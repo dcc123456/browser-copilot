@@ -1,0 +1,1183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Workflow concepts — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="Variables, interpolation, the data table, ports, loops, error handling, files, secrets, AI features, and triggers."
+    />
+    <link rel="canonical" href="https://dcc123456.github.io/browser-copilot/docs/concepts.html" />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/concepts.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/concepts-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/concepts.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Workflow concepts — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="Variables, interpolation, the data table, ports, loops, error handling, files, secrets, AI features, and triggers."
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/concepts.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Workflow concepts — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="Variables, interpolation, the data table, ports, loops, error handling, files, secrets, AI features, and triggers."
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index.html" class="text-sm text-ink">Docs</a>
+          <a
+            href="../index.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >Features</a
+          >
+          <a
+            href="../index.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >How it works</a
+          >
+          <a href="concepts-zh.html" class="text-sm text-muted transition-colors hover:text-ink"
+            >中文</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">Start</p>
+            <nav class="space-y-1">
+              <a
+                href="index.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Overview</a
+              ><a
+                href="getting-started.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Getting started</a
+              ><a
+                href="concepts.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >Workflow concepts</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+              Operators
+            </p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Web interaction</a
+              ><a
+                href="operators-browser.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Browser</a
+              ><a
+                href="operators-general.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >General</a
+              ><a
+                href="operators-data.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Data</a
+              ><a
+                href="operators-conditions.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Control flow</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">Documentation menu</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Start
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Overview</a
+                ><a
+                  href="getting-started.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Getting started</a
+                ><a
+                  href="concepts.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >Workflow concepts</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Operators
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Web interaction</a
+                ><a
+                  href="operators-browser.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Browser</a
+                ><a
+                  href="operators-general.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >General</a
+                ><a
+                  href="operators-data.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Data</a
+                ><a
+                  href="operators-conditions.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Control flow</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a><span>/</span
+          ><span class="text-muted">Workflow concepts</span>
+        </div>
+        <article class="docs-prose">
+          <h1>Workflow concepts</h1>
+          <p>
+            These are the ideas that apply across operators. Read them once and the individual
+            operator pages will make more sense.
+          </p>
+          <h2 id="workflow-anatomy">Workflow anatomy</h2>
+          <p>A workflow is a directed graph:</p>
+          <ul>
+            <li>
+              <strong>Trigger</strong> — the entry point. It holds the workflow name, one or more
+              launch configurations, declared inputs, and run settings.
+            </li>
+            <li>
+              <strong>Steps</strong> — operators placed on the canvas. Each step reads variables and
+              page state, performs one action, and usually writes a result.
+            </li>
+            <li>
+              <strong>Edges</strong> — connections that tell the engine which step runs next. Named
+              ports express branches, fallbacks, and loop returns.
+            </li>
+          </ul>
+          <p>
+            A run starts at the trigger, follows edges, and stops when no outgoing connection
+            applies or a step ends the graph. Every run owns a fresh <strong>variable bag</strong>.
+            Declared inputs are seeded first, then each step adds or replaces variables as it
+            executes. Later steps see everything earlier steps produced.
+          </p>
+          <p>The inspector has two scopes:</p>
+          <ul>
+            <li>
+              Select the <strong>Trigger</strong> block to edit workflow name, description,
+              triggers, and run settings such as log saving and notifications.
+            </li>
+            <li>
+              Select any other block to edit that operator&#39;s settings, output variable, error
+              policy, and goal contract.
+            </li>
+          </ul>
+          <h2 id="variables-and-interpolation">Variables and interpolation</h2>
+          <p>Variables are the only channel between steps.</p>
+          <ul>
+            <li>
+              A step that produces a result has an <strong>output variable</strong> field. Name it
+              for the data it holds.
+            </li>
+            <li>
+              Any text field that supports templates can read a variable with <code>{{name}}</code>.
+            </li>
+            <li>A step can overwrite a variable; downstream steps see the newest value.</li>
+          </ul>
+          <h3 id="reference-syntax">Reference syntax</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Form</th>
+                  <th>Reads</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>{{headline}}</code></td>
+                  <td>A top-level variable.</td>
+                </tr>
+                <tr>
+                  <td><code>{{user.email}}</code></td>
+                  <td>A property of an object.</td>
+                </tr>
+                <tr>
+                  <td><code>{{rows[0].name}}</code></td>
+                  <td>An array index, then a property.</td>
+                </tr>
+                <tr>
+                  <td><code>{{map[&quot;key&quot;]}}</code></td>
+                  <td>A property whose name contains characters like dots or spaces.</td>
+                </tr>
+                <tr>
+                  <td><code>{{rows[0]}}</code></td>
+                  <td>The whole object at that position.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            References are whitespace-tolerant. A malformed expression is left untouched, exactly
+            like a reference to a variable that does not exist.
+          </p>
+          <h3 id="objects-stored-as-text">Objects stored as text</h3>
+          <p>
+            Model output and some page reads arrive as strings. When a reference uses a property or
+            index on such a string — <code>{{article.title}}</code> where <code>article</code> holds
+            <code>{&quot;title&quot;: &quot;…&quot;}</code> — the engine parses the string as JSON
+            first, including a surrounding <code>```json</code> fence. That means a single AI answer
+            can be read as a whole (<code>{{article}}</code>) or field by field
+            (<code>{{article.title}}</code>) without changing how it was stored.
+          </p>
+          <h3 id="where-interpolation-runs">Where interpolation runs</h3>
+          <p>
+            Every string in a block&#39;s parameter bag is interpolated, including nested objects
+            and arrays: a condition&#39;s comparison value, a nested element target, a selector
+            built from a loop variable, a file name. The <code>code</code> parameter of
+            <strong>JavaScript code</strong> is additionally escaped for the JavaScript string
+            literal it lands in, so a value containing quotes or newlines cannot break the script.
+          </p>
+          <p>
+            Non-text settings are not interpolated: dropdown choices, checkboxes, numeric bounds,
+            and output variable names themselves. Point those at data through the operator&#39;s own
+            fields.
+          </p>
+          <h3 id="missing-and-empty-values">Missing and empty values</h3>
+          <ul>
+            <li>
+              If a token resolves to nothing, it is <strong>left in the text</strong> rather than
+              replaced with an empty string.
+            </li>
+            <li>
+              The engine records the surviving tokens for the run. Page-action steps that must not
+              type literal <code>{{name}}</code> into a page fail the step with an unresolved-input
+              error instead.
+            </li>
+            <li>
+              If a token resolves to an empty string, the step still sees an empty value. Blocks
+              that would otherwise clear a form field or overwrite data with nothing treat that case
+              specially and refuse or report it.
+            </li>
+          </ul>
+          <p>
+            This distinction is deliberate: <code>{{missing}}</code> is a broken workflow, while
+            <code>{{optionalNote}}</code> resolving to <code>&quot;&quot;</code> is a valid empty
+            value.
+          </p>
+          <h3 id="runtime-variables">Runtime variables</h3>
+          <p>Some variables are supplied by the engine instead of by a block:</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Variable</th>
+                  <th>Available in</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>loopIndex</code></td>
+                  <td>Loop bodies</td>
+                  <td>Zero-based iteration number.</td>
+                </tr>
+                <tr>
+                  <td><code>loopItem</code></td>
+                  <td>Data loops</td>
+                  <td>The current array item.</td>
+                </tr>
+                <tr>
+                  <td><code>loopElementSelector</code></td>
+                  <td>Element loops</td>
+                  <td>A selector that targets the current matched element.</td>
+                </tr>
+                <tr>
+                  <td><code>dataTable</code></td>
+                  <td>Whole run</td>
+                  <td>The run&#39;s array of row objects.</td>
+                </tr>
+                <tr>
+                  <td><code>lastExport</code></td>
+                  <td>After <strong>Export data</strong></td>
+                  <td>The text that was exported.</td>
+                </tr>
+                <tr>
+                  <td><code>lastExportPath</code></td>
+                  <td>After a successful export</td>
+                  <td>The file name that was written.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Operator pages list any additional output or fallback variable names.</p>
+          <h2 id="the-data-table">The data table</h2>
+          <p>
+            <code>dataTable</code> is a run-scoped array of row objects — the workflow&#39;s
+            spreadsheet. It is the only thing <strong>Export data</strong> reads when exporting
+            <strong>Table</strong>.
+          </p>
+          <ul>
+            <li>
+              Reading operators such as
+              <a href="operators-interaction.html#operator-get-text">Get text</a> and
+              <a href="operators-browser.html#operator-read-page">Read page</a> can save what they
+              read into the table. Enable <strong>Save to data table</strong>, set a
+              <strong>data column</strong>, and every match becomes a cell in that column.
+            </li>
+            <li>
+              Inside a loop, one iteration writes the row at <code>loopIndex</code>. Outside a loop,
+              multiple matches create one row per match.
+            </li>
+            <li>
+              Writing the same column again replaces the cell, so two reads can build a two-column
+              table instead of doubling the rows.
+            </li>
+            <li>
+              Data operators such as
+              <a href="operators-data.html#operator-insert-data">Insert data</a>,
+              <a href="operators-data.html#operator-delete-data">Delete data</a>, and
+              <a href="operators-data.html#operator-sort-data">Sort data</a> edit the same table.
+            </li>
+            <li>The table accepts up to 100,000 rows; further writes are ignored and reported.</li>
+          </ul>
+          <p>
+            An empty table cannot be exported: <strong>Export data</strong> fails with an
+            explanation instead of writing an empty file. If you only need one value, export
+            <strong>Variable</strong> instead.
+          </p>
+          <h2 id="ports-branches-and-loops">Ports, branches, and loops</h2>
+          <p>
+            Most operators have one output and continue to the next connected step. Extra ports let
+            a single node choose between paths:
+          </p>
+          <ul>
+            <li>
+              <strong
+                ><a href="operators-conditions.html#operator-conditions">Conditions</a></strong
+              >
+              — ordered paths, each with its own output. The run follows the first path whose
+              conditions all match. The <strong>fallback</strong> output is always present and is
+              used when nothing matches.
+            </li>
+            <li>
+              <strong
+                ><a href="operators-conditions.html#operator-element-exists"
+                  >Element exists</a
+                ></strong
+              >
+              — one output when the element exists, another when it does not.
+            </li>
+            <li>
+              <strong>Error fallback</strong> — when a step&#39;s <strong>On error</strong> policy
+              is “execute the fallback branch”, the extra fallback handle is used for the failure
+              path.
+            </li>
+            <li>
+              <strong>Loops</strong> — the loop body leaves the loop node, returns to it through the
+              loop-back handle, and repeats.
+            </li>
+          </ul>
+          <p>Loops expose the runtime variables listed above:</p>
+          <ul>
+            <li>
+              <strong
+                ><a href="operators-conditions.html#operator-repeat-task">Repeat task</a></strong
+              >
+              repeats a body a fixed number of times.
+            </li>
+            <li>
+              <strong
+                ><a href="operators-conditions.html#operator-while-loop">While loop</a></strong
+              >
+              repeats while its condition holds, up to 1,000 iterations.
+            </li>
+            <li>
+              <strong><a href="operators-conditions.html#operator-loop-data">Loop data</a></strong>
+              iterates a JSON array (<code>loopItem</code>, <code>loopIndex</code>).
+            </li>
+            <li>
+              <strong
+                ><a href="operators-conditions.html#operator-loop-elements"
+                  >Loop elements</a
+                ></strong
+              >
+              iterates page elements (<code>loopElementSelector</code>, <code>loopIndex</code>).
+            </li>
+            <li>
+              <strong
+                ><a href="operators-conditions.html#operator-loop-breakpoint"
+                  >Loop breakpoint</a
+                ></strong
+              >
+              stops the current loop and continues after it.
+            </li>
+          </ul>
+          <p>
+            A branch drawn back to an earlier block repeats that block. The editor warns when a
+            connection creates this loop-back shape; make sure the condition eventually changes, or
+            the run stops at the iteration limit.
+          </p>
+          <h2 id="errors-retries-and-reliability">Errors, retries, and reliability</h2>
+          <p>
+            A step that throws normally fails the run. The inspector gives each block these
+            controls:
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Setting</th>
+                  <th>Effect</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Disable block</strong></td>
+                  <td>The step is skipped, including its side effects, without deleting it.</td>
+                </tr>
+                <tr>
+                  <td><strong>Block timeout</strong></td>
+                  <td>
+                    Fails the step when it runs longer than the limit. <code>0</code> removes the
+                    limit.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>On error → Retry</strong></td>
+                  <td>
+                    Retries the action the given number of times, waiting the configured interval.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>On error → Throw</strong></td>
+                  <td>Fails the run with the given message.</td>
+                </tr>
+                <tr>
+                  <td><strong>On error → Continue</strong></td>
+                  <td>Marks the step as failed and continues to the next step.</td>
+                </tr>
+                <tr>
+                  <td><strong>On error → Fallback</strong></td>
+                  <td>Continues on the node&#39;s fallback connection.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Run-level behavior:</p>
+          <ul>
+            <li>
+              Before starting, the engine checks required parameters. Missing values appear in the
+              run log, and the run stops at the first block that cannot work instead of failing
+              halfway through with no context.
+            </li>
+            <li>A failed run keeps its log. Select a log row to locate the block on the canvas.</li>
+            <li>
+              <strong>Debug mode</strong> pauses before blocks marked with a breakpoint, shows the
+              variables captured at that point, and can resume, step, or stop.
+            </li>
+            <li>
+              <strong>Run workflow from here</strong> starts a run at the selected node instead of
+              the trigger, using the current page state.
+            </li>
+            <li>
+              <strong>Resume</strong> on a failed workflow card re-runs from the step after the last
+              clean checkpoint, so an already-completed login or submit is not repeated.
+            </li>
+            <li>
+              <strong>Save execution logs</strong> keeps run transcripts in history;
+              <strong>Notify when finished</strong> posts a notification when a run settles.
+            </li>
+          </ul>
+          <h3 id="goals-and-verification">Goals and verification</h3>
+          <p>
+            A workflow can carry a <strong>workflow goal</strong>: a summary plus success conditions
+            checked after the last step. Generated workflows also give individual steps a goal
+            contract — what the step should achieve and which observable facts prove it.
+          </p>
+          <p>These contracts are used by:</p>
+          <ul>
+            <li>
+              <strong>Certification</strong> — verification levels that check execution, per-step
+              contracts, and the workflow goal. Editing a contract or the graph drops the workflow
+              back to unverified until it is checked again.
+            </li>
+            <li>
+              <strong>AI repair</strong> — when a run fails, the repair agent works from the goal
+              contract and the failure, proposes node changes, and reports whether the workflow then
+              succeeds without AI assistance.
+            </li>
+            <li>
+              <strong>AI takeover</strong> — optionally completes a failed step on the live page
+              once, then leaves its fixes as pending for your confirmation.
+            </li>
+          </ul>
+          <p>
+            Goal contracts are optional for hand-built workflows. They are what make “success” a
+            checkable fact rather than “the run did not throw”.
+          </p>
+          <h3 id="ai-seed-recall">AI seed recall</h3>
+          <p>
+            When generating a workflow, certified workflows that previously solved a similar goal
+            can be offered to the generator as step evidence. Seeding only proposes steps; the
+            generated graph still has to be saved and executed like any other workflow.
+          </p>
+          <h2 id="files-downloads-and-uploads">Files, downloads, and uploads</h2>
+          <h3 id="where-files-go">Where files go</h3>
+          <p>The extension resolves a destination in this order:</p>
+          <ol>
+            <li>
+              <strong>The configured download folder</strong> — set it in Settings → Download
+              folder. Files are written silently.
+            </li>
+            <li>
+              <strong>A save dialog</strong> — when no folder is configured and the side panel is
+              open, you choose the location.
+            </li>
+            <li>
+              <strong>The extension&#39;s internal folder</strong> — for unattended runs with nobody
+              to answer a dialog, files land in <code>browser-copilot-downloads/</code> inside the
+              extension&#39;s storage, and the run log names the file.
+            </li>
+          </ol>
+          <p>
+            Blocks that produce a file use this chain: <strong>Export data</strong>,
+            <strong>Take screenshot</strong> when saving to a file, <strong>Save local</strong>, and
+            others. <strong>Handle download</strong> waits for a browser download and can save it
+            through the same path.
+          </p>
+          <p>
+            When a block accepts a file path, it is <strong>relative</strong> to the download
+            folder, not an absolute host path. Subfolders are allowed
+            (<code>reports/sales.xlsx</code>), and <code>{{variables}}</code> in the path are
+            interpolated at run time.
+          </p>
+          <h3 id="upload-sources">Upload sources</h3>
+          <p>
+            <a href="operators-interaction.html#operator-upload-file">Upload file</a> supports four
+            sources:
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Use when</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>User picks files</td>
+                  <td>Someone is present to choose files during the run.</td>
+                </tr>
+                <tr>
+                  <td>File from an earlier step</td>
+                  <td>A variable already holds a data URL, artifact, or array of artifacts.</td>
+                </tr>
+                <tr>
+                  <td>Latest download file</td>
+                  <td>Upload the newest file matching a name pattern and type filter.</td>
+                </tr>
+                <tr>
+                  <td>Specific file path</td>
+                  <td>Upload one named file from the download folder.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3 id="spreadsheets">Spreadsheets</h3>
+          <p>
+            <a href="operators-data.html#operator-parse-excel">Parse Excel</a> reads
+            <code>.xlsx</code> or <code>.csv</code> from a user-picked file, a variable held by an
+            earlier step, or a relative path in the download folder. With a header row it produces
+            objects keyed by column name plus the raw two-dimensional array.
+          </p>
+          <h2 id="secrets">Secrets</h2>
+          <p>
+            <a href="operators-data.html#operator-get-secret">Get secret</a> fetches stored
+            credential fields into variables at run time. The values live in the extension&#39;s
+            credential store (Data → Passwords &amp; identities), never in the workflow JSON, and
+            are resolved fresh on every run.
+          </p>
+          <p>
+            Use it for values that must stay secret: passwords, API keys, tokens. A username or a
+            search keyword does not need this block — put it in the form value or a trigger input,
+            where it stays visible and editable.
+          </p>
+          <p>
+            Credential fields are read by reference, so rotating a password in the Data tab takes
+            effect on the next run without editing the workflow.
+          </p>
+          <h2 id="ai-features">AI features</h2>
+          <p>
+            Browser Copilot uses AI in several places. They are independent; none of them is
+            required to run a workflow.
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Feature</th>
+                  <th>Where it appears</th>
+                  <th>What it does</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>AI agent</strong></td>
+                  <td>Operator in the General category</td>
+                  <td>
+                    Reads a page or element, follows your prompt, optionally acts on the page, and
+                    stores a text answer.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>AI takeover</strong></td>
+                  <td>Settings, and a failed run when enabled</td>
+                  <td>
+                    Lets an agent complete a failed step on the live page. Fixes are proposed for
+                    confirmation, never applied silently.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>AI repair</strong></td>
+                  <td>Run result and workflow toolbar</td>
+                  <td>
+                    Diagnoses a failure from the run log and the goal contract, edits the graph, and
+                    verifies the result.
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Goal contract</strong></td>
+                  <td>Trigger and per-block inspector</td>
+                  <td>Defines checkable success facts used by verification and repair.</td>
+                </tr>
+                <tr>
+                  <td><strong>Seed recall</strong></td>
+                  <td>Workflow generation</td>
+                  <td>Offers previously certified workflows as step evidence.</td>
+                </tr>
+                <tr>
+                  <td><strong>OCR</strong></td>
+                  <td>OCR operator</td>
+                  <td>Local text recognition with Tesseract.js; no network calls.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            AI features that call a model use the provider configured in Settings, and each has its
+            own budget or round limit so a single step cannot loop forever. If a model call fails,
+            the AI agent step reports the failure like any other step, and its
+            <strong>On error</strong> policy decides what happens next.
+          </p>
+          <h2 id="triggers-and-scheduling">Triggers and scheduling</h2>
+          <p>
+            A workflow can have several triggers. The first is the <strong>primary</strong> trigger,
+            mirrored onto the workflow record so lists and schedulers can show how the workflow
+            starts. Disabling one trigger does not disable the others.
+          </p>
+          <p>Trigger details:</p>
+          <ul>
+            <li>
+              <strong>Manual</strong> workflows start from the editor, the Workflows tab, or a
+              context-menu/shortcut trigger.
+            </li>
+            <li>
+              <strong>Time-based</strong> triggers (interval, specific date, specific weekdays) are
+              armed as browser alarms and fire while the browser is running.
+            </li>
+            <li>
+              <strong>Page-based</strong> triggers (visit web, element change) are wired by the
+              injected page observer and match on URL or selector.
+            </li>
+            <li>
+              <strong>Browser-based</strong> triggers (on startup, keyboard shortcut, context menu)
+              are registered by the extension itself.
+            </li>
+          </ul>
+          <p>
+            <strong>Scheduled tasks</strong> are a separate surface: a task owns a schedule and can
+            run a stored workflow with its own variable payload. Use a workflow trigger when the
+            launch logic belongs to the workflow; use a scheduled task when several tasks share a
+            schedule or when a task chains workflows.
+          </p>
+          <h2 id="ocr-build-variants">OCR build variants</h2>
+          <p>Browser Copilot ships in two build variants:</p>
+          <ul>
+            <li>
+              <strong>Full build</strong> — includes Tesseract.js and its language data.
+              <a href="operators-browser.html#operator-ocr">OCR text recognition</a> works offline.
+            </li>
+            <li>
+              <strong>Lite build</strong> (<code>no-ocr</code>) — strips the OCR engine and language
+              files. The OCR operator is shown as unavailable and refuses to run.
+            </li>
+          </ul>
+          <p>
+            Everything else behaves the same in both builds. The OCR operator page carries the
+            <strong>Full build only</strong> badge.
+          </p>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">On this page</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#workflow-anatomy"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Workflow anatomy</a
+            ><a
+              href="#variables-and-interpolation"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Variables and interpolation</a
+            ><a
+              href="#reference-syntax"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Reference syntax</a
+            ><a
+              href="#objects-stored-as-text"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Objects stored as text</a
+            ><a
+              href="#where-interpolation-runs"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Where interpolation runs</a
+            ><a
+              href="#missing-and-empty-values"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Missing and empty values</a
+            ><a
+              href="#runtime-variables"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Runtime variables</a
+            ><a
+              href="#the-data-table"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >The data table</a
+            ><a
+              href="#ports-branches-and-loops"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Ports, branches, and loops</a
+            ><a
+              href="#errors-retries-and-reliability"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Errors, retries, and reliability</a
+            ><a
+              href="#goals-and-verification"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Goals and verification</a
+            ><a
+              href="#ai-seed-recall"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >AI seed recall</a
+            ><a
+              href="#files-downloads-and-uploads"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Files, downloads, and uploads</a
+            ><a
+              href="#where-files-go"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Where files go</a
+            ><a
+              href="#upload-sources"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Upload sources</a
+            ><a
+              href="#spreadsheets"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Spreadsheets</a
+            ><a
+              href="#secrets"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Secrets</a
+            ><a
+              href="#ai-features"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >AI features</a
+            ><a
+              href="#triggers-and-scheduling"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Triggers and scheduling</a
+            ><a
+              href="#ocr-build-variants"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >OCR build variants</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/concepts.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >Edit this page on GitHub</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>Generated from docs/workflow</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="getting-started.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← Previous</span
+            ><span class="text-sm text-ink">Getting started</span></a
+          ><a
+            href="operators-interaction.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">Next →</span
+            ><span class="text-sm text-ink">Web interaction</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">On this page</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#workflow-anatomy"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Workflow anatomy</a
+            ><a
+              href="#variables-and-interpolation"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Variables and interpolation</a
+            ><a
+              href="#reference-syntax"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Reference syntax</a
+            ><a
+              href="#objects-stored-as-text"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Objects stored as text</a
+            ><a
+              href="#where-interpolation-runs"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Where interpolation runs</a
+            ><a
+              href="#missing-and-empty-values"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Missing and empty values</a
+            ><a
+              href="#runtime-variables"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Runtime variables</a
+            ><a
+              href="#the-data-table"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >The data table</a
+            ><a
+              href="#ports-branches-and-loops"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Ports, branches, and loops</a
+            ><a
+              href="#errors-retries-and-reliability"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Errors, retries, and reliability</a
+            ><a
+              href="#goals-and-verification"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Goals and verification</a
+            ><a
+              href="#ai-seed-recall"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >AI seed recall</a
+            ><a
+              href="#files-downloads-and-uploads"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Files, downloads, and uploads</a
+            ><a
+              href="#where-files-go"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Where files go</a
+            ><a
+              href="#upload-sources"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Upload sources</a
+            ><a
+              href="#spreadsheets"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >Spreadsheets</a
+            ><a
+              href="#secrets"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Secrets</a
+            ><a
+              href="#ai-features"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >AI features</a
+            ><a
+              href="#triggers-and-scheduling"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Triggers and scheduling</a
+            ><a
+              href="#ocr-build-variants"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >OCR build variants</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm Noncommercial 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

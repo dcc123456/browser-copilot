@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Workflow documentation — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="Complete usage reference for the 63 workflow operators in Browser Copilot, including variables, data tables, loops, downloads, secrets, and AI features."
+    />
+    <link rel="canonical" href="https://dcc123456.github.io/browser-copilot/docs/index.html" />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/index.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/index-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/index.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Workflow documentation — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="Complete usage reference for the 63 workflow operators in Browser Copilot, including variables, data tables, loops, downloads, secrets, and AI features."
+    />
+    <meta property="og:url" content="https://dcc123456.github.io/browser-copilot/docs/index.html" />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Workflow documentation — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="Complete usage reference for the 63 workflow operators in Browser Copilot, including variables, data tables, loops, downloads, secrets, and AI features."
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index.html" class="text-sm text-ink">Docs</a>
+          <a
+            href="../index.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >Features</a
+          >
+          <a
+            href="../index.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >How it works</a
+          >
+          <a href="index-zh.html" class="text-sm text-muted transition-colors hover:text-ink"
+            >中文</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">Start</p>
+            <nav class="space-y-1">
+              <a
+                href="index.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >Overview</a
+              ><a
+                href="getting-started.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Getting started</a
+              ><a
+                href="concepts.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Workflow concepts</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+              Operators
+            </p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Web interaction</a
+              ><a
+                href="operators-browser.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Browser</a
+              ><a
+                href="operators-general.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >General</a
+              ><a
+                href="operators-data.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Data</a
+              ><a
+                href="operators-conditions.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Control flow</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">Documentation menu</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Start
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >Overview</a
+                ><a
+                  href="getting-started.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Getting started</a
+                ><a
+                  href="concepts.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Workflow concepts</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Operators
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Web interaction</a
+                ><a
+                  href="operators-browser.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Browser</a
+                ><a
+                  href="operators-general.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >General</a
+                ><a
+                  href="operators-data.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Data</a
+                ><a
+                  href="operators-conditions.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Control flow</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <span class="text-muted">Docs</span>
+        </div>
+        <article class="docs-prose">
+          <h1>Workflow documentation</h1>
+          <p>
+            Browser Copilot workflows turn repeated browser work into a graph you can run, debug,
+            and reuse. You wire operators together on a canvas; each operator performs one step, and
+            variables carry data from one step to the next.
+          </p>
+          <p>
+            This reference covers every operator that appears in the workflow palette, plus the
+            behavior that is specific to Browser Copilot: variable interpolation, the data table,
+            loops, error handling, downloads, secrets, and the AI features built into the editor.
+          </p>
+          <p>
+            New here? Read <a href="getting-started.html">Getting started</a> for a tour of the
+            editor and a complete first workflow, then keep
+            <a href="concepts.html">Workflow concepts</a> open while you build.
+          </p>
+          <h2 id="what-this-reference-covers">What this reference covers</h2>
+          <p>The palette contains <strong>63 operators</strong>:</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Category page</th>
+                  <th>Operators</th>
+                  <th>Includes</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><a href="operators-interaction.html">Web interaction</a></td>
+                  <td>14</td>
+                  <td>Clicking, reading, filling, scrolling, scripts</td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html">Browser</a></td>
+                  <td>18</td>
+                  <td>Tabs, history, screenshots, downloads, OCR</td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general.html">General</a></td>
+                  <td>13</td>
+                  <td>Triggers, sub-workflows, HTTP, notes, AI agent</td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html">Data</a></td>
+                  <td>11</td>
+                  <td>Variables, regex, sorting, secrets, spreadsheets</td>
+                </tr>
+                <tr>
+                  <td><a href="operators-conditions.html">Control flow</a></td>
+                  <td>7</td>
+                  <td>Branches, element checks, loops, breakpoints</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            The 63 are 58 operators shared with the Automa catalog plus 5 Browser Copilot-only
+            operators: <code>ai-agent</code>, <code>ocr</code>, <code>set-variable</code>,
+            <code>get-secret</code>, and <code>parse-excel</code>.
+          </p>
+          <p>
+            Two other pages explain the platform rather than individual operators:
+            <a href="getting-started.html">Getting started</a> and
+            <a href="concepts.html">Workflow concepts</a>.
+          </p>
+          <h2 id="where-the-field-reference-comes-from">Where the field reference comes from</h2>
+          <p>
+            The block inspector in the editor is the authoritative reference for a node&#39;s
+            settings. Each operator page below describes the same fields in the same order, with the
+            defaults this release ships, plus the runtime behavior that is not visible in the form.
+          </p>
+          <ul>
+            <li>English operator names and headings match the palette.</li>
+            <li>
+              Setting names match the English inspector labels. When a field is stored under a
+              different key, the page mentions the key only where a workflow JSON is involved.
+            </li>
+            <li>
+              The workflow-level settings shared by every node — disable, timeout, error handling,
+              goal contract, breakpoints — are explained once in
+              <a href="concepts.html#errors-retries-and-reliability">Workflow concepts</a> instead
+              of being repeated on every page.
+            </li>
+          </ul>
+          <p>
+            If an operator page and the inspector disagree, trust the inspector and please report
+            the difference.
+          </p>
+          <h2 id="status-legend">Status legend</h2>
+          <p>Most operators work in a normal run and carry no badge. Five are exceptions:</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Badge</th>
+                  <th>Meaning</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Unavailable in MV3</td>
+                  <td>
+                    The operator needs an API that Manifest V3 extensions cannot use. It stays on
+                    the canvas for imported workflows but cannot run.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Not implemented</td>
+                  <td>The operator exists in the catalog but this build has no executor for it.</td>
+                </tr>
+                <tr>
+                  <td>Placeholder</td>
+                  <td>
+                    The operator can be placed and connected, but performs no work in this build.
+                  </td>
+                </tr>
+                <tr>
+                  <td>Full build only</td>
+                  <td>
+                    The operator works only in the full build. The lite <code>no-ocr</code> build
+                    strips its engine.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            The five affected operators are <code>proxy</code>, <code>save-assets</code>,
+            <code>browser-event</code>, <code>switch-to</code>, and <code>ocr</code>.
+          </p>
+          <h2 id="operator-index">Operator index</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Operator</th>
+                  <th>What it does</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="docs-group-row">
+                  <td colspan="3"><strong>Web interaction</strong></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction.html#operator-event-click">Click element</a>
+                  </td>
+                  <td>Clicks the first element matched by the locator.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction.html#operator-get-text">Get text</a></td>
+                  <td>
+                    Reads rendered text from one or more elements and publishes it to a variable
+                    and, optionally, the data table.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction.html#operator-element-scroll">Scroll element</a>
+                  </td>
+                  <td>
+                    Scrolls the page or an element to an offset, or brings an element into view.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction.html#operator-link">Link</a></td>
+                  <td>Follows a link element and can open its destination in a new tab.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction.html#operator-attribute-value"
+                      >Attribute value</a
+                    >
+                  </td>
+                  <td>Reads an attribute into a variable, or writes a value to an attribute.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction.html#operator-forms">Forms</a></td>
+                  <td>
+                    Fills a text field, selects an option, toggles a checkbox or radio, or reads a
+                    control's current value.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction.html#operator-javascript-code"
+                      >JavaScript code</a
+                    >
+                  </td>
+                  <td>Runs a JavaScript function body in the page and stores its return value.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction.html#operator-trigger-event">Trigger event</a>
+                  </td>
+                  <td>Dispatches a DOM event on the selected element.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction.html#operator-switch-to">Switch frame</a></td>
+                  <td>Names the main window or an iframe as the context for later steps.</td>
+                  <td>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                      >Placeholder</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction.html#operator-upload-file">Upload file</a></td>
+                  <td>
+                    Attaches files to an upload control from a picker, a workflow variable, the
+                    newest download, or a specific path.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction.html#operator-hover-element">Hover element</a>
+                  </td>
+                  <td>Moves the pointer over the first element matched by the locator.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction.html#operator-save-assets">Save assets</a></td>
+                  <td>
+                    Would download a media element or a direct URL, but the operator is not
+                    implemented.
+                  </td>
+                  <td>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium border-err/40 bg-err/10 text-err"
+                      >Not implemented</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction.html#operator-press-key">Press key</a></td>
+                  <td>
+                    Sends a key or a key combination to the focused control or to a chosen element.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction.html#operator-create-element">Create element</a>
+                  </td>
+                  <td>Injects HTML, CSS, and optional JavaScript into the page.</td>
+                  <td></td>
+                </tr>
+                <tr class="docs-group-row">
+                  <td colspan="3"><strong>Browser</strong></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-active-tab">Active tab</a></td>
+                  <td>Records the browser's active tab as the tab the workflow is working with.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-new-tab">New tab</a></td>
+                  <td>Opens a URL in a new tab and makes it the tab the workflow drives.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-switch-tab">Switch tab</a></td>
+                  <td>
+                    Brings an open tab selected by pattern, title, position, or index to the
+                    foreground and makes it the workflow's tab.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-new-window">New window</a></td>
+                  <td>Opens a new browser window and points the workflow at it.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-proxy">Proxy</a></td>
+                  <td>
+                    Routes browser traffic through a proxy in Automa, but is unavailable in Browser
+                    Copilot's Manifest V3 build.
+                  </td>
+                  <td>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium border-err/40 bg-err/10 text-err"
+                      >Unavailable in MV3</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-go-back">Go back</a></td>
+                  <td>Navigates the workflow's tab back one entry in browser history.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-forward-page">Go forward</a></td>
+                  <td>
+                    Navigates the workflow's tab forward one entry in browser history. No upstream
+                    Automa page.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-close-tab">Close tab/window</a></td>
+                  <td>
+                    Closes the tab the workflow is driving and follows the tab the browser focuses
+                    in its place.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-browser.html#operator-take-screenshot">Take screenshot</a>
+                  </td>
+                  <td>
+                    Captures the visible page, the full page, or one element and stores the image.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-read-page">Read page</a></td>
+                  <td>
+                    Reads the active tab's visible text, selected text, or HTML into a variable and
+                    optionally the data table. No upstream Automa page.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-browser-event">Browser event</a></td>
+                  <td>
+                    Would pause until a tab, network, or download event fires, but the operator is a
+                    placeholder in this build.
+                  </td>
+                  <td>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                      >Placeholder</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-handle-dialog">Handle dialog</a></td>
+                  <td>Installs handlers that accept or dismiss the page's JavaScript dialogs.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-browser.html#operator-handle-download">Handle download</a>
+                  </td>
+                  <td>Waits for a browser download and stores its details.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-save-local">Save to local</a></td>
+                  <td>Writes interpolated text to a local file. No upstream Automa page.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-reload-tab">Reload tab</a></td>
+                  <td>Reloads the workflow's tab, or navigates it to a URL when one is set.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-tab-url">Get tab URL</a></td>
+                  <td>Reads the URL of the active tab or of every tab in the window.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-cookie">Cookie</a></td>
+                  <td>Gets, sets, or removes browser cookies.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser.html#operator-ocr">OCR text recognition</a></td>
+                  <td>
+                    Runs local Tesseract.js OCR on an image variable, a page element, or the
+                    previous page snapshot. No upstream Automa page. This operator exists only in
+                    Browser Copilot.
+                  </td>
+                  <td>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                      >Full build only</span
+                    >
+                  </td>
+                </tr>
+                <tr class="docs-group-row">
+                  <td colspan="3"><strong>General</strong></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general.html#operator-trigger">Trigger</a></td>
+                  <td>
+                    The entry point of a workflow. It carries the workflow's name and run settings,
+                    one or more launch configurations, and the declared inputs that seed the run's
+                    variables.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-general.html#operator-execute-workflow">Execute workflow</a>
+                  </td>
+                  <td>
+                    Runs another saved workflow as a nested run, then continues on the main output.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general.html#operator-delay">Delay</a></td>
+                  <td>Pauses the run for a fixed time before the next step.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general.html#operator-export-data">Export data</a></td>
+                  <td>Writes the run's data table or one variable to a downloaded file.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general.html#operator-blocks-group">Blocks group</a></td>
+                  <td>
+                    Bundles a set of steps into one node so a long canvas stays readable. The group
+                    runs its children in their stored order and then leaves through its own output.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general.html#operator-clipboard">Clipboard</a></td>
+                  <td>
+                    Reads the system clipboard, or the current page selection, into a variable; or
+                    writes workflow text into the clipboard.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-general.html#operator-wait-connections">Wait connections</a>
+                  </td>
+                  <td>
+                    Pauses briefly so a navigation started by the previous step can settle, then
+                    waits for the tab being driven to report that it has loaded. In this build it
+                    waits on the tab, not…
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general.html#operator-notification">Notification</a></td>
+                  <td>
+                    Shows a desktop notification, and can forward the same text to a Feishu bot.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general.html#operator-note">Note</a></td>
+                  <td>
+                    A free-form annotation placed on the canvas. It documents the workflow and has
+                    no effect on execution. No upstream Automa page exists for this operator.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-general.html#operator-workflow-state">Workflow State</a>
+                  </td>
+                  <td>
+                    Asks the run to stop itself, another workflow, or a named set of workflows. In
+                    this build a block cannot reach the scheduler, so every stop action ends the
+                    step with an error in…
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-general.html#operator-parameter-prompt">Parameter prompt</a>
+                  </td>
+                  <td>
+                    Resolves the workflow's declared inputs before the following steps run. This
+                    build shows no interactive dialog: values come from the run scope, and defaults
+                    fill the gaps.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general.html#operator-webhook">HTTP Request</a></td>
+                  <td>
+                    Sends an HTTP request to a remote endpoint and decodes the response into
+                    variables or the data table.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general.html#operator-ai-agent">AI agent</a></td>
+                  <td>
+                    Reads an optional target element and hands it, together with your prompt, to a
+                    tool-calling AI agent. The agent returns a text answer and, when allowed, can
+                    act on the page. Bro…
+                  </td>
+                  <td></td>
+                </tr>
+                <tr class="docs-group-row">
+                  <td colspan="3"><strong>Data</strong></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html#operator-insert-data">Insert data</a></td>
+                  <td>Adds records to the run's data table or writes a value into a variable.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html#operator-delete-data">Delete data</a></td>
+                  <td>Removes columns from the data table or deletes variables.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html#operator-log-data">Get log data</a></td>
+                  <td>
+                    Collects the current run's log as text and stores it in a variable and,
+                    optionally, in a data-table column.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html#operator-slice-variable">Slice variable</a></td>
+                  <td>Takes a segment of a string variable or a sub-array of an array variable.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-data.html#operator-increase-variable">Increase variable</a>
+                  </td>
+                  <td>
+                    Adds a fixed amount to a numeric variable, starting from zero when the variable
+                    does not exist yet.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html#operator-regex-variable">RegEx variable</a></td>
+                  <td>
+                    Applies a regular expression to a text variable and keeps either the matches or
+                    the replaced text.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html#operator-data-mapping">Data mapping</a></td>
+                  <td>Renames fields of table rows or of an array held in a variable.</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html#operator-sort-data">Sort data</a></td>
+                  <td>
+                    Orders the data table or an array held in a variable, optionally by up to three
+                    item properties.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html#operator-set-variable">Set variable</a></td>
+                  <td>
+                    Writes one or more workflow variables in a single step. Browser Copilot-only
+                    operator.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html#operator-get-secret">Get secret</a></td>
+                  <td>
+                    Copies stored credential fields into workflow variables at run time. Browser
+                    Copilot-only operator.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data.html#operator-parse-excel">Parse Excel</a></td>
+                  <td>
+                    Reads an .xlsx or .csv spreadsheet into row objects plus the raw cell grid.
+                    Browser Copilot-only operator.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr class="docs-group-row">
+                  <td colspan="3"><strong>Control flow</strong></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-conditions.html#operator-repeat-task">Repeat task</a></td>
+                  <td>
+                    Runs the attached branch a fixed number of times, then continues from the end
+                    output.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-conditions.html#operator-conditions">Conditions</a></td>
+                  <td>
+                    Evaluates its named output paths from top to bottom and continues on the first
+                    path whose conditions all hold, or on fallback when none do.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-conditions.html#operator-element-exists">Element exists</a>
+                  </td>
+                  <td>
+                    Takes the exists port when the locator matches at least one element and the not
+                    exists port when it matches none.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-conditions.html#operator-while-loop">While loop</a></td>
+                  <td>
+                    Repeats the attached branch while its condition holds, testing the condition
+                    before every iteration.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-conditions.html#operator-loop-data">Loop data</a></td>
+                  <td>
+                    Iterates a data table, number range, variable, JSON array, or page element list,
+                    publishing each item as loopItem and its position as loopIndex.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-conditions.html#operator-loop-elements">Loop elements</a>
+                  </td>
+                  <td>
+                    Iterates every element that matches the locator and publishes a selector for the
+                    current element as loopElementSelector.
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-conditions.html#operator-loop-breakpoint">Loop breakpoint</a>
+                  </td>
+                  <td>
+                    Ends the current iteration, or the whole loop, from anywhere inside a loop body.
+                  </td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h2 id="cloud-operators-that-are-not-available">
+            Cloud operators that are not available
+          </h2>
+          <p>
+            The catalog also knows five cloud operators. They are hidden from the palette and have
+            no local executor, so they are intentionally not documented as usable operators:
+          </p>
+          <ul>
+            <li><code>ai-workflow</code> — runs a workflow in Automa&#39;s hosted cloud.</li>
+            <li>
+              <code>google-sheets</code> — appends rows to a Google Sheet through an OAuth
+              connection.
+            </li>
+            <li><code>google-sheets-drive</code> — reads a spreadsheet from Google Drive.</li>
+            <li><code>google-drive</code> — uploads a file to Google Drive.</li>
+            <li><code>block-package</code> — installs a community block package.</li>
+          </ul>
+          <p>
+            A workflow imported with one of these nodes keeps the node on the canvas for reference
+            but cannot run it.
+          </p>
+          <h2 id="upstream-attribution">Upstream attribution</h2>
+          <p>
+            Browser Copilot keeps workflow JSON compatible with Automa, so operator names, field
+            names, and much of the general behavior come from the Automa project. Every shared
+            operator links to its Automa reference page under <strong>Resources</strong>.
+          </p>
+          <p>
+            The prose on these pages is written for Browser Copilot and verified against this
+            repository; it is not copied from the Automa documentation. Where Browser Copilot
+            behaves differently, the operator page says so under
+            <strong>Browser Copilot notes</strong>.
+          </p>
+          <p>
+            Four catalog operators have no upstream documentation page and are marked accordingly:
+            <code>note</code>, <code>forward-page</code>, <code>save-local</code>, and
+            <code>read-page</code>. The five Browser Copilot-only operators are labelled as such and
+            never claim an upstream page.
+          </p>
+          <h2 id="version-note">Version note</h2>
+          <p>
+            These pages describe Browser Copilot 0.6.8. New operators and fields are added with the
+            feature; when a saved workflow was created by an older version, the inspector shows the
+            fields that version understood, and the runtime keeps the legacy shape working.
+          </p>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">On this page</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#what-this-reference-covers"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >What this reference covers</a
+            ><a
+              href="#where-the-field-reference-comes-from"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Where the field reference comes from</a
+            ><a
+              href="#status-legend"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Status legend</a
+            ><a
+              href="#operator-index"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Operator index</a
+            ><a
+              href="#cloud-operators-that-are-not-available"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Cloud operators that are not available</a
+            ><a
+              href="#upstream-attribution"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Upstream attribution</a
+            ><a
+              href="#version-note"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Version note</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/README.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >Edit this page on GitHub</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>Generated from docs/workflow</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <span></span
+          ><a
+            href="getting-started.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">Next →</span
+            ><span class="text-sm text-ink">Getting started</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">On this page</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#what-this-reference-covers"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >What this reference covers</a
+            ><a
+              href="#where-the-field-reference-comes-from"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Where the field reference comes from</a
+            ><a
+              href="#status-legend"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Status legend</a
+            ><a
+              href="#operator-index"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Operator index</a
+            ><a
+              href="#cloud-operators-that-are-not-available"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Cloud operators that are not available</a
+            ><a
+              href="#upstream-attribution"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Upstream attribution</a
+            ><a
+              href="#version-note"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Version note</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm Noncommercial 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

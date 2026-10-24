@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>快速上手 — Browser Copilot Docs</title>
+    <meta name="description" content="创建、运行、调试并导出你的第一个 Browser Copilot 工作流。" />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/getting-started-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/getting-started.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/getting-started-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/getting-started.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="快速上手 — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="创建、运行、调试并导出你的第一个 Browser Copilot 工作流。"
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/getting-started-zh.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="快速上手 — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="创建、运行、调试并导出你的第一个 Browser Copilot 工作流。"
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index-zh.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index-zh.html" class="text-sm text-ink">文档</a>
+          <a
+            href="../index-zh.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >功能</a
+          >
+          <a
+            href="../index-zh.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >工作原理</a
+          >
+          <a href="getting-started.html" class="text-sm text-muted transition-colors hover:text-ink"
+            >EN</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">开始</p>
+            <nav class="space-y-1">
+              <a
+                href="index-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >文档概览</a
+              ><a
+                href="getting-started-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >快速上手</a
+              ><a
+                href="concepts-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >工作流概念</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">算子</p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >页面交互</a
+              ><a
+                href="operators-browser-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >浏览器</a
+              ><a
+                href="operators-general-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >通用</a
+              ><a
+                href="operators-data-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >数据</a
+              ><a
+                href="operators-conditions-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >条件控制</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">文档菜单</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                开始
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >文档概览</a
+                ><a
+                  href="getting-started-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >快速上手</a
+                ><a
+                  href="concepts-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >工作流概念</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                算子
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >页面交互</a
+                ><a
+                  href="operators-browser-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >浏览器</a
+                ><a
+                  href="operators-general-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >通用</a
+                ><a
+                  href="operators-data-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >数据</a
+                ><a
+                  href="operators-conditions-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >条件控制</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a><span>/</span
+          ><span class="text-muted">快速上手</span>
+        </div>
+        <article class="docs-prose">
+          <h1>快速上手</h1>
+          <p>
+            本页带你熟悉工作流编辑器，并搭建一个完整可运行的工作流：打开页面、读取标题、把文本写入变量，最后保存成文件。
+          </p>
+          <h2 id="打开工作流编辑器">打开工作流编辑器</h2>
+          <ol>
+            <li>打开 Browser Copilot 侧边栏，选择 <strong>工作流</strong> 标签页。</li>
+            <li>
+              点击 <strong>新建</strong> 创建工作流，或在已有工作流上点击
+              <strong>编辑</strong> 打开画布。
+            </li>
+            <li>
+              编辑器左侧是图，右侧是算子属性面板。<strong>添加算子</strong>
+              用于展开或收起算子栏；<strong>工作流</strong> 与
+              <strong>日志</strong> 用于在算子属性、触发器与运行设置、运行历史之间切换。
+            </li>
+          </ol>
+          <p>
+            顶部工具栏有 <strong>保存</strong> 与
+            <strong>运行</strong
+            >（Ctrl+Enter）。运行时先保存工作流，因此后台执行的图始终就是你看到的那一张。<strong
+              >调试模式</strong
+            >
+            会为下一次运行启用断点与单步执行。
+          </p>
+          <p>
+            也可以不手工搭图，直接点击
+            <strong>录制工作流</strong>：你在页面上的操作会被记录下来，并在结束后作为图打开。
+          </p>
+          <h2 id="认识画布">认识画布</h2>
+          <ul>
+            <li>
+              每个工作流都从
+              <strong>触发器</strong> 算子开始。工作流名称、描述、触发方式与运行设置都在这个算子上。
+            </li>
+            <li>算子栏按分类分组，支持按名称搜索。</li>
+            <li>
+              选中算子后在右侧属性面板中编辑。拖动节点标题可移动节点，<strong>一键美化排版</strong>
+              可整理整张图。
+            </li>
+            <li>
+              连线从算子的输出（右侧）连到下一个算子的输入（左侧）。分支、回退与循环返回使用额外的命名端口，详见<a
+                href="concepts-zh.html#%E7%AB%AF%E5%8F%A3%E5%88%86%E6%94%AF%E4%B8%8E%E5%BE%AA%E7%8E%AF"
+                >端口、分支与循环</a
+              >。
+            </li>
+            <li>画布上的改动可以撤销。删除节点或连线不会影响已保存的工作流，直到你再次保存。</li>
+          </ul>
+          <h2 id="配置触发器">配置触发器</h2>
+          <p>
+            触发器算子决定工作流何时开始。选中它，用
+            <strong>添加触发器</strong>
+            增加一个或多个触发器；第一个是主触发器，工作流卡片上显示的就是它的触发方式。每个触发器都可以单独启用或禁用。
+          </p>
+          <p>可选的触发方式：</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>触发方式</th>
+                  <th>何时触发</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>手动</td>
+                  <td>从编辑器或工作流标签页运行。</td>
+                </tr>
+                <tr>
+                  <td>定时 / Cron</td>
+                  <td>间隔若干分钟后再次运行。</td>
+                </tr>
+                <tr>
+                  <td>指定日期</td>
+                  <td>到达指定的一次性日期与时间。</td>
+                </tr>
+                <tr>
+                  <td>每周的某几天</td>
+                  <td>到达到所选星期与本地时间。</td>
+                </tr>
+                <tr>
+                  <td>访问网页时</td>
+                  <td>打开的网址匹配指定模式（glob 或正则表达式）。</td>
+                </tr>
+                <tr>
+                  <td>键盘快捷键</td>
+                  <td>按下配置的快捷键，可选择仅在输入框之外生效。</td>
+                </tr>
+                <tr>
+                  <td>右键菜单</td>
+                  <td>从浏览器的右键菜单中选择该工作流。</td>
+                </tr>
+                <tr>
+                  <td>浏览器启动时</td>
+                  <td>浏览器启动时。</td>
+                </tr>
+                <tr>
+                  <td>元素变化时</td>
+                  <td>页面上匹配 CSS 选择器的元素被插入或发生变化时。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            需要参数的触发方式会显示对应字段。配置不完整的触发器会被保存，但不会触发；运行前的预检会给出提示。
+          </p>
+          <p>
+            触发器还可以声明
+            <strong>输入参数</strong
+            >（名称、类型与默认值）。声明的输入会写入运行的变量表，因此即使调用方没有传值，<code
+              >{{keyword}}</code
+            >
+            也能解析。生成的工作流因此既能直接运行，也仍然可编辑。
+          </p>
+          <h2 id="添加并连接算子">添加并连接算子</h2>
+          <ol>
+            <li>点击 <strong>添加算子</strong>，找到需要的算子。</li>
+            <li>点击或拖动到画布上，新节点会带上默认设置。</li>
+            <li>把上一个节点的输出端口连到新节点的输入端口。</li>
+            <li>选中节点，在属性面板中填写设置。</li>
+          </ol>
+          <p>大多数算子只有一个输入和一个输出。部分算子会提供额外端口：</p>
+          <ul>
+            <li>
+              <strong>条件判断</strong> 为每条配置的路径提供一个输出，再加一个
+              <strong>fallback</strong> 回退输出。
+            </li>
+            <li><strong>元素是否存在</strong> 提供 true 与 false 两个输出。</li>
+            <li>循环与错误处理算子会提供返回端口或回退端口。</li>
+          </ul>
+          <p>
+            端口在各算子页以及<a
+              href="concepts-zh.html#%E7%AB%AF%E5%8F%A3%E5%88%86%E6%94%AF%E4%B8%8E%E5%BE%AA%E7%8E%AF"
+              >工作流概念</a
+            >中说明。
+          </p>
+          <h2 id="配置算子">配置算子</h2>
+          <p>属性面板与算子表单一一对应。多数节点底部都有这些通用区块：</p>
+          <ul>
+            <li>
+              <strong>输出变量名</strong> —
+              这一步把结果写到哪里。按数据含义命名（<code>headline</code>），不要按算子命名（<code>text2</code>）。
+            </li>
+            <li><strong>禁用算子</strong> — 跳过这个节点，但不用删除它。</li>
+            <li>
+              <strong>超时</strong> — 运行超过限制时让这一步失败；填 <code>0</code> 表示不限制。
+            </li>
+            <li><strong>出错时</strong> — 重试、抛出错误、继续执行或走回退分支。</li>
+            <li>
+              <strong>目标与成功条件</strong> — 可选的可判定事实，供生成、校验与 AI 修复使用。
+            </li>
+            <li><strong>断点</strong> — 调试模式下在这一步之前暂停。</li>
+          </ul>
+          <p>
+            任何接受 <code>{{...}}</code> 的文本字段都可以引用工作流变量，包括选择器、网址、文件名与
+            JSON 值。规则与边界见<a
+              href="concepts-zh.html#%E5%8F%98%E9%87%8F%E4%B8%8E%E6%8F%92%E5%80%BC"
+              >变量与插值</a
+            >。
+          </p>
+          <h2 id="运行调试与查看日志">运行、调试与查看日志</h2>
+          <p>
+            点击
+            <strong>运行</strong
+            >（Ctrl+Enter）在当前浏览器中执行工作流。如果工作流是在别处生成的，首次运行可能会让你确认页面上下文。
+          </p>
+          <ul>
+            <li>
+              <strong>日志</strong>
+              面板列出本次运行以及每个算子一行。点击某一行可在画布上定位该算子。
+            </li>
+            <li>出错的步骤会中止运行，除非它的 <strong>出错时</strong> 策略另有规定。</li>
+            <li>如果必填参数缺失，运行会在第一个缺参算子之前停止；日志会逐个列出。</li>
+          </ul>
+          <p>
+            打开 <strong>调试模式</strong> 后，运行会在每个带断点的算子前暂停。调试栏提供
+            <strong>继续</strong>、<strong>下一步</strong>、<strong>停止</strong>，<strong
+              >变量</strong
+            >
+            面板显示暂停处捕获到的变量值。也可以在节点上使用
+            <strong>从此处运行</strong>，从图的中间开始执行。
+          </p>
+          <p>触发器算子上的可选运行设置：</p>
+          <ul>
+            <li><strong>保存执行日志</strong> 把运行记录留在历史里。</li>
+            <li><strong>完成时通知</strong> 在运行结束时发送浏览器通知。</li>
+            <li><strong>工作流目标</strong> 记录最后一步之后要校验的成功条件。</li>
+          </ul>
+          <h2 id="保存导出与导入">保存、导出与导入</h2>
+          <p>
+            <strong>保存</strong> 会存储工作流。工作流标签页提供
+            <strong>导出</strong>：可以导出单个工作流、当前选中的多个工作流，或一个分组；结果都是
+            JSON 文件。<strong>导入</strong>
+            接受这些文件（包括分组导出），恢复工作流与分组，不会覆盖无关的工作流。
+          </p>
+          <p>
+            如果工作流包含云端算子或当前版本不可用的算子，导入后节点会保留在画布上，但无法运行；参见<a
+              href="index-zh.html#%E7%8A%B6%E6%80%81%E5%9B%BE%E4%BE%8B"
+              >状态图例</a
+            >。
+          </p>
+          <h2 id="第一个工作流">第一个工作流</h2>
+          <p>目标：打开一个页面，把标题读入变量，拼出一行报告并写入文本文件。</p>
+          <ol>
+            <li>在工作流标签页新建一个工作流，并在编辑器中打开。</li>
+            <li>触发器保持 <strong>手动</strong> 即可。</li>
+            <li>
+              添加 <strong>新建标签页</strong>，连接 触发器 → 新建标签页，把网址设为
+              <code>https://example.com</code>。
+            </li>
+            <li>
+              添加 <strong>获取文本</strong>，连接 新建标签页 → 获取文本，选择器填
+              <code>h1</code>，<strong>输出变量名</strong> 填 <code>headline</code>。
+            </li>
+            <li>
+              添加 <strong>设置变量</strong>，连接 获取文本 → 设置变量。新增一行：变量名
+              <code>report</code>，值 <code>Headline: {{headline}}</code>。
+            </li>
+            <li>
+              添加 <strong>导出数据</strong>，连接 设置变量 → 导出数据：
+              <ul>
+                <li><strong>要导出的数据</strong>：Variable（变量）。</li>
+                <li><strong>变量名</strong>：<code>report</code>。</li>
+                <li><strong>导出为</strong>：纯文本。</li>
+                <li><strong>文件名</strong>：<code>headline.txt</code>。</li>
+              </ul>
+            </li>
+            <li>
+              点击 <strong>运行</strong>。第一次导出会弹出保存对话框；如果已在 设置 → 下载目录
+              中配置了目录，文件会直接写入该目录，不再询问。
+            </li>
+            <li>
+              打开 <code>headline.txt</code>，确认内容为 <code>Headline: </code> 加上页面的
+              <code>h1</code> 文本。
+            </li>
+          </ol>
+          <p>
+            如果文本为空，查看「获取文本」这一步的日志：选择器匹配不到元素时它会直接失败，而不是静默导出一个空文件。
+          </p>
+          <h2 id="下一步">下一步</h2>
+          <ul>
+            <li>
+              <a href="concepts-zh.html">工作流概念</a> — 变量、数据表、循环、错误处理、文件、凭证与
+              AI 能力。
+            </li>
+            <li>
+              <a href="operators-interaction-zh.html">页面交互算子</a> —
+              点击、读取、填写与脚本注入。
+            </li>
+            <li>
+              <a href="operators-browser-zh.html">浏览器算子</a> — 标签页、下载、Cookie 与 OCR。
+            </li>
+            <li><a href="operators-conditions-zh.html">条件控制算子</a> — 条件分支与循环。</li>
+          </ul>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">本页目录</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#打开工作流编辑器"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >打开工作流编辑器</a
+            ><a
+              href="#认识画布"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >认识画布</a
+            ><a
+              href="#配置触发器"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >配置触发器</a
+            ><a
+              href="#添加并连接算子"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >添加并连接算子</a
+            ><a
+              href="#配置算子"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >配置算子</a
+            ><a
+              href="#运行调试与查看日志"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >运行、调试与查看日志</a
+            ><a
+              href="#保存导出与导入"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >保存、导出与导入</a
+            ><a
+              href="#第一个工作流"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >第一个工作流</a
+            ><a
+              href="#下一步"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >下一步</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/getting-started.zh-CN.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >在 GitHub 上编辑此页</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>由 docs/workflow 生成</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="index-zh.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← 上一页</span
+            ><span class="text-sm text-ink">文档概览</span></a
+          ><a
+            href="concepts-zh.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">下一页 →</span
+            ><span class="text-sm text-ink">工作流概念</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">本页目录</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#打开工作流编辑器"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >打开工作流编辑器</a
+            ><a
+              href="#认识画布"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >认识画布</a
+            ><a
+              href="#配置触发器"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >配置触发器</a
+            ><a
+              href="#添加并连接算子"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >添加并连接算子</a
+            ><a
+              href="#配置算子"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >配置算子</a
+            ><a
+              href="#运行调试与查看日志"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >运行、调试与查看日志</a
+            ><a
+              href="#保存导出与导入"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >保存、导出与导入</a
+            ><a
+              href="#第一个工作流"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >第一个工作流</a
+            ><a
+              href="#下一步"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >下一步</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm 非商业许可 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

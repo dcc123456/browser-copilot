@@ -1,0 +1,1081 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>工作流文档 — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="Browser Copilot 的 63 个工作流算子完整使用文档，涵盖变量、数据表、循环、下载、凭证与 AI 能力。"
+    />
+    <link rel="canonical" href="https://dcc123456.github.io/browser-copilot/docs/index-zh.html" />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/index.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/index-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/index.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="工作流文档 — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="Browser Copilot 的 63 个工作流算子完整使用文档，涵盖变量、数据表、循环、下载、凭证与 AI 能力。"
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/index-zh.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="工作流文档 — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="Browser Copilot 的 63 个工作流算子完整使用文档，涵盖变量、数据表、循环、下载、凭证与 AI 能力。"
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index-zh.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index-zh.html" class="text-sm text-ink">文档</a>
+          <a
+            href="../index-zh.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >功能</a
+          >
+          <a
+            href="../index-zh.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >工作原理</a
+          >
+          <a href="index.html" class="text-sm text-muted transition-colors hover:text-ink">EN</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">开始</p>
+            <nav class="space-y-1">
+              <a
+                href="index-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >文档概览</a
+              ><a
+                href="getting-started-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >快速上手</a
+              ><a
+                href="concepts-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >工作流概念</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">算子</p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >页面交互</a
+              ><a
+                href="operators-browser-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >浏览器</a
+              ><a
+                href="operators-general-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >通用</a
+              ><a
+                href="operators-data-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >数据</a
+              ><a
+                href="operators-conditions-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >条件控制</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">文档菜单</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                开始
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >文档概览</a
+                ><a
+                  href="getting-started-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >快速上手</a
+                ><a
+                  href="concepts-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >工作流概念</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                算子
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >页面交互</a
+                ><a
+                  href="operators-browser-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >浏览器</a
+                ><a
+                  href="operators-general-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >通用</a
+                ><a
+                  href="operators-data-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >数据</a
+                ><a
+                  href="operators-conditions-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >条件控制</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <span class="text-muted">文档</span>
+        </div>
+        <article class="docs-prose">
+          <h1>工作流文档</h1>
+          <p>
+            Browser Copilot
+            工作流把反复进行的浏览器操作变成一张可运行、可调试、可复用的图：在画布上把算子连接起来，每个算子执行一步，变量负责在步骤之间传递数据。
+          </p>
+          <p>
+            本文档覆盖工作流调色板中出现的全部算子，以及 Browser Copilot
+            特有的行为：变量插值、数据表、循环、错误处理、下载、凭证，以及编辑器内置的 AI 能力。
+          </p>
+          <p>
+            第一次使用？先阅读<a href="getting-started-zh.html">快速上手</a
+            >完成第一个工作流，之后在搭建过程中随时查阅<a href="concepts-zh.html">工作流概念</a>。
+          </p>
+          <h2 id="本文档覆盖什么">本文档覆盖什么</h2>
+          <p>调色板共有 <strong>63 个算子</strong>：</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>分类页</th>
+                  <th>算子数</th>
+                  <th>包含内容</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><a href="operators-interaction-zh.html">页面交互</a></td>
+                  <td>14</td>
+                  <td>点击、读取、填写、滚动、脚本注入</td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html">浏览器</a></td>
+                  <td>18</td>
+                  <td>标签页、历史、截图、下载、OCR</td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general-zh.html">通用</a></td>
+                  <td>13</td>
+                  <td>触发器、子工作流、HTTP、备注、AI</td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html">数据</a></td>
+                  <td>11</td>
+                  <td>变量、正则、排序、凭证、电子表格</td>
+                </tr>
+                <tr>
+                  <td><a href="operators-conditions-zh.html">条件控制</a></td>
+                  <td>7</td>
+                  <td>条件分支、元素判断、循环、循环断点</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            这 63 个算子里，58 个与 Automa 目录互通，5 个是 Browser Copilot
+            自有算子：<code>ai-agent</code>、<code>ocr</code>、<code>set-variable</code>、<code>get-secret</code>、<code>parse-excel</code>。
+          </p>
+          <p>
+            另外两页介绍平台而不是单个算子：<a href="getting-started-zh.html">快速上手</a>与<a
+              href="concepts-zh.html"
+              >工作流概念</a
+            >。
+          </p>
+          <h2 id="字段说明以哪里为准">字段说明以哪里为准</h2>
+          <p>
+            编辑器中的属性面板是节点设置的权威来源。每个算子页按属性面板的顺序描述相同字段，给出当前版本的默认值与表单上看不到的运行行为。
+          </p>
+          <ul>
+            <li>中文页的算子名、标题与中文界面的调色板一致。</li>
+            <li>
+              设置名与中文属性面板的标签一致；只有当工作流 JSON
+              需要直接编辑时，页面才会提到存储键名。
+            </li>
+            <li>
+              所有节点共享的工作流级设置——禁用、超时、错误处理、目标契约、断点——统一写在<a
+                href="concepts-zh.html#%E9%94%99%E8%AF%AF%E9%87%8D%E8%AF%95%E4%B8%8E%E5%8F%AF%E9%9D%A0%E6%80%A7"
+                >工作流概念</a
+              >中，不在每个算子页重复。
+            </li>
+          </ul>
+          <p>如果算子页与属性面板不一致，以属性面板为准，并请反馈这处差异。</p>
+          <h2 id="状态图例">状态图例</h2>
+          <p>大多数算子在正常运行中可用，不显示徽章。只有 5 个例外：</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>徽章</th>
+                  <th>含义</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>MV3 下不可用</td>
+                  <td>
+                    该算子依赖 Manifest V3 扩展无法使用的 API。导入的工作流仍保留节点，但无法运行。
+                  </td>
+                </tr>
+                <tr>
+                  <td>尚未实现</td>
+                  <td>目录中存在该算子，但当前版本没有对应的执行器。</td>
+                </tr>
+                <tr>
+                  <td>占位实现</td>
+                  <td>算子可以放置和连接，但当前版本不执行任何动作。</td>
+                </tr>
+                <tr>
+                  <td>仅完整版可用</td>
+                  <td>只有完整版可用；精简的 <code>no-ocr</code> 构建会移除其引擎。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            受影响的 5 个算子是
+            <code>proxy</code>、<code>save-assets</code>、<code>browser-event</code>、<code
+              >switch-to</code
+            >
+            和 <code>ocr</code>。
+          </p>
+          <h2 id="算子总表">算子总表</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>算子</th>
+                  <th>用途</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="docs-group-row">
+                  <td colspan="3"><strong>页面交互</strong></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction-zh.html#operator-event-click">点击元素</a></td>
+                  <td>点击定位器匹配到的第一个元素。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction-zh.html#operator-get-text">获取文本</a></td>
+                  <td>读取一个或多个元素渲染出的文本，写入变量，并可按需写入数据表。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction-zh.html#operator-element-scroll">滚动元素</a>
+                  </td>
+                  <td>把页面或元素滚动到指定偏移量，或把元素滚动到可见区域。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction-zh.html#operator-link">点击链接</a></td>
+                  <td>跟随链接元素，并可把目标地址放到新标签页打开。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction-zh.html#operator-attribute-value">属性值</a>
+                  </td>
+                  <td>读取元素的属性到变量，或把值写入属性。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction-zh.html#operator-forms">填写表单</a></td>
+                  <td>填写文本框、选择下拉选项、切换复选框或单选框，或读取表单控件的当前值。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction-zh.html#operator-javascript-code"
+                      >JavaScript 代码</a
+                    >
+                  </td>
+                  <td>在页面中执行一段 JavaScript 函数体，并保存其返回值。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction-zh.html#operator-trigger-event">触发事件</a>
+                  </td>
+                  <td>在选中的元素上派发一个 DOM 事件。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction-zh.html#operator-switch-to">切换框架/窗口</a>
+                  </td>
+                  <td>为后续步骤指定主窗口或某个 iframe 作为上下文。</td>
+                  <td>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                      >占位实现</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction-zh.html#operator-upload-file">上传文件</a></td>
+                  <td>从选择器、工作流变量、最新下载或指定路径，把文件附加到上传控件。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction-zh.html#operator-hover-element">悬停元素</a>
+                  </td>
+                  <td>把指针移动到定位器匹配到的第一个元素上。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction-zh.html#operator-save-assets">保存资源</a></td>
+                  <td>原本用于下载媒体元素或直接链接，但此算子尚未实现。</td>
+                  <td>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium border-err/40 bg-err/10 text-err"
+                      >尚未实现</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="operators-interaction-zh.html#operator-press-key">按键</a></td>
+                  <td>向当前焦点控件或指定元素发送单个按键或组合键。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-interaction-zh.html#operator-create-element">创建元素</a>
+                  </td>
+                  <td>向页面注入 HTML、CSS 和可选的 JavaScript。</td>
+                  <td></td>
+                </tr>
+                <tr class="docs-group-row">
+                  <td colspan="3"><strong>浏览器</strong></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-active-tab">当前标签页</a></td>
+                  <td>把浏览器当前激活的标签页记录为工作流正在操作的标签页。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-new-tab">新建标签页</a></td>
+                  <td>在新标签页中打开网址，并把该标签页设为工作流驱动的标签页。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-switch-tab">切换标签页</a></td>
+                  <td>
+                    按匹配模式、标题、位置或索引把已打开的标签页切到前台，并设为工作流操作的标签页。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-new-window">新建窗口</a></td>
+                  <td>打开新的浏览器窗口，并把工作流指向该窗口。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-proxy">代理</a></td>
+                  <td>
+                    在 Automa 中用于让浏览器流量经过代理，但在 Browser Copilot 的 Manifest V3
+                    构建中不可用。
+                  </td>
+                  <td>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium border-err/40 bg-err/10 text-err"
+                      >MV3 下不可用</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-go-back">后退</a></td>
+                  <td>让工作流的标签页在浏览历史中后退一页。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-forward-page">前进</a></td>
+                  <td>让工作流的标签页在浏览历史中前进一页。Automa 上游没有对应页面。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-close-tab">关闭标签页</a></td>
+                  <td>关闭工作流正在驱动的标签页，并跟随浏览器在其位置激活的标签页。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-take-screenshot">截图</a></td>
+                  <td>截取可见页面、整页或某个元素，并保存图像。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-read-page">读取页面</a></td>
+                  <td>
+                    读取当前标签页的可见文本、选中文本或 HTML，写入变量，并可按需写入数据表。Automa
+                    上游没有对应页面。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-browser-event">浏览器事件</a></td>
+                  <td>
+                    原本用于暂停到某个标签页、网络或下载事件发生，但此算子在当前构建中只是占位。
+                  </td>
+                  <td>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                      >占位实现</span
+                    >
+                  </td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-handle-dialog">处理对话框</a></td>
+                  <td>安装处理器，用于接受或关闭页面的 JavaScript 对话框。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-handle-download">处理下载</a></td>
+                  <td>等待浏览器下载并保存其详细信息。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-save-local">保存到本地</a></td>
+                  <td>把插值后的文本写入本地文件。Automa 上游没有对应页面。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-reload-tab">刷新标签页</a></td>
+                  <td>刷新工作流的标签页；填写网址时改为在该标签页打开该地址。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-tab-url">标签页网址</a></td>
+                  <td>读取当前标签页或窗口中所有标签页的网址。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-cookie">Cookie</a></td>
+                  <td>获取、设置或删除浏览器 Cookie。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-browser-zh.html#operator-ocr">OCR 识别</a></td>
+                  <td>
+                    对图片变量、页面元素或上一次页面快照运行本地 Tesseract.js OCR。Automa
+                    上游没有对应页面。此算子仅存在于 Browser Copilot 中。
+                  </td>
+                  <td>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                      >仅完整版可用</span
+                    >
+                  </td>
+                </tr>
+                <tr class="docs-group-row">
+                  <td colspan="3"><strong>通用</strong></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general-zh.html#operator-trigger">触发器</a></td>
+                  <td>
+                    工作流的入口。它保存工作流名称与运行设置、一个或多个启动方式，以及用于初始化运行变量的已声明输入。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-general-zh.html#operator-execute-workflow">执行工作流</a>
+                  </td>
+                  <td>把另一个已保存的工作流作为嵌套运行启动，结束后沿主输出继续。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general-zh.html#operator-delay">延时</a></td>
+                  <td>在下一步开始前按固定时长暂停运行。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general-zh.html#operator-export-data">导出数据</a></td>
+                  <td>把本次运行的数据表或某个变量写入下载文件。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general-zh.html#operator-blocks-group">分组</a></td>
+                  <td>
+                    把一组步骤打包成一个节点，让长画布更易读。分组按保存顺序运行内部步骤，然后从自己的输出继续。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general-zh.html#operator-clipboard">剪贴板</a></td>
+                  <td>把系统剪贴板或当前页面选中的文本读入变量，或把工作流中的文本写入剪贴板。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-general-zh.html#operator-wait-connections">等待连接</a>
+                  </td>
+                  <td>
+                    先短暂停顿，让上一步触发的导航稳定下来，再等待正在操作的标签页报告加载完成。本版本等待的是标签页，而不是图中其他分支。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general-zh.html#operator-notification">通知</a></td>
+                  <td>显示桌面通知，也可以把同样的文本转发到飞书机器人。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general-zh.html#operator-note">便签</a></td>
+                  <td>
+                    放在画布上的自由备注，用于说明工作流，不影响执行。该算子没有对应的 Automa
+                    上游页面。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-general-zh.html#operator-workflow-state">工作流状态</a>
+                  </td>
+                  <td>
+                    请求停止当前运行、另一个工作流或一组指定工作流。本版本中算子无法访问调度器，因此所有停止动作都会让步骤报错结束。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-general-zh.html#operator-parameter-prompt">参数输入</a>
+                  </td>
+                  <td>
+                    在后续步骤运行前解析工作流已声明的输入。本版本不显示交互对话框：值来自运行作用域，缺失时用默认值补齐。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general-zh.html#operator-webhook">Webhook</a></td>
+                  <td>向远程端点发送 HTTP 请求，并把响应解析到变量或数据表。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-general-zh.html#operator-ai-agent">AI 智能体</a></td>
+                  <td>
+                    读取可选的目标元素，把它和你的提示词一起交给可调用工具的 AI
+                    智能体。智能体返回文本答案，在允许时还可以操作页面。Browser Copilot 独有算子。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr class="docs-group-row">
+                  <td colspan="3"><strong>数据</strong></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-insert-data">插入数据</a></td>
+                  <td>向运行期的数据表追加记录，或把一个值写入变量。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-delete-data">删除数据</a></td>
+                  <td>从数据表中删除列，或删除变量。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-log-data">日志数据</a></td>
+                  <td>把本次运行的日志收集为文本，写入变量，并可按需写入数据表的一列。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-slice-variable">变量切片</a></td>
+                  <td>截取字符串变量的一段，或数组变量的一个子数组。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-increase-variable">变量自增</a></td>
+                  <td>把数值变量加上固定步长；变量尚不存在时从零开始。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-regex-variable">正则变量</a></td>
+                  <td>用正则表达式处理文本变量，保留匹配结果或替换后的文本。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-data-mapping">数据映射</a></td>
+                  <td>重命名数据表行或变量数组中的字段。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-sort-data">排序数据</a></td>
+                  <td>对数据表或变量中的数组排序，可按最多三个属性依次比较。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-set-variable">设置变量</a></td>
+                  <td>在一步中写入一个或多个工作流变量。Browser Copilot 独有算子。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-get-secret">获取凭证</a></td>
+                  <td>运行时把已保存的凭证字段复制到工作流变量。Browser Copilot 独有算子。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-data-zh.html#operator-parse-excel">解析表格</a></td>
+                  <td>
+                    把 .xlsx 或 .csv 表格读成对象数组与原始单元格二维数组。Browser Copilot
+                    独有算子。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr class="docs-group-row">
+                  <td colspan="3"><strong>条件控制</strong></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-conditions-zh.html#operator-repeat-task">重复任务</a></td>
+                  <td>按固定次数运行所连接的分支，然后从 end 输出继续。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-conditions-zh.html#operator-conditions">条件</a></td>
+                  <td>
+                    自上而下依次判断命名的输出路径，运行走第一条所有条件都成立的路径；都不成立时走
+                    fallback。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-conditions-zh.html#operator-element-exists">元素是否存在</a>
+                  </td>
+                  <td>
+                    定位器至少匹配到一个元素时走 exists 端口，一个都没有时走 not exists 端口。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-conditions-zh.html#operator-while-loop">While 循环</a></td>
+                  <td>在条件成立期间重复运行所连接的分支，每轮开始前先判断条件。</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td><a href="operators-conditions-zh.html#operator-loop-data">循环数据</a></td>
+                  <td>
+                    遍历数据表、数字区间、变量、JSON 数组或页面元素列表，把当前项写入
+                    loopItem，把位置写入 loopIndex。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-conditions-zh.html#operator-loop-elements">循环元素</a>
+                  </td>
+                  <td>
+                    遍历定位器匹配到的每个元素，并把当前元素的选择器写入 loopElementSelector。
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="operators-conditions-zh.html#operator-loop-breakpoint">循环断点</a>
+                  </td>
+                  <td>在循环体内的任意位置结束当前这一轮，或结束整个循环。</td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h2 id="不可用的云端算子">不可用的云端算子</h2>
+          <p>
+            目录中还认识 5
+            个云端算子。它们不会出现在调色板里，也没有本地执行器，因此本文档不把它们当作可用算子来写：
+          </p>
+          <ul>
+            <li><code>ai-workflow</code> — 在 Automa 托管云端运行工作流。</li>
+            <li><code>google-sheets</code> — 通过 OAuth 连接向 Google 表格追加行。</li>
+            <li><code>google-sheets-drive</code> — 从 Google Drive 读取电子表格。</li>
+            <li><code>google-drive</code> — 上传文件到 Google Drive。</li>
+            <li><code>block-package</code> — 安装社区块包。</li>
+          </ul>
+          <p>如果导入的工作流包含这些节点，画布会保留它们以便查看，但无法运行。</p>
+          <h2 id="上游归属">上游归属</h2>
+          <p>
+            Browser Copilot 的工作流 JSON 与 Automa
+            保持兼容，因此算子名、字段名以及相当一部分通用行为来自 Automa 项目。每个共享算子在
+            <strong>参考资源</strong> 一节给出对应的 Automa 文档链接。
+          </p>
+          <p>
+            这些页面的正文是依据本仓库行为为 Browser Copilot 撰写的，不是从 Automa
+            文档复制的。Browser Copilot 行为不同的地方，算子页会在
+            <strong>Browser Copilot 说明</strong> 中单独指出。
+          </p>
+          <p>
+            有 4
+            个目录算子没有上游文档页面，页面会明确标注：<code>note</code>、<code>forward-page</code>、<code>save-local</code>、<code>read-page</code>。5
+            个 Browser Copilot 自有算子一律标注为本地算子，不声称存在上游页面。
+          </p>
+          <h2 id="版本说明">版本说明</h2>
+          <p>
+            本文档对应 Browser Copilot
+            0.6.8。新算子和新字段随功能一起加入；用旧版本保存的工作流，属性面板只显示该版本理解的字段，运行时仍会兼容旧的存储结构。
+          </p>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">本页目录</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#本文档覆盖什么"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >本文档覆盖什么</a
+            ><a
+              href="#字段说明以哪里为准"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >字段说明以哪里为准</a
+            ><a
+              href="#状态图例"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >状态图例</a
+            ><a
+              href="#算子总表"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >算子总表</a
+            ><a
+              href="#不可用的云端算子"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >不可用的云端算子</a
+            ><a
+              href="#上游归属"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >上游归属</a
+            ><a
+              href="#版本说明"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >版本说明</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/README.zh-CN.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >在 GitHub 上编辑此页</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>由 docs/workflow 生成</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <span></span
+          ><a
+            href="getting-started-zh.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">下一页 →</span
+            ><span class="text-sm text-ink">快速上手</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">本页目录</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#本文档覆盖什么"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >本文档覆盖什么</a
+            ><a
+              href="#字段说明以哪里为准"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >字段说明以哪里为准</a
+            ><a
+              href="#状态图例"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >状态图例</a
+            ><a
+              href="#算子总表"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >算子总表</a
+            ><a
+              href="#不可用的云端算子"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >不可用的云端算子</a
+            ><a
+              href="#上游归属"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >上游归属</a
+            ><a
+              href="#版本说明"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >版本说明</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm 非商业许可 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

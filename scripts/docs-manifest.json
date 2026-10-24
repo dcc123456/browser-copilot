@@ -1,0 +1,119 @@
+{
+  "siteUrl": "https://dcc123456.github.io/browser-copilot",
+  "repoBlob": "https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow",
+  "statuses": {
+    "mv3-unsupported": { "en": "Unavailable in MV3", "zh": "MV3 下不可用", "tone": "danger" },
+    "not-implemented": { "en": "Not implemented", "zh": "尚未实现", "tone": "danger" },
+    "placeholder": { "en": "Placeholder", "zh": "占位实现", "tone": "neutral" },
+    "requires-ocr": { "en": "Full build only", "zh": "仅完整版可用", "tone": "neutral" }
+  },
+  "noUpstream": [
+    "note",
+    "forward-page",
+    "save-local",
+    "read-page",
+    "ai-agent",
+    "ocr",
+    "set-variable",
+    "get-secret",
+    "parse-excel"
+  ],
+  "pages": [
+    {
+      "slug": "index",
+      "source": { "en": "README.md", "zh": "README.zh-CN.md" },
+      "group": "start",
+      "category": null,
+      "nav": { "en": "Overview", "zh": "文档概览" },
+      "title": { "en": "Workflow documentation", "zh": "工作流文档" },
+      "description": {
+        "en": "Complete usage reference for the 63 workflow operators in Browser Copilot, including variables, data tables, loops, downloads, secrets, and AI features.",
+        "zh": "Browser Copilot 的 63 个工作流算子完整使用文档，涵盖变量、数据表、循环、下载、凭证与 AI 能力。"
+      }
+    },
+    {
+      "slug": "getting-started",
+      "source": { "en": "getting-started.md", "zh": "getting-started.zh-CN.md" },
+      "group": "start",
+      "category": null,
+      "nav": { "en": "Getting started", "zh": "快速上手" },
+      "title": { "en": "Getting started", "zh": "快速上手" },
+      "description": {
+        "en": "Build, run, debug, and export your first Browser Copilot workflow.",
+        "zh": "创建、运行、调试并导出你的第一个 Browser Copilot 工作流。"
+      }
+    },
+    {
+      "slug": "concepts",
+      "source": { "en": "concepts.md", "zh": "concepts.zh-CN.md" },
+      "group": "start",
+      "category": null,
+      "nav": { "en": "Workflow concepts", "zh": "工作流概念" },
+      "title": { "en": "Workflow concepts", "zh": "工作流概念" },
+      "description": {
+        "en": "Variables, interpolation, the data table, ports, loops, error handling, files, secrets, AI features, and triggers.",
+        "zh": "变量、插值、数据表、端口、循环、错误处理、文件、凭证、AI 能力与触发器。"
+      }
+    },
+    {
+      "slug": "operators-interaction",
+      "source": { "en": "operators-interaction.md", "zh": "operators-interaction.zh-CN.md" },
+      "group": "operators",
+      "category": "interaction",
+      "nav": { "en": "Web interaction", "zh": "页面交互" },
+      "title": { "en": "Web interaction operators", "zh": "页面交互算子" },
+      "description": {
+        "en": "Click, read, fill, scroll, upload, and inject JavaScript on the page with 14 interaction operators.",
+        "zh": "使用 14 个页面交互算子完成点击、读取、填写、滚动、上传与脚本注入。"
+      }
+    },
+    {
+      "slug": "operators-browser",
+      "source": { "en": "operators-browser.md", "zh": "operators-browser.zh-CN.md" },
+      "group": "operators",
+      "category": "browser",
+      "nav": { "en": "Browser", "zh": "浏览器" },
+      "title": { "en": "Browser operators", "zh": "浏览器算子" },
+      "description": {
+        "en": "Tabs, windows, history, screenshots, downloads, cookies, and OCR with 18 browser operators.",
+        "zh": "使用 18 个浏览器算子处理标签页、窗口、历史、截图、下载、Cookie 与 OCR。"
+      }
+    },
+    {
+      "slug": "operators-general",
+      "source": { "en": "operators-general.md", "zh": "operators-general.zh-CN.md" },
+      "group": "operators",
+      "category": "general",
+      "nav": { "en": "General", "zh": "通用" },
+      "title": { "en": "General operators", "zh": "通用算子" },
+      "description": {
+        "en": "Triggers, sub-workflows, HTTP requests, notifications, exports, groups, and AI agents with 13 general operators.",
+        "zh": "使用 13 个通用算子处理触发器、子工作流、HTTP 请求、通知、导出、分组与 AI Agent。"
+      }
+    },
+    {
+      "slug": "operators-data",
+      "source": { "en": "operators-data.md", "zh": "operators-data.zh-CN.md" },
+      "group": "operators",
+      "category": "data",
+      "nav": { "en": "Data", "zh": "数据" },
+      "title": { "en": "Data operators", "zh": "数据算子" },
+      "description": {
+        "en": "Variables, regex, sorting, mapping, table rows, secrets, and spreadsheet parsing with 11 data operators.",
+        "zh": "使用 11 个数据算子处理变量、正则、排序、映射、表格行、凭证与电子表格解析。"
+      }
+    },
+    {
+      "slug": "operators-conditions",
+      "source": { "en": "operators-conditions.md", "zh": "operators-conditions.zh-CN.md" },
+      "group": "operators",
+      "category": "conditions",
+      "nav": { "en": "Control flow", "zh": "条件控制" },
+      "title": { "en": "Control flow operators", "zh": "条件控制算子" },
+      "description": {
+        "en": "Branches, element checks, while loops, data loops, element loops, repeats, and loop breakpoints.",
+        "zh": "条件分支、元素判断、While 循环、数据循环、元素循环、重复任务与循环断点。"
+      }
+    }
+  ]
+}

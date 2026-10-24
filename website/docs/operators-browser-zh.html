@@ -1,0 +1,1964 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>浏览器算子 — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="使用 18 个浏览器算子处理标签页、窗口、历史、截图、下载、Cookie 与 OCR。"
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-browser-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-browser.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-browser-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-browser.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="浏览器算子 — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="使用 18 个浏览器算子处理标签页、窗口、历史、截图、下载、Cookie 与 OCR。"
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/operators-browser-zh.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="浏览器算子 — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="使用 18 个浏览器算子处理标签页、窗口、历史、截图、下载、Cookie 与 OCR。"
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index-zh.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index-zh.html" class="text-sm text-ink">文档</a>
+          <a
+            href="../index-zh.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >功能</a
+          >
+          <a
+            href="../index-zh.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >工作原理</a
+          >
+          <a
+            href="operators-browser.html"
+            class="text-sm text-muted transition-colors hover:text-ink"
+            >EN</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">开始</p>
+            <nav class="space-y-1">
+              <a
+                href="index-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >文档概览</a
+              ><a
+                href="getting-started-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >快速上手</a
+              ><a
+                href="concepts-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >工作流概念</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">算子</p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >页面交互</a
+              ><a
+                href="operators-browser-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >浏览器</a
+              ><a
+                href="operators-general-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >通用</a
+              ><a
+                href="operators-data-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >数据</a
+              ><a
+                href="operators-conditions-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >条件控制</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">文档菜单</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                开始
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >文档概览</a
+                ><a
+                  href="getting-started-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >快速上手</a
+                ><a
+                  href="concepts-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >工作流概念</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                算子
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >页面交互</a
+                ><a
+                  href="operators-browser-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >浏览器</a
+                ><a
+                  href="operators-general-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >通用</a
+                ><a
+                  href="operators-data-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >数据</a
+                ><a
+                  href="operators-conditions-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >条件控制</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a><span>/</span
+          ><span class="text-muted">浏览器</span>
+        </div>
+        <article class="docs-prose">
+          <h1>浏览器算子</h1>
+          <p>
+            这些算子处理标签页、窗口、导航、下载、对话框、Cookie
+            和页面截图。它们要么改变工作流所操作的页面，要么读取不属于 DOM 的浏览器状态。
+          </p>
+          <p>
+            所有数据字段都支持
+            <code>{{variables}}</code
+            >。通用的<strong>描述</strong>、<strong>禁用此算子</strong>、<strong>超时</strong>和<strong>出错时</strong>设置适用于每个节点，因此不在下表中重复。当前执行器会保存但不生效的字段，会在各算子的说明中单独指出。
+          </p>
+          <section data-operator="active-tab">
+            <h2 id="operator-active-tab">当前标签页</h2>
+            <p>
+              把浏览器当前激活的标签页记录为工作流正在操作的标签页。<a
+                href="https://www.goautoma.com/extension/docs/blocks/active-tab.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>禁用此算子</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>标准设置；运行时跳过此算子。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出">输出</h3>
+            <ul>
+              <li>
+                <code>{{lastActiveTab}}</code> 接收当前标签页的
+                <code>{ id, url, title, active }</code>。
+              </li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                算子只读取当前标签页，不会改变运行的标签页绑定。后续步骤需要移动到指定标签页时，请用<strong>切换标签页</strong>。
+              </li>
+              <li>本算子没有输出变量字段；结果始终写入 <code>lastActiveTab</code>。</li>
+              <li>除了标准节点选项，它没有可编辑的设置。</li>
+            </ul>
+          </section>
+          <section data-operator="new-tab">
+            <h2 id="operator-new-tab">新建标签页</h2>
+            <p>
+              在新标签页中打开网址，并把该标签页设为工作流驱动的标签页。<a
+                href="https://www.goautoma.com/extension/docs/blocks/new-tab.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-2">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>新标签页网址</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>协议加地址。地址留空会打开空白标签页，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>更新之前打开的标签页</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>复用上一个<strong>新建标签页</strong>打开的标签页，而不是再建一个。</td>
+                  </tr>
+                  <tr>
+                    <td>等待标签页加载完成</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>等标签页进入 <code>complete</code> 状态后再继续。</td>
+                  </tr>
+                  <tr>
+                    <td>设为活动标签页</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>将标签页加入分组</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>使用自定义 User-Agent</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>User-Agent</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>仅在开启自定义 User-Agent 时显示。</td>
+                  </tr>
+                  <tr>
+                    <td>Tab zoom</td>
+                    <td>滑块</td>
+                    <td><code>1</code></td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-2">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-2">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                标签页始终以活动状态创建，因此<strong>设为活动标签页</strong>目前不生效。<strong>将标签页加入分组</strong>、自定义
+                User-Agent 和 <strong>Tab zoom</strong> 会保存但不会应用。
+              </li>
+              <li>
+                <strong>更新之前打开的标签页</strong
+                >只复用本算子上一次创建的标签页，并在提供网址时切换其地址。如果该标签页已被关闭，则新建一个。
+              </li>
+              <li>
+                步骤会把运行绑定到新标签页。如果未开启<strong>等待标签页加载完成</strong>，后续读取应使用<strong>等待选择器</strong>或自行轮询内容。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="switch-tab">
+            <h2 id="operator-switch-tab">切换标签页</h2>
+            <p>
+              按匹配模式、标题、位置或索引把已打开的标签页切到前台，并设为工作流操作的标签页。<a
+                href="https://www.goautoma.com/extension/docs/blocks/switch-tab.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-3">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找标签页方式</td>
+                    <td>下拉选择</td>
+                    <td><code>match-patterns</code></td>
+                    <td>
+                      <code>match-patterns</code
+                      >、<code>tab-title</code>、<code>next-tab</code>、<code>prev-tab</code> 或
+                      <code>tab-index</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>匹配模式</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>按通配符匹配标签页网址，例如 <code>https://example.com/*</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>标签页标题</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>按子串匹配标签页标题。</td>
+                  </tr>
+                  <tr>
+                    <td>无匹配时创建</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>按模式或标题找不到时新建标签页。</td>
+                  </tr>
+                  <tr>
+                    <td>新标签页网址</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><strong>无匹配时创建</strong>使用的地址。</td>
+                  </tr>
+                  <tr>
+                    <td>索引</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td><code>tab-index</code> 使用的从零开始的标签页序号。</td>
+                  </tr>
+                  <tr>
+                    <td>设为活动标签页</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>除了切换工作流目标，还在浏览器中聚焦该标签页。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-3">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-3">Browser Copilot 说明</h3>
+            <ul>
+              <li>标签页索引从 0 开始，按运行所在窗口内标签页 id 升序排列，而不是视觉顺序。</li>
+              <li>
+                匹配模式是通配符。标签页标题按区分大小写的子串匹配。<strong>下一个标签页</strong>和<strong>上一个标签页</strong>相对于运行当前操作的标签页，并会循环。
+              </li>
+              <li>
+                取消勾选<strong>设为活动标签页</strong>仍会把运行切换到匹配的标签页，只是不抢用户的焦点。
+              </li>
+              <li>
+                <strong>无匹配时创建</strong>需要非空网址；没有网址时，找不到匹配项会让步骤失败。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="new-window">
+            <h2 id="operator-new-window">新建窗口</h2>
+            <p>
+              打开新的浏览器窗口，并把工作流指向该窗口。<a
+                href="https://www.goautoma.com/extension/docs/blocks/new-window.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-4">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>类型</td>
+                    <td>下拉选择</td>
+                    <td><code>normal</code></td>
+                    <td><code>normal</code>、<code>popup</code> 或 <code>panel</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>网址（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>要打开的地址，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>窗口状态</td>
+                    <td>下拉选择</td>
+                    <td><code>normal</code></td>
+                    <td>
+                      <code>normal</code>、<code>minimized</code>、<code>maximized</code> 或
+                      <code>fullscreen</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>设为无痕窗口</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>需要扩展获得无痕模式权限。</td>
+                  </tr>
+                  <tr>
+                    <td>顶部</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td>屏幕位置；<code>0</code> 表示交给浏览器决定。</td>
+                  </tr>
+                  <tr>
+                    <td>左侧</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td>屏幕位置；<code>0</code> 表示交给浏览器决定。</td>
+                  </tr>
+                  <tr>
+                    <td>高度</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td><code>0</code> 表示由浏览器决定。</td>
+                  </tr>
+                  <tr>
+                    <td>宽度</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td><code>0</code> 表示由浏览器决定。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-4">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-4">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                只把网址传给浏览器。<strong>类型</strong>、<strong>窗口状态</strong>、无痕标志以及位置和尺寸字段会保存，但当前构建不会应用。
+              </li>
+              <li>运行所在的窗口和标签页会切换到新窗口，后续步骤都在其中执行。</li>
+              <li>默认的 <code>0</code> 尺寸表示“由浏览器决定”，不是创建零尺寸窗口。</li>
+            </ul>
+          </section>
+          <section data-operator="proxy">
+            <h2 id="operator-proxy">
+              代理<span
+                class="ml-3 inline-flex translate-y-[-2px] items-center rounded-full border px-2 py-0.5 text-xs font-medium border-err/40 bg-err/10 text-err"
+                >MV3 下不可用</span
+              >
+            </h2>
+            <p>
+              在 Automa 中用于让浏览器流量经过代理，但在 Browser Copilot 的 Manifest V3
+              构建中不可用。<a href="https://www.goautoma.com/extension/docs/blocks/proxy.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-5">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>主机</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>代理主机，例如 <code>socks5://1.2.3.4:1080</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>端口</td>
+                    <td>数字</td>
+                    <td><code>443</code></td>
+                    <td>代理端口。</td>
+                  </tr>
+                  <tr>
+                    <td>绕过列表</td>
+                    <td>多行文本</td>
+                    <td>—</td>
+                    <td>逗号分隔的、不经过代理的主机。</td>
+                  </tr>
+                  <tr>
+                    <td>清除所有代理</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>原本用于移除已配置的代理。</td>
+                  </tr>
+                  <tr>
+                    <td>Scheme</td>
+                    <td>文本</td>
+                    <td><code>https</code></td>
+                    <td>随算子保存；编辑器不显示此字段。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-5">输出</h3>
+            <p>无输出。步骤在产生值之前就会失败。</p>
+            <h3 id="browser-copilot-说明-5">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                <strong>Manifest V3 不支持。</strong> <code>chrome.proxy</code> API
+                不可用，扩展也没有声明
+                <code>proxy</code> 权限，因此执行器直接抛错，而不是假装转发了流量。
+              </li>
+              <li>步骤失败是有意为之：一个用来隐藏网络出口的工作流，绝不能在直连时报告成功。</li>
+              <li>保留这些设置只是为了让导入的 Automa 工作流不丢数据。修改它们无法让算子工作。</li>
+              <li>请去掉此算子后运行工作流，或在浏览器或系统层面使用外部代理。</li>
+            </ul>
+          </section>
+          <section data-operator="go-back">
+            <h2 id="operator-go-back">后退</h2>
+            <p>
+              让工作流的标签页在浏览历史中后退一页。<a
+                href="https://www.goautoma.com/extension/docs/blocks/go-back.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-6">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>禁用此算子</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>标准设置；运行时跳过此算子。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-6">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-6">Browser Copilot 说明</h3>
+            <ul>
+              <li>导航发生在工作流正在驱动的标签页上，不一定是你眼前激活的标签页。</li>
+              <li>
+                步骤在发出导航后即返回；后续读取应轮询选择器，后续操作应开启<strong>等待选择器</strong>。
+              </li>
+              <li>标签页必须有上一条历史记录；否则浏览器会报错，步骤失败。</li>
+            </ul>
+          </section>
+          <section data-operator="forward-page">
+            <h2 id="operator-forward-page">前进</h2>
+            <p>让工作流的标签页在浏览历史中前进一页。Automa 上游没有对应页面。</p>
+            <h3 id="设置-7">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>禁用此算子</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>标准设置；运行时跳过此算子。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-7">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-7">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                此算子是为了与<strong>后退</strong>配对而保留在 Browser Copilot 中的；Automa
+                上游文档没有对应页面。
+              </li>
+              <li>它在运行的标签页上调用浏览器的前进导航，不会等待页面加载完成。</li>
+              <li>
+                标签页必须有下一条历史记录，通常意味着同一个标签页之前执行过<strong>后退</strong>。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="close-tab">
+            <h2 id="operator-close-tab">关闭标签页</h2>
+            <p>
+              关闭工作流正在驱动的标签页，并跟随浏览器在其位置激活的标签页。<a
+                href="https://www.goautoma.com/extension/docs/blocks/close-tab.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-8">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>关闭</td>
+                    <td>下拉选择</td>
+                    <td><code>tab</code></td>
+                    <td><code>tab</code> 或 <code>window</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>关闭当前标签页</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>关闭运行当前的标签页。</td>
+                  </tr>
+                  <tr>
+                    <td>匹配模式</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><strong>关闭当前标签页</strong>关闭时显示的网址匹配模式。</td>
+                  </tr>
+                  <tr>
+                    <td>关闭所有窗口</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>选择 <code>window</code> 时显示。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-8">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-8">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                当前构建会忽略<strong>关闭</strong>、匹配模式和<strong>关闭所有窗口</strong>：它始终关闭运行所在窗口的当前标签页。
+              </li>
+              <li>
+                关闭后，运行会绑定到浏览器随后激活的标签页，后续步骤不会继续指向已失效的标签页。
+              </li>
+              <li>关闭窗口的最后一个标签页时，该窗口也会关闭。</li>
+            </ul>
+          </section>
+          <section data-operator="take-screenshot">
+            <h2 id="operator-take-screenshot">截图</h2>
+            <p>
+              截取可见页面、整页或某个元素，并保存图像。<a
+                href="https://www.goautoma.com/extension/docs/blocks/take-screenshot.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-9">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>截图范围</td>
+                    <td>下拉选择</td>
+                    <td><code>page</code></td>
+                    <td>
+                      <code>page</code>（可见区域）、<code>fullpage</code> 或 <code>element</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>CSS 选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>element</code> 的定位器，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>Image quality (100%)</td>
+                    <td>滑块</td>
+                    <td><code>100</code></td>
+                    <td>JPEG 质量；仅在可见区域 JPEG 截图时显示并生效。</td>
+                  </tr>
+                  <tr>
+                    <td>保存截图到本地</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>把图像写入文件。</td>
+                  </tr>
+                  <tr>
+                    <td>文件名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>保存文件的基础名称，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>类型</td>
+                    <td>下拉选择</td>
+                    <td><code>png</code></td>
+                    <td>保存可见区域截图时可选 <code>png</code> 或 <code>jpeg</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>插入截图到数据表</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>以 data URL 形式追加到指定列。</td>
+                  </tr>
+                  <tr>
+                    <td>选择列</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>开启<strong>插入截图到数据表</strong>时使用的列名。</td>
+                  </tr>
+                  <tr>
+                    <td>赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>用自定义变量名发布图像。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>自定义输出名。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-9">输出</h3>
+            <ul>
+              <li>
+                <strong>变量名</strong>为空时写入 <code>{{lastScreenshot}}</code>，否则写入
+                <code>{{&lt;name&gt;}}</code>。图像是 data URL。
+              </li>
+              <li>
+                <strong>保存截图到本地</strong>成功时，<code>{{lastScreenshotPath}}</code>
+                接收文件名。
+              </li>
+              <li>开启<strong>插入截图到数据表</strong>时，data URL 追加到指定列。</li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-9">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                整页和元素截图固定为 PNG。这两种模式选择 JPEG 会实际保存
+                <code>.png</code> 文件并记录一条警告；JPEG 质量只对可见区域截图生效。
+              </li>
+              <li>
+                写入磁盘时，先使用设置的下载目录，再打开侧面板的保存对话框，最后是扩展存储中的无人值守目录
+                <code>browser-copilot-downloads/</code>。
+              </li>
+              <li>
+                把截图存入数据列会让工作流的数据表变得很大；整页大图建议使用<strong>保存截图到本地</strong>。
+              </li>
+              <li>可见区域截图会在必要时恢复最小化窗口；截图失败时会给出浏览器底层错误。</li>
+            </ul>
+          </section>
+          <section data-operator="read-page">
+            <h2 id="operator-read-page">读取页面</h2>
+            <p>
+              读取当前标签页的可见文本、选中文本或 HTML，写入变量，并可按需写入数据表。Automa
+              上游没有对应页面。
+            </p>
+            <h3 id="设置-10">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Read</td>
+                    <td>下拉选择</td>
+                    <td><code>text</code></td>
+                    <td>
+                      <code>text</code>（可见文本）、<code>selection</code> 或 <code>html</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Element (optional)</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>限定文本或 HTML 读取范围的 CSS 选择器；留空读取整个文档。</td>
+                  </tr>
+                  <tr>
+                    <td>Max characters</td>
+                    <td>数字</td>
+                    <td><code>20000</code></td>
+                    <td>返回字符串的上限；正文被截断时会记录一条提示。</td>
+                  </tr>
+                  <tr>
+                    <td>赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>用自定义变量名发布结果。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>结果的自定义输出名。</td>
+                  </tr>
+                  <tr>
+                    <td>插入到数据表</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>把结果写入数据表。</td>
+                  </tr>
+                  <tr>
+                    <td>选择列</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>接收结果的列名。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-10">输出</h3>
+            <ul>
+              <li>
+                <strong>变量名</strong>为空时写入 <code>{{lastReadPage}}</code>，否则写入
+                <code>{{&lt;name&gt;}}</code>。两种情况下 <code>lastReadPage</code> 都会更新。
+              </li>
+              <li>
+                开启<strong>插入到数据表</strong>时，每次运行写入一个值，循环中每次迭代写入一行。
+              </li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-10">Browser Copilot 说明</h3>
+            <ul>
+              <li>此算子专属于 Browser Copilot，Automa 没有对应页面。</li>
+              <li>
+                <code>selection</code>
+                会忽略元素范围，读取用户当前的选中内容。没有选中文本时只记录错误，不会让步骤失败。
+              </li>
+              <li>
+                <code>html</code> 返回限定元素的 <code>outerHTML</code> 或整个文档，并受
+                <strong>Max characters</strong> 限制。
+              </li>
+              <li>
+                文本读取或限定元素的 HTML
+                读取结果为空时，步骤会失败，规则与<strong>获取文本</strong>一致。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="browser-event">
+            <h2 id="operator-browser-event">
+              浏览器事件<span
+                class="ml-3 inline-flex translate-y-[-2px] items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                >占位实现</span
+              >
+            </h2>
+            <p>
+              原本用于暂停到某个标签页、网络或下载事件发生，但此算子在当前构建中只是占位。<a
+                href="https://www.goautoma.com/extension/docs/blocks/browser-event.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-11">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>事件</td>
+                    <td>下拉选择</td>
+                    <td><code>tab:loaded</code></td>
+                    <td>编辑器列表中的标签页、网络或下载事件。</td>
+                  </tr>
+                  <tr>
+                    <td>超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>10000</code></td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>设为活动标签页</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>仅标签页事件。</td>
+                  </tr>
+                  <tr>
+                    <td>等待标签页网址</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>tab:loaded</code> 使用的网址模式。</td>
+                  </tr>
+                  <tr>
+                    <td>下载文件名查询</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>download:created</code> 使用的文件名子串。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-11">输出</h3>
+            <p>无输出。执行器记录一条提示后立即返回。</p>
+            <h3 id="browser-copilot-说明-11">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                <strong>占位实现。</strong> 执行器既不订阅浏览器事件也不等待；步骤一开始就立即完成。
+              </li>
+              <li>
+                <strong>超时</strong
+                >、<strong>设为活动标签页</strong>和两个过滤字段会保存，但没有任何效果。
+              </li>
+              <li>
+                需要等待页面状态时，请用<strong>延时</strong>加读取或<strong>元素是否存在</strong>；需要拿到下载文件时，请用<strong>处理下载</strong>。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="handle-dialog">
+            <h2 id="operator-handle-dialog">处理对话框</h2>
+            <p>
+              安装处理器，用于接受或关闭页面的 JavaScript 对话框。<a
+                href="https://www.goautoma.com/extension/docs/blocks/handle-dialog.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-12">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>接受对话框</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>对 <code>confirm()</code> 对话框选择接受而不是取消。</td>
+                  </tr>
+                  <tr>
+                    <td>提示文本（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>prompt()</code> 的回答；仅在接受时显示。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-12">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-12">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                算子会改写页面的对话框处理器，影响之后出现的对话框：<code>confirm()</code>
+                返回接受值，设置了提示文本时 <code>prompt()</code> 返回该文本，<code
+                  >beforeunload</code
+                >
+                提示会被抑制。
+              </li>
+              <li>
+                它不会关闭已经打开的
+                <code>alert()</code>，因为原生对话框阻塞页面时页面脚本无法运行。
+              </li>
+              <li>
+                冻结或重定义了对话框函数的页面可能无法改写；步骤仍会报告成功，因此对话框很关键时请验证下一步操作。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="handle-download">
+            <h2 id="operator-handle-download">处理下载</h2>
+            <p>
+              等待浏览器下载并保存其详细信息。<a
+                href="https://www.goautoma.com/extension/docs/blocks/handle-download.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-13">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>20000</code></td>
+                    <td>查找匹配下载的时长。</td>
+                  </tr>
+                  <tr>
+                    <td>文件下载 ID（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>文件名（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>与下载文件完整路径匹配的子串。</td>
+                  </tr>
+                  <tr>
+                    <td>冲突时</td>
+                    <td>下拉选择</td>
+                    <td><code>uniquify</code></td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>等待文件下载完成</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>轮询直到出现匹配下载或超时。</td>
+                  </tr>
+                  <tr>
+                    <td>赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>用自定义变量名发布记录。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>自定义输出名。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-13">输出</h3>
+            <ul>
+              <li>
+                <strong>变量名</strong>为空时写入 <code>{{lastDownload}}</code>，否则写入
+                <code>{{&lt;name&gt;}}</code>。
+              </li>
+              <li>
+                值是匹配项的 <code>{ id, filename, url }</code>；超时内没有匹配时为
+                <code>null</code>。
+              </li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-13">Browser Copilot 说明</h3>
+            <ul>
+              <li>匹配方式是文件名子串。没有填写文件名时，使用浏览器返回的最近一次下载。</li>
+              <li>
+                <strong>文件下载 ID</strong
+                >和<strong>冲突时</strong>会保存但不使用；算子只记录元数据，不会重命名、移动或删除文件。
+              </li>
+              <li>没有找到下载不算错误：输出为 <code>null</code>，后续条件可以据此分支。</li>
+            </ul>
+          </section>
+          <section data-operator="save-local">
+            <h2 id="operator-save-local">保存到本地</h2>
+            <p>把插值后的文本写入本地文件。Automa 上游没有对应页面。</p>
+            <h3 id="设置-14">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>内容</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>要写入的文本，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>文件名（含扩展名）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      包含扩展名的文件名，留空时回退为 <code>file.txt</code>，支持
+                      <code>{{variables}}</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>保存方式</td>
+                    <td>下拉选择</td>
+                    <td><code>auto</code></td>
+                    <td>
+                      <code>auto</code>、<code>force</code> 或 <code>manual</code>；详见说明。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>输出变量名（保存路径）</td>
+                    <td>文本</td>
+                    <td><code>lastSavedPath</code></td>
+                    <td>接收已保存文件名的变量。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-14">输出</h3>
+            <ul>
+              <li>
+                成功写入文件时，<code>{{lastSavedPath}}</code>
+                或自定义的**输出变量名（保存路径）**接收文件名。
+              </li>
+              <li>保存被取消或失败时，变量保持原值。</li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-14">Browser Copilot 说明</h3>
+            <ul>
+              <li>此算子专属于 Browser Copilot，Automa 没有对应页面。</li>
+              <li>
+                <strong>保存方式</strong
+                >会保存但当前构建不会应用。写入时先使用设置的下载目录，再打开侧面板保存对话框，最后是扩展存储中的无人值守目录
+                <code>browser-copilot-downloads/</code>。
+              </li>
+              <li>内容为空时步骤失败。引用解析为空字符串时同样失败，避免误写 0 字节文件。</li>
+              <li>
+                数据表请用<strong>导出数据</strong>，媒体文件请用<strong>保存资源</strong>；此算子只写文本。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="reload-tab">
+            <h2 id="operator-reload-tab">刷新标签页</h2>
+            <p>
+              刷新工作流的标签页；填写网址时改为在该标签页打开该地址。<a
+                href="https://www.goautoma.com/extension/docs/blocks/reload-tab.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-15">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>网址（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      留空则刷新当前页面；填写则在运行的标签页中打开该地址，支持
+                      <code>{{variables}}</code>。
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-15">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-15">Browser Copilot 说明</h3>
+            <ul>
+              <li>网址留空时刷新运行正在驱动的标签页，而不是眼前恰好激活的标签页。</li>
+              <li>
+                填写网址时在同一个标签页中导航并等待新文档加载，不会另开标签页。需要新标签页请用<strong>新建标签页</strong>。
+              </li>
+              <li>刷新后页面会重新渲染，后续读取应轮询选择器。</li>
+            </ul>
+          </section>
+          <section data-operator="tab-url">
+            <h2 id="operator-tab-url">标签页网址</h2>
+            <p>
+              读取当前标签页或窗口中所有标签页的网址。<a
+                href="https://www.goautoma.com/extension/docs/blocks/tab-url.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-16">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>选择标签页</td>
+                    <td>下拉选择</td>
+                    <td><code>active-tab</code></td>
+                    <td>
+                      <code>active-tab</code> 返回一个网址；<code>all</code>
+                      返回运行所在窗口的所有标签页。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>匹配模式（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>all</code> 模式下随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>标签页标题（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>all</code> 模式下随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>用自定义变量名发布网址。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>自定义输出名。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-16">输出</h3>
+            <ul>
+              <li>
+                <strong>变量名</strong>为空时写入 <code>{{lastTabUrl}}</code>，否则写入
+                <code>{{&lt;name&gt;}}</code>。
+              </li>
+              <li>
+                <code>active-tab</code> 返回一个网址字符串。<code>all</code> 返回用换行连接的网址。
+              </li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-16">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                可选的匹配模式和标题过滤会保存，但当前构建会忽略；<code>all</code>
+                始终返回运行所在窗口中的所有标签页。
+              </li>
+              <li>
+                只返回网址，不返回标题或标签页 id。需要标签页对象时请用<strong>当前标签页</strong>。
+              </li>
+              <li>编辑器没有数据列字段；结果只写入变量。</li>
+            </ul>
+          </section>
+          <section data-operator="cookie">
+            <h2 id="operator-cookie">Cookie</h2>
+            <p>
+              获取、设置或删除浏览器 Cookie。<a
+                href="https://www.goautoma.com/extension/docs/blocks/cookie.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-17">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>操作</td>
+                    <td>下拉选择</td>
+                    <td><code>get</code></td>
+                    <td><code>get</code>、<code>set</code> 或 <code>remove</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>获取所有 Cookie</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>读取全部 Cookie，而不是一个指定名称的 Cookie。</td>
+                  </tr>
+                  <tr>
+                    <td>使用 JSON 格式</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>以 JSON 描述 Cookie 操作；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>网址</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>Cookie 的网址。<code>set</code> 和 <code>remove</code> 必填。</td>
+                  </tr>
+                  <tr>
+                    <td>名称</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      Cookie 名称。<code>get</code>、<code>set</code> 和
+                      <code>remove</code> 均必填。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>值（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>set</code> 写入的值，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>路径（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>域名（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>SameSite（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>过期时间（秒，可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>set</code> 使用的过期时间；留空表示会话 Cookie。</td>
+                  </tr>
+                  <tr>
+                    <td>仅 HTTP</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>安全</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>用自定义变量名发布读取结果。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>get</code> 的自定义输出名。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-17">输出</h3>
+            <ul>
+              <li>
+                <code>get</code>：<strong>变量名</strong>为空时写入
+                <code>{{lastCookie}}</code>，否则写入 <code>{{&lt;name&gt;}}</code>，内容是 Cookie
+                值或空字符串。
+              </li>
+              <li>
+                <code>get</code> 且勾选<strong>获取所有 Cookie</strong> 时，变量接收 Cookie
+                对象数组。
+              </li>
+              <li><code>set</code> 和 <code>remove</code>：无输出。</li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-17">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                只把网址、名称、值和过期时间传给浏览器
+                API。<strong>路径</strong>、<strong>域名</strong>、<strong>SameSite</strong>、<strong
+                  >仅 HTTP</strong
+                >、<strong>安全</strong>、<strong>session</strong> 和 JSON
+                编辑器会保存，但当前构建不会应用。
+              </li>
+              <li>
+                <code>set</code> 和 <code>remove</code> 需要网址；<code>remove</code> 还需要名称。
+              </li>
+              <li>读取不存在的 Cookie 会写入空字符串而不是失败，使用前请先检查值。</li>
+            </ul>
+          </section>
+          <section data-operator="ocr">
+            <h2 id="operator-ocr">
+              OCR 识别<span
+                class="ml-3 inline-flex translate-y-[-2px] items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                >仅完整版可用</span
+              >
+            </h2>
+            <p>
+              对图片变量、页面元素或上一次页面快照运行本地 Tesseract.js OCR。Automa
+              上游没有对应页面。此算子仅存在于 Browser Copilot 中。
+            </p>
+            <h3 id="设置-18">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>输入图片</td>
+                    <td>下拉选择</td>
+                    <td><code>page</code></td>
+                    <td>
+                      <code>variable</code>、<code>element</code> 或
+                      <code>page</code>（上一次可见页面快照）。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>图片变量（data URL / base64 / 链接）</td>
+                    <td>文本</td>
+                    <td><code>lastScreenshot</code></td>
+                    <td><code>variable</code> 模式读取的变量。</td>
+                  </tr>
+                  <tr>
+                    <td>CSS 选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      <code>element</code> 模式读取的元素，可为 <code>img</code>、<code
+                        >canvas</code
+                      >
+                      或无文本容器。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>OCR 语言（留空 = 使用全局设置）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      用 <code>+</code> 连接的 Tesseract 语言代码，例如 <code>eng+chi_sim</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>识别前预处理图片（放大 + 增强对比度）</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>预处理图片；失败时回退到原图。</td>
+                  </tr>
+                  <tr>
+                    <td>输出变量（字符串类型）</td>
+                    <td>文本</td>
+                    <td><code>lastOcrText</code></td>
+                    <td>接收识别文本的变量。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-18">输出</h3>
+            <ul>
+              <li>
+                <strong>输出变量</strong>为空时写入 <code>{{lastOcrText}}</code>，否则写入
+                <code>{{&lt;name&gt;}}</code>。值始终是字符串。
+              </li>
+              <li>识别结果为空时步骤会失败，并给出截图、语言和预处理方面的诊断信息。</li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-18">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                <strong>仅完整 OCR 构建可用。</strong> 无 OCR 版本不编译 Tesseract.js（<code
+                  >OCR_SUPPORTED</code
+                >
+                为 false）；编辑器会禁用该算子，执行器也会拒绝运行。
+              </li>
+              <li>OCR 使用 Tesseract.js 和本地语言数据在设备上运行，图片不会上传到任何地方。</li>
+              <li>
+                元素来源只使用 CSS 选择器。导入的<strong>查找元素方式</strong>会被忽略，XPath
+                表达式无法解析。
+              </li>
+              <li>
+                <strong>OCR 语言</strong>留空时使用全局的<strong>本地 OCR 语言</strong
+                >设置。缺少语言包会让识别失败，而不会静默回退。
+              </li>
+            </ul>
+          </section>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">本页目录</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#operator-active-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >当前标签页</a
+            ><a
+              href="#operator-new-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >新建标签页</a
+            ><a
+              href="#operator-switch-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >切换标签页</a
+            ><a
+              href="#operator-new-window"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >新建窗口</a
+            ><a
+              href="#operator-proxy"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >代理</a
+            ><a
+              href="#operator-go-back"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >后退</a
+            ><a
+              href="#operator-forward-page"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >前进</a
+            ><a
+              href="#operator-close-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >关闭标签页</a
+            ><a
+              href="#operator-take-screenshot"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >截图</a
+            ><a
+              href="#operator-read-page"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >读取页面</a
+            ><a
+              href="#operator-browser-event"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >浏览器事件</a
+            ><a
+              href="#operator-handle-dialog"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >处理对话框</a
+            ><a
+              href="#operator-handle-download"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >处理下载</a
+            ><a
+              href="#operator-save-local"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >保存到本地</a
+            ><a
+              href="#operator-reload-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >刷新标签页</a
+            ><a
+              href="#operator-tab-url"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >标签页网址</a
+            ><a
+              href="#operator-cookie"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Cookie</a
+            ><a
+              href="#operator-ocr"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >OCR 识别</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/operators-browser.zh-CN.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >在 GitHub 上编辑此页</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>由 docs/workflow 生成</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="operators-interaction-zh.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← 上一页</span
+            ><span class="text-sm text-ink">页面交互</span></a
+          ><a
+            href="operators-general-zh.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">下一页 →</span
+            ><span class="text-sm text-ink">通用</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">本页目录</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#operator-active-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >当前标签页</a
+            ><a
+              href="#operator-new-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >新建标签页</a
+            ><a
+              href="#operator-switch-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >切换标签页</a
+            ><a
+              href="#operator-new-window"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >新建窗口</a
+            ><a
+              href="#operator-proxy"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >代理</a
+            ><a
+              href="#operator-go-back"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >后退</a
+            ><a
+              href="#operator-forward-page"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >前进</a
+            ><a
+              href="#operator-close-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >关闭标签页</a
+            ><a
+              href="#operator-take-screenshot"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >截图</a
+            ><a
+              href="#operator-read-page"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >读取页面</a
+            ><a
+              href="#operator-browser-event"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >浏览器事件</a
+            ><a
+              href="#operator-handle-dialog"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >处理对话框</a
+            ><a
+              href="#operator-handle-download"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >处理下载</a
+            ><a
+              href="#operator-save-local"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >保存到本地</a
+            ><a
+              href="#operator-reload-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >刷新标签页</a
+            ><a
+              href="#operator-tab-url"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >标签页网址</a
+            ><a
+              href="#operator-cookie"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Cookie</a
+            ><a
+              href="#operator-ocr"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >OCR 识别</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm 非商业许可 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

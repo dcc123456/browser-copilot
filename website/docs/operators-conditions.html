@@ -1,0 +1,1333 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Control flow operators — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="Branches, element checks, while loops, data loops, element loops, repeats, and loop breakpoints."
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-conditions.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-conditions.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-conditions-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-conditions.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Control flow operators — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="Branches, element checks, while loops, data loops, element loops, repeats, and loop breakpoints."
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/operators-conditions.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Control flow operators — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="Branches, element checks, while loops, data loops, element loops, repeats, and loop breakpoints."
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index.html" class="text-sm text-ink">Docs</a>
+          <a
+            href="../index.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >Features</a
+          >
+          <a
+            href="../index.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >How it works</a
+          >
+          <a
+            href="operators-conditions-zh.html"
+            class="text-sm text-muted transition-colors hover:text-ink"
+            >中文</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">Start</p>
+            <nav class="space-y-1">
+              <a
+                href="index.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Overview</a
+              ><a
+                href="getting-started.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Getting started</a
+              ><a
+                href="concepts.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Workflow concepts</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+              Operators
+            </p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Web interaction</a
+              ><a
+                href="operators-browser.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Browser</a
+              ><a
+                href="operators-general.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >General</a
+              ><a
+                href="operators-data.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Data</a
+              ><a
+                href="operators-conditions.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >Control flow</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">Documentation menu</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Start
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Overview</a
+                ><a
+                  href="getting-started.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Getting started</a
+                ><a
+                  href="concepts.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Workflow concepts</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Operators
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Web interaction</a
+                ><a
+                  href="operators-browser.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Browser</a
+                ><a
+                  href="operators-general.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >General</a
+                ><a
+                  href="operators-data.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Data</a
+                ><a
+                  href="operators-conditions.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >Control flow</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a><span>/</span
+          ><span class="text-muted">Control flow</span>
+        </div>
+        <article class="docs-prose">
+          <h1>Control flow operators</h1>
+          <p>
+            This page covers the operators that decide where a run goes or how often it repeats:
+            <strong>Conditions</strong>, <strong>Element exists</strong>, the four loops, and the
+            block that ends a loop early. Each section lists the operator&#39;s settings, its
+            outputs, and the behavior that is specific to Browser Copilot. Branch ports and the
+            loop-back edge are explained once in
+            <a href="concepts.html#ports-branches-and-loops">Workflow concepts</a>, and failed steps
+            follow
+            <a href="concepts.html#errors-retries-and-reliability"
+              >Errors, retries, and reliability</a
+            >; the common <strong>Description</strong>, <strong>Disable block</strong>,
+            <strong>Block timeout</strong>, and <strong>On error</strong> settings apply to every
+            node and are not repeated in the tables. Locators accept a CSS selector or an XPath
+            expression, and data fields accept <code>{{variables}}</code>.
+          </p>
+          <section data-operator="repeat-task">
+            <h2 id="operator-repeat-task">Repeat task</h2>
+            <p>
+              Runs the attached branch a fixed number of times, then continues from the
+              <strong>end</strong> output.
+              <a href="https://www.goautoma.com/extension/docs/blocks/repeat-task.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Repeat count</td>
+                    <td>Number</td>
+                    <td><code>1</code></td>
+                    <td>
+                      How many times the branch runs. <code>0</code> skips the body and continues
+                      straight from <strong>end</strong>.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs">Outputs</h3>
+            <ul>
+              <li>
+                <code>loopIndex</code> — zero-based repetition number, written before each
+                repetition and left at the last value afterwards.
+              </li>
+              <li>
+                <code>loop</code> (<code>output-1</code>) starts the body;
+                <code>end</code> (<code>output-2</code>) is the continuation after the last
+                repetition.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The body closes by routing its last step back to this node. Reaching the loop node
+                again ends one repetition; see
+                <a href="concepts.html#ports-branches-and-loops">ports, branches, and loops</a>.
+              </li>
+              <li>
+                With <code>0</code> the body never runs, but the <strong>end</strong> path still
+                does.
+              </li>
+              <li>
+                No <code>loopItem</code> is published — the repetition number is the only loop
+                context here.
+              </li>
+              <li>
+                A failing body step stops the loop and the run; the <strong>end</strong> path is not
+                followed. See
+                <a href="concepts.html#errors-retries-and-reliability">errors and reliability</a>.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="conditions">
+            <h2 id="operator-conditions">Conditions</h2>
+            <p>
+              Evaluates its named output paths from top to bottom and continues on the first path
+              whose conditions all hold, or on <strong>fallback</strong> when none do.
+              <a href="https://www.goautoma.com/extension/docs/blocks/conditions.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-2">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Output paths</td>
+                    <td>List</td>
+                    <td>None</td>
+                    <td>
+                      Ordered branches. Each entry owns one output port and its own condition tree.
+                      Up to 20 paths; <strong>Add path</strong> is disabled at the limit.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Path name</td>
+                    <td>Text</td>
+                    <td><code>Path N</code></td>
+                    <td>
+                      Label shown on that path&#39;s port and in the run log. Renaming keeps the
+                      path id, so existing connections survive it.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Path conditions</td>
+                    <td>Condition tree</td>
+                    <td>Empty</td>
+                    <td>
+                      OR groups of AND rows. Every row in a group must hold, and one group must
+                      hold, for the path to match. A path with no rows never matches.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Retry if no conditions are met</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Saved with the operator; this build does not re-evaluate (see the notes).
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Times</td>
+                    <td>Number</td>
+                    <td><code>10</code></td>
+                    <td>Shown only while <strong>Retry if no conditions are met</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>1000</code></td>
+                    <td>Shown only while <strong>Retry if no conditions are met</strong> is on.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-2">Outputs</h3>
+            <ul>
+              <li>
+                One port per configured path, keyed <code>output-&lt;pathId&gt;</code> and labelled
+                with the path name, plus an always-present <strong>fallback</strong> port
+                (<code>output-none</code>).
+              </li>
+              <li>
+                No variable is published; the run log names the path that matched, or reports that
+                none did.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-2">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Only the first match runs. Change the evaluation order with the path&#39;s move-up /
+                move-down buttons instead of duplicating conditions.
+              </li>
+              <li>
+                An empty path is skipped rather than treated as always true, so a half-configured
+                branch cannot swallow the run.
+              </li>
+              <li>
+                Ports are exclusive: when a path matches but its port has no connection, the run
+                ends there instead of falling through to another path. See
+                <a href="concepts.html#ports-branches-and-loops">ports, branches, and loops</a>.
+              </li>
+              <li>
+                Imported workflows may carry a legacy <code>code</code> expression; it wins over
+                <code>paths</code> and the node then uses <code>output-1</code> (true) and
+                <code>output-2</code> (false). The editor writes <code>paths</code>, which is
+                authoritative whenever the key exists — including an empty list, which routes every
+                run to <strong>fallback</strong>.
+              </li>
+              <li>
+                <strong>Retry if no conditions are met</strong> and its two numbers are stored for
+                round-tripping but are not applied by the engine in this build. A
+                <strong>Delay</strong> step before the node, or a <strong>While loop</strong> driven
+                by the page, is the working alternative.
+              </li>
+              <li>
+                A condition row compares two values with an operator (<code>Equals</code>,
+                <code>Contains</code>, numeric comparisons, a regex, …) or stands alone: element
+                exists / not exists / visible, data exists, or a code snippet. Element checks run
+                against the current page after interpolation.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="element-exists">
+            <h2 id="operator-element-exists">Element exists</h2>
+            <p>
+              Takes the <strong>exists</strong> port when the locator matches at least one element
+              and the <strong>not exists</strong> port when it matches none.
+              <a href="https://www.goautoma.com/extension/docs/blocks/element-exists.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-3">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td>
+                      <code>cssSelector</code>, <code>xpath</code>, or <code>text</code>. XPath is
+                      recognised from the value itself.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Locator to probe. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Select multiple elements</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Shared locator option; the check already means &quot;one or more&quot;, so
+                      this changes nothing here.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Saved by the shared locator options; this build probes once (see the notes).
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Shown only while <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Try for</td>
+                    <td>Number</td>
+                    <td><code>1</code></td>
+                    <td>Number of attempts the form records for the check.</td>
+                  </tr>
+                  <tr>
+                    <td>Timeout (milliseconds)</td>
+                    <td>Number</td>
+                    <td><code>500</code></td>
+                    <td>Pause between the recorded attempts.</td>
+                  </tr>
+                  <tr>
+                    <td>Throw an error if doesn&#39;t exist</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Recorded intent: fail the step instead of taking <strong>not exists</strong>.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-3">Outputs</h3>
+            <ul>
+              <li>
+                <code>exists</code> (<code>output-1</code>) and
+                <code>not exists</code> (<code>output-2</code>). Both are exclusive branches; an
+                unwired port ends the run.
+              </li>
+              <li>No variable is written — the match count only appears in the run log.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-3">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The engine performs one probe. <strong>Try for</strong>,
+                <strong>Timeout (milliseconds)</strong>, <strong>Wait for selector</strong>, and
+                <strong>Throw an error if doesn&#39;t exist</strong> travel with the block but are
+                not consumed here, so a late element lands on <strong>not exists</strong> even with
+                the throw option on. Add a <strong>Delay</strong> before this node, or wait on the
+                step that actually needs the element.
+              </li>
+              <li>
+                Existence is &quot;count greater than zero&quot;: hidden elements still count, and
+                the locator does not need to be unique.
+              </li>
+              <li>
+                <strong>Find by → Text</strong> is stored but not turned into a text search; the
+                value is queried as a selector. Use a CSS or XPath locator here, or an
+                <strong>Element text</strong> row inside <strong>Conditions</strong>.
+              </li>
+              <li>
+                Wire both ports when the run should continue either way; leaving one unconnected
+                ends the run on that verdict.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="while-loop">
+            <h2 id="operator-while-loop">While loop</h2>
+            <p>
+              Repeats the attached branch while its condition holds, testing the condition before
+              every iteration.
+              <a href="https://www.goautoma.com/extension/docs/blocks/while-loop.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-4">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>While loop condition</td>
+                    <td>Condition tree</td>
+                    <td>Unset</td>
+                    <td>
+                      OR groups of AND rows, built the same way as in <strong>Conditions</strong>.
+                      Evaluated before each iteration.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-4">Outputs</h3>
+            <ul>
+              <li><code>loopIndex</code> — zero-based iteration number inside the body.</li>
+              <li>
+                <code>loop</code> (<code>output-1</code>) runs the body;
+                <code>end</code> (<code>output-2</code>) is the continuation once the condition is
+                false.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-4">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                A false first check means zero iterations and the run continues on
+                <strong>end</strong>.
+              </li>
+              <li>
+                The loop is capped at 1,000 iterations. After the 1,001st iteration the run fails
+                with an iteration-limit error instead of spinning; the node is reported as failed
+                and <strong>end</strong> is not followed.
+              </li>
+              <li>
+                A node with no saved condition logs an error and runs zero iterations. The editor
+                opens with one OR group of two empty rows, but they are only written to the node
+                once you edit the tree — and empty compared with empty holds, so an unchanged
+                default tree would loop until the cap. Fill in real operands.
+              </li>
+              <li>
+                <strong>Stop loop</strong> leaves through <strong>end</strong>. A loop breakpoint
+                that only skips the current item still consumes one iteration against the cap, so a
+                body that always skips cannot bypass the guard.
+              </li>
+              <li>
+                A failing body step ends the loop and the run without following
+                <strong>end</strong>; see
+                <a href="concepts.html#errors-retries-and-reliability">errors and reliability</a>.
+              </li>
+              <li>
+                Imported workflows may carry a <code>code</code> expression instead of the tree. A
+                saved tree wins; the expression is used only when no tree is configured.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="loop-data">
+            <h2 id="operator-loop-data">Loop data</h2>
+            <p>
+              Iterates a data table, number range, variable, JSON array, or page element list,
+              publishing each item as <code>loopItem</code> and its position as
+              <code>loopIndex</code>.
+              <a href="https://www.goautoma.com/extension/docs/blocks/loop-data.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-5">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Loop ID</td>
+                    <td>Text</td>
+                    <td>Auto (6 chars)</td>
+                    <td>
+                      Names this loop for <strong>Loop breakpoint</strong> and for resume progress.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Loop through</td>
+                    <td>Select</td>
+                    <td><code>data-columns</code></td>
+                    <td>
+                      <code>data-columns</code> (Table), <code>numbers</code>,
+                      <code>google-sheets</code>, <code>variable</code>, <code>custom-data</code>,
+                      or <code>elements</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Reference key</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Google Sheets source only. Not usable in this build; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Variable source only. Dotted paths such as <code>order.items</code> read the
+                      same way <code>{{order.items}}</code> does.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Element selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Element source only. CSS or XPath; every match is iterated.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Element source only: poll until at least one match appears.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>
+                      Element source only; shown while <strong>Wait for selector</strong> is on.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Custom data (JSON array)</td>
+                    <td>Text</td>
+                    <td><code>[]</code></td>
+                    <td>
+                      JSON source. <strong>Import file</strong> also accepts <code>.json</code>,
+                      <code>.csv</code>, and <code>.xlsx</code> up to 1 MB.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>First row is the header</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>
+                      Import only; applies to spreadsheet files, so imported rows become objects
+                      keyed by column.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>From number</td>
+                    <td>Number</td>
+                    <td><code>1</code></td>
+                    <td>Numbers source: first value of the range.</td>
+                  </tr>
+                  <tr>
+                    <td>To number</td>
+                    <td>Number</td>
+                    <td><code>10</code></td>
+                    <td>
+                      Numbers source: last value, inclusive; the range counts down when
+                      <strong>From number</strong> is larger.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Max data to loop (0 to disable)</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Cap on iterations; <code>0</code> visits every item.</td>
+                  </tr>
+                  <tr>
+                    <td>Start from index</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>
+                      Skips that many items first. Hidden while
+                      <strong>Resume last workflow</strong> is on.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Resume last workflow</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Continue from the index saved before the last unfinished item.</td>
+                  </tr>
+                  <tr>
+                    <td>Reverse loop order</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Iterates the source backwards, before the start index and the cap apply.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-5">Outputs</h3>
+            <ul>
+              <li>
+                <code>loopIndex</code> — absolute position in the source, so the first item after
+                skipping three is <code>3</code>.
+              </li>
+              <li>
+                <code>loopItem</code> — the current item: an object for table rows and JSON items, a
+                number for a number range. Element loops set it to <code>null</code>.
+              </li>
+              <li>
+                One output port: the body. This loop has no <code>end</code> port; the after-loop
+                continuation is described in the notes.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-5">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                <strong>After-loop path</strong>: with a single output, the run continues after the
+                loop from the outgoing edge of the <strong>Loop breakpoint</strong> inside the body.
+                A body without one leaves the run with nowhere to go when the loop finishes. Graphs
+                imported with a legacy <code>end</code> port still use that edge as a fallback.
+              </li>
+              <li>
+                Source behavior:
+                <ul>
+                  <li>
+                    <strong>Table</strong> reads <code>dataTable</code>; an empty table logs an info
+                    line and iterates zero times.
+                  </li>
+                  <li>
+                    <strong>Numbers</strong> builds an inclusive range and ignores the start index,
+                    the cap, reverse order, and resume.
+                  </li>
+                  <li>
+                    <strong>Variable</strong> iterates an array as-is; JSON text is parsed first; a
+                    plain string iterates its characters; a number iterates <code>1..N</code>.
+                  </li>
+                  <li>
+                    <strong>Custom data</strong> must be a JSON array; empty or malformed data fails
+                    the run with a named reason.
+                  </li>
+                  <li>
+                    <strong>Element source</strong> counts matches once at loop start and publishes
+                    <code>loopElementSelector</code> for each one.
+                  </li>
+                  <li>
+                    <strong>Google Sheets</strong> is refused in this build (it needs OAuth
+                    credentials); import the sheet as custom data instead.
+                  </li>
+                </ul>
+              </li>
+              <li>
+                Preparation order is reverse first, then <strong>Start from index</strong>, then
+                <strong>Max data to loop</strong>. The source is snapshotted at loop start, so rows
+                the body appends are not visited by this loop.
+              </li>
+              <li>
+                <strong>Resume last workflow</strong> records the current index before each
+                item&#39;s body runs, so an interrupted run replays the unfinished item. Normal
+                completion and <strong>Stop loop</strong> clear the entry.
+              </li>
+              <li>
+                A failing body step stops the loop and the run without following the after-loop
+                path.
+              </li>
+              <li>
+                Invalid number bounds, a non-iterable variable, or an unknown source fail the run
+                with a message that names the loop; see
+                <a href="concepts.html#errors-retries-and-reliability">errors and reliability</a>.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="loop-elements">
+            <h2 id="operator-loop-elements">Loop elements</h2>
+            <p>
+              Iterates every element that matches the locator and publishes a selector for the
+              current element as <code>loopElementSelector</code>.
+              <a href="https://www.goautoma.com/extension/docs/blocks/loop-elements.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-6">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Loop ID</td>
+                    <td>Text</td>
+                    <td>Auto (6 chars)</td>
+                    <td>Identifies this loop for <strong>Loop breakpoint</strong>.</td>
+                  </tr>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>, <code>xpath</code>, or <code>text</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Locator for the set to iterate; every match is used. Accepts
+                      <code>{{variables}}</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Saved by the shared locator options; matches are counted once when the loop
+                      starts, with no polling.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Shown while <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Max data to loop (0 to disable)</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Cap on iterations; <code>0</code> visits every match.</td>
+                  </tr>
+                  <tr>
+                    <td>Reverse loop order</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Saved with the operator; this build iterates in document order.</td>
+                  </tr>
+                  <tr>
+                    <td>Load more elements: Action</td>
+                    <td>Select</td>
+                    <td><code>none</code></td>
+                    <td>
+                      <code>none</code>, click-element, click-link, scroll down, or scroll up. Saved
+                      only; see the notes.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Load more elements: Element selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Shown for the two click actions.</td>
+                  </tr>
+                  <tr>
+                    <td>Load more elements: Max seconds wait for more elements</td>
+                    <td>Number</td>
+                    <td><code>5</code></td>
+                    <td>Shown for click-element and both scroll actions.</td>
+                  </tr>
+                  <tr>
+                    <td>Load more elements: Scroll to bottom / top</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Shown for the scroll actions; the label follows the direction.</td>
+                  </tr>
+                  <tr>
+                    <td>Load more elements: Max seconds wait for the page to load</td>
+                    <td>Number</td>
+                    <td><code>10</code></td>
+                    <td>Shown for click-link.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-6">Outputs</h3>
+            <ul>
+              <li><code>loopIndex</code> — zero-based position in the matched set.</li>
+              <li>
+                <code>loopElementSelector</code> — a selector that targets the current element,
+                meant to be spliced into the body&#39;s own locators.
+              </li>
+              <li><code>loopItem</code> is not published by element loops.</li>
+              <li>
+                One output port: the body. The after-loop continuation leaves from the
+                <strong>Loop breakpoint</strong> inside the body, exactly as for
+                <strong>Loop data</strong>.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-6">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Use the published selector inside the body:
+                <code>{{loopElementSelector}} .price</code>, or as the locator of a click/read step.
+              </li>
+              <li>
+                Matches are counted once when the loop starts; elements added later are not visited.
+                Start a second loop for content that loads during the body.
+              </li>
+              <li>
+                When a unique selector cannot be produced for an iteration, the loop logs an error
+                line and leaves <code>loopElementSelector</code> empty. The body then fails on the
+                unresolved token instead of silently repeating the first element.
+              </li>
+              <li>
+                The <strong>Load more elements</strong> section and
+                <strong>Reverse loop order</strong> round-trip through Automa but are not executed
+                by this build. Load more content with a <strong>Scroll element</strong> or a click
+                step at the end of the body.
+              </li>
+              <li>
+                A failing body step stops the loop and the run without following the after-loop
+                path; see
+                <a href="concepts.html#errors-retries-and-reliability">errors and reliability</a>.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="loop-breakpoint">
+            <h2 id="operator-loop-breakpoint">Loop breakpoint</h2>
+            <p>
+              Ends the current iteration, or the whole loop, from anywhere inside a loop body.
+              <a href="https://www.goautoma.com/extension/docs/blocks/loop-breakpoint.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-7">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Loop ID</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Loop to break: the loop&#39;s <strong>Loop ID</strong> or its node id. Empty
+                      targets the innermost enclosing loop.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Stop loop</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Off skips the rest of the current item and moves to the next. On leaves the
+                      loop entirely.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-7">Outputs</h3>
+            <ul>
+              <li>
+                One output port. For <strong>Loop data</strong> and
+                <strong>Loop elements</strong> it is the loop&#39;s after-loop path, because those
+                loops have no <code>end</code> port of their own.
+              </li>
+              <li>No variable is written.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-7">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                In <strong>Loop data</strong> and <strong>Loop elements</strong>, the run continues
+                after the loop on this node&#39;s outgoing edge. A skip moves on to the next item
+                and remembers that edge for when the loop ends; <strong>Stop loop</strong> jumps to
+                it immediately.
+              </li>
+              <li>
+                In <strong>While loop</strong> and <strong>Repeat task</strong>, leaving the loop
+                goes through the loop&#39;s <strong>end</strong> port, not through this node&#39;s
+                edge. A skip still consumes one iteration against the while-loop cap.
+              </li>
+              <li>
+                An empty <strong>Loop ID</strong> breaks the innermost loop. Naming an outer
+                loop&#39;s ID unwinds the inner loops too and is handled by that outer loop.
+              </li>
+              <li>
+                Outside any loop, or with an ID that matches no enclosing loop, the block is ignored
+                with an info line and the run still succeeds.
+              </li>
+              <li>
+                The block is never retried, never fails, and never takes the error fallback: its
+                sentinel bypasses <strong>On error</strong> and is caught by the loop. See
+                <a href="concepts.html#errors-retries-and-reliability">errors and reliability</a>.
+              </li>
+              <li>
+                This is not the debugger marker. A debug pause comes from a
+                <code>$breakpoint</code> flag in block data, toggled from the block menu; it pauses
+                a testing run before that block and never ends a loop. Checkpoints are written as
+                each step settles, so a resume continues from the step after the last checkpointed
+                node.
+              </li>
+            </ul>
+          </section>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">On this page</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#operator-repeat-task"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Repeat task</a
+            ><a
+              href="#operator-conditions"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Conditions</a
+            ><a
+              href="#operator-element-exists"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Element exists</a
+            ><a
+              href="#operator-while-loop"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >While loop</a
+            ><a
+              href="#operator-loop-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Loop data</a
+            ><a
+              href="#operator-loop-elements"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Loop elements</a
+            ><a
+              href="#operator-loop-breakpoint"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Loop breakpoint</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/operators-conditions.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >Edit this page on GitHub</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>Generated from docs/workflow</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="operators-data.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← Previous</span
+            ><span class="text-sm text-ink">Data</span></a
+          ><span></span>
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">On this page</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#operator-repeat-task"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Repeat task</a
+            ><a
+              href="#operator-conditions"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Conditions</a
+            ><a
+              href="#operator-element-exists"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Element exists</a
+            ><a
+              href="#operator-while-loop"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >While loop</a
+            ><a
+              href="#operator-loop-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Loop data</a
+            ><a
+              href="#operator-loop-elements"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Loop elements</a
+            ><a
+              href="#operator-loop-breakpoint"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Loop breakpoint</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm Noncommercial 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

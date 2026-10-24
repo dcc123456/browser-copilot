@@ -1,0 +1,2027 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>页面交互算子 — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="使用 14 个页面交互算子完成点击、读取、填写、滚动、上传与脚本注入。"
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-interaction-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-interaction.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-interaction-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-interaction.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="页面交互算子 — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="使用 14 个页面交互算子完成点击、读取、填写、滚动、上传与脚本注入。"
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/operators-interaction-zh.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="页面交互算子 — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="使用 14 个页面交互算子完成点击、读取、填写、滚动、上传与脚本注入。"
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index-zh.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index-zh.html" class="text-sm text-ink">文档</a>
+          <a
+            href="../index-zh.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >功能</a
+          >
+          <a
+            href="../index-zh.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >工作原理</a
+          >
+          <a
+            href="operators-interaction.html"
+            class="text-sm text-muted transition-colors hover:text-ink"
+            >EN</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">开始</p>
+            <nav class="space-y-1">
+              <a
+                href="index-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >文档概览</a
+              ><a
+                href="getting-started-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >快速上手</a
+              ><a
+                href="concepts-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >工作流概念</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">算子</p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >页面交互</a
+              ><a
+                href="operators-browser-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >浏览器</a
+              ><a
+                href="operators-general-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >通用</a
+              ><a
+                href="operators-data-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >数据</a
+              ><a
+                href="operators-conditions-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >条件控制</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">文档菜单</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                开始
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >文档概览</a
+                ><a
+                  href="getting-started-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >快速上手</a
+                ><a
+                  href="concepts-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >工作流概念</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                算子
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >页面交互</a
+                ><a
+                  href="operators-browser-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >浏览器</a
+                ><a
+                  href="operators-general-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >通用</a
+                ><a
+                  href="operators-data-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >数据</a
+                ><a
+                  href="operators-conditions-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >条件控制</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a><span>/</span
+          ><span class="text-muted">页面交互</span>
+        </div>
+        <article class="docs-prose">
+          <h1>交互算子</h1>
+          <p>
+            本页介绍直接操作页面的算子：点击、读取、输入、滚动和派发事件。每个算子都列出设置、输出以及
+            Browser Copilot 特有的行为。
+          </p>
+          <p>
+            定位器支持 CSS 选择器、XPath 表达式或可见文本，所有数据字段都支持
+            <code>{{variables}}</code
+            >。步骤在运行所绑定的标签页上执行，不一定是你眼前激活的标签页。无法解析的引用会原样保留，并在运行日志中指明。通用的<strong>描述</strong>、<strong>禁用此算子</strong>、<strong>超时</strong>和<strong>出错时</strong>设置适用于整个节点，因此不在每个表格中重复。
+          </p>
+          <section data-operator="event-click">
+            <h2 id="operator-event-click">点击元素</h2>
+            <p>
+              点击定位器匹配到的第一个元素。<a
+                href="https://www.goautoma.com/extension/docs/blocks/event-click.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td>
+                      <code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。选择
+                      <code>text</code> 时，选择器字段填叶子元素的完整可见文本。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>目标元素的定位器，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择多个元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>通用定位选项；点击仍然只作用于第一个匹配项。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>点击前轮询等待元素出现。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>开启<strong>等待选择器</strong>后使用的轮询时长。</td>
+                  </tr>
+                  <tr>
+                    <td>执行时标记元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>运行时高亮目标，便于在编辑器中观察。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                目标被禁用或被其他元素遮挡时，点击会被拒绝；运行日志会指出遮挡元素，而不是穿透点击。
+              </li>
+              <li>
+                步骤在派发点击后即返回。如果点击触发了导航，请在其后接读取或等待，再依赖新页面。
+              </li>
+              <li>需要处理链接目标时用<strong>点击链接</strong>；按钮和其他控件用本算子。</li>
+            </ul>
+          </section>
+          <section data-operator="get-text">
+            <h2 id="operator-get-text">获取文本</h2>
+            <p>
+              读取一个或多个元素渲染出的文本，写入变量，并可按需写入数据表。<a
+                href="https://www.goautoma.com/extension/docs/blocks/get-text.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-2">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>要读取的元素的定位器，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择多个元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>读取全部匹配项并以数组输出，而不是只读第一个。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>读取前轮询等待元素出现。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>开启<strong>等待选择器</strong>后使用的轮询时长。</td>
+                  </tr>
+                  <tr>
+                    <td>执行时标记元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>运行时高亮目标。</td>
+                  </tr>
+                  <tr>
+                    <td>正则</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>表达式旗标（flags）</td>
+                    <td>多选</td>
+                    <td>无</td>
+                    <td><code>g</code>、<code>i</code>、<code>m</code>，随正则一起保存。</td>
+                  </tr>
+                  <tr>
+                    <td>文本前缀</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>保留该标记之后的文本。</td>
+                  </tr>
+                  <tr>
+                    <td>文本后缀</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>保留该标记之前的文本。</td>
+                  </tr>
+                  <tr>
+                    <td>包含 HTML 标签</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>返回元素的 <code>innerHTML</code>，而不是文本。</td>
+                  </tr>
+                  <tr>
+                    <td>使用 textContent</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>
+                      读取 <code>textContent</code>（包含隐藏节点），而不是渲染后的
+                      <code>innerText</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>插入到数据表</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>把读取结果写入数据表。</td>
+                  </tr>
+                  <tr>
+                    <td>选择列</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>接收数据的列名。写入数据表时必填。</td>
+                  </tr>
+                  <tr>
+                    <td>添加额外行</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>额外行的值</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>仅在开启<strong>添加额外行</strong>时显示。</td>
+                  </tr>
+                  <tr>
+                    <td>额外行列名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>仅在开启<strong>添加额外行</strong>时显示。</td>
+                  </tr>
+                  <tr>
+                    <td>赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>用自定义变量名发布结果。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>自定义输出名；未勾选<strong>赋值到变量</strong>时忽略。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-2">输出</h3>
+            <ul>
+              <li>
+                <strong>变量名</strong>为空时写入 <code>{{lastText}}</code>，否则写入
+                <code>{{&lt;name&gt;}}</code>。两种情况下 <code>lastText</code> 都会更新。
+              </li>
+              <li>开启<strong>选择多个元素</strong>时，值是一个字符串数组。</li>
+              <li>
+                开启<strong>插入到数据表</strong>时，每次运行写入一个值，循环中每次迭代写入一行。再次写入同一列会替换该单元格。
+              </li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-2">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                没有匹配到元素，或匹配到的文本全为空白时，步骤会失败，而不是发布空值。读取本来就是可选的场景请改用<strong>元素是否存在</strong>。
+              </li>
+              <li>
+                <strong>正则</strong
+                >和<strong>表达式旗标（flags）<strong>会随导入的工作流保存，但当前构建不会应用。可用</strong>正则变量</strong>或
+                <strong>JavaScript 代码</strong>过滤结果。
+              </li>
+              <li><strong>添加额外行</strong>及其两个字段同样只保存、不写入。</li>
+              <li>
+                存在标记时，<strong>文本前缀</strong>和<strong>文本后缀</strong>会保留前缀之后、后缀之前的子串。
+              </li>
+              <li>
+                开启<strong>插入到数据表</strong>但没有填列名时，算子会记录一条提示并跳过数据表写入。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="element-scroll">
+            <h2 id="operator-element-scroll">滚动元素</h2>
+            <p>
+              把页面或元素滚动到指定偏移量，或把元素滚动到可见区域。<a
+                href="https://www.goautoma.com/extension/docs/blocks/element-scroll.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-3">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td><code>html</code></td>
+                    <td>
+                      <code>html</code> 或 <code>window</code> 滚动页面；其他定位器滚动对应元素。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>选择多个元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>通用定位选项；只滚动第一个匹配项。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>滚动前轮询等待元素出现。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>开启<strong>等待选择器</strong>后使用的轮询时长。</td>
+                  </tr>
+                  <tr>
+                    <td>执行时标记元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>运行时高亮目标。</td>
+                  </tr>
+                  <tr>
+                    <td>横向滚动</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td>横向目标位置（像素）。</td>
+                  </tr>
+                  <tr>
+                    <td>纵向滚动</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td>纵向目标位置（像素）。</td>
+                  </tr>
+                  <tr>
+                    <td>滚动到可见</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>忽略偏移量，把元素滚动到可见区域。</td>
+                  </tr>
+                  <tr>
+                    <td>平滑滚动</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>平滑动画滚动，而不是立即跳转。</td>
+                  </tr>
+                  <tr>
+                    <td>Increment horizontal scroll</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>把<strong>横向滚动</strong>视为相对当前位置的增量。</td>
+                  </tr>
+                  <tr>
+                    <td>Increment vertical scroll</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>把<strong>纵向滚动</strong>视为相对当前位置的增量。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-3">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-3">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                使用默认的 <code>html</code> 选择器时滚动文档；使用
+                <code>window</code>
+                时同样滚动页面。只有在需要移动某个滚动容器时才填写具体元素选择器。
+              </li>
+              <li>
+                未勾选增量选项时，数值会作为目标位置传给
+                <code>scrollTo</code>，因此小于当前位置的值会向回滚动。
+              </li>
+              <li><strong>滚动到可见</strong>优先于偏移量，并忽略增量选项。</li>
+            </ul>
+          </section>
+          <section data-operator="link">
+            <h2 id="operator-link">点击链接</h2>
+            <p>
+              跟随链接元素，并可把目标地址放到新标签页打开。<a
+                href="https://www.goautoma.com/extension/docs/blocks/link.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-4">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>链接元素的定位器，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>点击前轮询等待链接出现。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>开启<strong>等待选择器</strong>后使用的轮询时长。</td>
+                  </tr>
+                  <tr>
+                    <td>执行时标记元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>运行时高亮目标。</td>
+                  </tr>
+                  <tr>
+                    <td>在新标签页打开</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>在新标签页打开目标，而不是在当前页跟随链接。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-4">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-4">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                算子会先读取链接的目标地址，再执行点击。<code>_self</code>
+                链接在开启<strong>在新标签页打开</strong>时会通过新标签页打开，而不是替换当前页面。
+              </li>
+              <li>步骤会等待目标标签页加载完成（最长约 15 秒）后才返回。</li>
+              <li>只跟随第一个匹配的链接；本算子隐藏了多元素选项。</li>
+            </ul>
+          </section>
+          <section data-operator="attribute-value">
+            <h2 id="operator-attribute-value">属性值</h2>
+            <p>
+              读取元素的属性到变量，或把值写入属性。<a
+                href="https://www.goautoma.com/extension/docs/blocks/attribute-value.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-5">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>元素定位器，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择多个元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>通用定位选项；只读取或写入第一个匹配项。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>操作前轮询等待元素出现。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>开启<strong>等待选择器</strong>后使用的轮询时长。</td>
+                  </tr>
+                  <tr>
+                    <td>执行时标记元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>运行时高亮目标。</td>
+                  </tr>
+                  <tr>
+                    <td>操作</td>
+                    <td>下拉选择</td>
+                    <td><code>get</code></td>
+                    <td><code>get</code> 读取属性；<code>set</code> 写入属性。</td>
+                  </tr>
+                  <tr>
+                    <td>属性名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>要读取或写入的属性，例如 <code>href</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>属性值</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>set</code> 写入的值，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>用自定义变量名发布读取结果。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>get</code> 的自定义输出名。</td>
+                  </tr>
+                  <tr>
+                    <td>插入到数据表</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>仅对 <code>get</code> 显示；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>选择列</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>开启<strong>插入到数据表</strong>时显示的列名。</td>
+                  </tr>
+                  <tr>
+                    <td>添加额外行</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>仅对 <code>get</code> 显示；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>额外行的值</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>仅在开启<strong>添加额外行</strong>时显示。</td>
+                  </tr>
+                  <tr>
+                    <td>额外行列名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>仅在开启<strong>添加额外行</strong>时显示。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-5">输出</h3>
+            <ul>
+              <li>
+                <code>get</code>：<strong>变量名</strong>为空时写入
+                <code>{{lastAttribute}}</code>，否则写入 <code>{{&lt;name&gt;}}</code>。
+              </li>
+              <li><code>set</code>：无输出。</li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-5">Browser Copilot 说明</h3>
+            <ul>
+              <li>元素不匹配或属性不存在时，读取会失败，而不是发布空字符串。</li>
+              <li>
+                <code>get</code>
+                会显示<strong>插入到数据表</strong>和<strong>添加额外行</strong>控件，但当前构建不会写入，只会设置变量。
+              </li>
+              <li>从布尔或数字属性读出的值仍然是字符串，因为它们来自 DOM。</li>
+            </ul>
+          </section>
+          <section data-operator="forms">
+            <h2 id="operator-forms">填写表单</h2>
+            <p>
+              填写文本框、选择下拉选项、切换复选框或单选框，或读取表单控件的当前值。<a
+                href="https://www.goautoma.com/extension/docs/blocks/forms.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-6">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>表单控件的定位器，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择多个元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>通用定位选项；只使用第一个匹配项。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>操作前轮询等待控件出现。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>开启<strong>等待选择器</strong>后使用的轮询时长。</td>
+                  </tr>
+                  <tr>
+                    <td>执行时标记元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>运行时高亮目标。</td>
+                  </tr>
+                  <tr>
+                    <td>获取表单值</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>读取控件，而不是写入。</td>
+                  </tr>
+                  <tr>
+                    <td>赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>用自定义变量名发布读取结果。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>开启<strong>获取表单值</strong>时必填。</td>
+                  </tr>
+                  <tr>
+                    <td>表单类型</td>
+                    <td>下拉选择</td>
+                    <td><code>text-field</code></td>
+                    <td>
+                      <code>text-field</code>、<code>select</code>、<code>checkbox</code> 或
+                      <code>radio</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>设为选中</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>勾选或取消勾选复选框、单选框。</td>
+                  </tr>
+                  <tr>
+                    <td>值</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>要输入的文本，或下拉框的选项值，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>清空输入框</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>输入前先清空字段。</td>
+                  </tr>
+                  <tr>
+                    <td>选择选项方式</td>
+                    <td>下拉选择</td>
+                    <td><code>value</code></td>
+                    <td>
+                      <code>value</code>、<code>first-option</code>、<code>last-option</code> 或
+                      <code>custom-position</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>选项位置</td>
+                    <td>数字</td>
+                    <td><code>1</code></td>
+                    <td><code>custom-position</code> 使用的从一开始的位置。</td>
+                  </tr>
+                  <tr>
+                    <td>输入延时（毫秒，0 为禁用）</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-6">输出</h3>
+            <ul>
+              <li>
+                开启<strong>获取表单值</strong>时：<code>{{&lt;name&gt;}}</code>
+                接收控件的原生值，变量名必填。
+              </li>
+              <li>其他情况：无输出。</li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-6">Browser Copilot 说明</h3>
+            <ul>
+              <li>文本值因为引用解析为空而变成空串时，算子会拒绝填写，避免误清空字段。</li>
+              <li><strong>输入延时</strong>会保存但不会生效；文本一次写入。</li>
+              <li>
+                读取值保留原生类型：文本框为字符串，复选框和单选框为布尔值，多选下拉框为数组。
+              </li>
+              <li><code>custom-position</code> 从 1 开始计数；按位置选择选项时不需要填写值。</li>
+            </ul>
+          </section>
+          <section data-operator="javascript-code">
+            <h2 id="operator-javascript-code">JavaScript 代码</h2>
+            <p>
+              在页面中执行一段 JavaScript 函数体，并保存其返回值。<a
+                href="https://www.goautoma.com/extension/docs/blocks/javascript-code.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-7">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>20000</code></td>
+                    <td>脚本的最长运行时间。</td>
+                  </tr>
+                  <tr>
+                    <td>执行环境</td>
+                    <td>下拉选择</td>
+                    <td><code>website</code></td>
+                    <td>
+                      <code>website</code> 在页面中运行；<code>background</code> 会保存但未实现。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>JavaScript 代码</td>
+                    <td>多行文本</td>
+                    <td>
+                      <code>console.log(&quot;Script started&quot;);\nautomaNextBlock()</code>
+                    </td>
+                    <td>函数体，用 <code>return</code> 返回结果。</td>
+                  </tr>
+                  <tr>
+                    <td>在每个新标签页执行</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>页面加载前运行</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>预加载脚本</td>
+                    <td>列表</td>
+                    <td>空</td>
+                    <td>每项包含地址和类型（<code>script</code> 或 <code>style</code>）。</td>
+                  </tr>
+                  <tr>
+                    <td>执行后移除</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>针对每个预加载项。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-7">输出</h3>
+            <ul>
+              <li>
+                <code>{{lastResult}}</code> 始终接收脚本的返回值，或传给
+                <code>automaNextBlock()</code> 的值。
+              </li>
+              <li>
+                通过 <code>automaSetVariable()</code> 或直接给
+                <code>variables</code> 赋值写入的变量会合并到本次运行。
+              </li>
+              <li>页面执行环境捕获的控制台输出会写入运行日志。</li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-7">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                页面执行环境提供
+                <code>automaNextBlock()</code>、<code>automaSetVariable()</code>、<code
+                  >automaRefData()</code
+                >
+                和 <code>automaResetTimeout()</code>。
+              </li>
+              <li>
+                脚本按函数体执行，可写 <code>return</code>，不是独立程序。<code
+                  >automaNextBlock()</code
+                >
+                会提前结束脚本并覆盖返回值。
+              </li>
+              <li>
+                <strong>执行环境</strong
+                >、<strong>在每个新标签页执行</strong>、<strong>页面加载前运行</strong>和<strong>预加载脚本</strong>会随工作流保存，但当前构建不会应用；脚本始终在当前页面运行。
+              </li>
+              <li>
+                空脚本会报错，抛出异常的脚本也会报错。重试或回退由节点的<strong>出错时</strong>策略决定。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="trigger-event">
+            <h2 id="operator-trigger-event">触发事件</h2>
+            <p>
+              在选中的元素上派发一个 DOM 事件。<a
+                href="https://www.goautoma.com/extension/docs/blocks/trigger-event.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-8">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td><code>html</code></td>
+                    <td>接收事件的元素，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择多个元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>通用定位选项；只有第一个匹配项接收事件。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>派发前轮询等待元素出现。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>开启<strong>等待选择器</strong>后使用的轮询时长。</td>
+                  </tr>
+                  <tr>
+                    <td>执行时标记元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>运行时高亮目标。</td>
+                  </tr>
+                  <tr>
+                    <td>事件</td>
+                    <td>下拉选择</td>
+                    <td>—</td>
+                    <td>
+                      21 个 DOM 事件之一，例如
+                      <code>click</code>、<code>change</code>、<code>keydown</code>、<code
+                        >input</code
+                      >
+                      或 <code>wheel</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>冒泡</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>可取消</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-8">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-8">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                派发的是 <code>CustomEvent</code>，携带事件名和 <code>detail</code> 值。名称包含
+                <code>mouse</code> 或 <code>click</code> 的事件不冒泡；其他事件默认冒泡。
+              </li>
+              <li>
+                <strong>选项</strong
+                >折叠区中的修饰键、鼠标按键、坐标、滚轮增量、键盘字段和输入数据会保存，但当前构建不会转发。因此<strong>冒泡</strong>和<strong>可取消</strong>以实际派发规则为准，而不是复选框。
+              </li>
+              <li>
+                页面需要精确配置的原生事件或其他事件对象时，请改用
+                <strong>JavaScript 代码</strong>。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="switch-to">
+            <h2 id="operator-switch-to">
+              切换框架/窗口<span
+                class="ml-3 inline-flex translate-y-[-2px] items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                >占位实现</span
+              >
+            </h2>
+            <p>
+              为后续步骤指定主窗口或某个 iframe 作为上下文。<a
+                href="https://www.goautoma.com/extension/docs/blocks/switch-to.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-9">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>窗口类型</td>
+                    <td>下拉选择</td>
+                    <td><code>main-window</code></td>
+                    <td><code>main-window</code> 或 <code>iframe</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>元素选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      iframe 的 CSS 选择器或 XPath；<strong>窗口类型</strong>为
+                      <code>iframe</code> 时显示。
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-9">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-9">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                此算子只是上下文占位。执行器会把选中的框架写入运行日志，但不会改变驱动的框架上下文，后续步骤仍通过页面内核解析元素。
+              </li>
+              <li>不要依赖它在运行时进入 iframe；它既不会聚焦框架，也不会限制后续定位器的范围。</li>
+              <li>
+                导入工作流中的<strong>查找元素方式</strong>会被忽略，因为表单只提供一个选择器输入框。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="upload-file">
+            <h2 id="operator-upload-file">上传文件</h2>
+            <p>
+              从选择器、工作流变量、最新下载或指定路径，把文件附加到上传控件。<a
+                href="https://www.goautoma.com/extension/docs/blocks/upload-file.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-10">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>上传方式</td>
+                    <td>下拉选择</td>
+                    <td><code>user-select</code></td>
+                    <td>
+                      <code>user-select</code>、<code>workflow-file</code>、<code
+                        >latest-download</code
+                      >
+                      或 <code>file-path</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>文件类型</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>MIME 类型或扩展名，例如 <code>image/*,.pdf</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>存放文件的变量</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      <code>workflow-file</code> 的变量名；可存放 data URL、文件产物或产物数组。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>下载目录内的文件路径</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>file-path</code> 的相对路径，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>文件名模式</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>latest-download</code> 用于挑选最新匹配文件的通配符。</td>
+                  </tr>
+                  <tr>
+                    <td>没有匹配文件时让我手动选择</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>没有匹配下载时回退到文件选择器。</td>
+                  </tr>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code> 或 <code>xpath</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>上传控件的定位器，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>允许多文件</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td><code>latest-download</code> 和 <code>file-path</code> 下隐藏。</td>
+                  </tr>
+                  <tr>
+                    <td>上传前等待目标选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>附加前轮询等待控件出现。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>10000</code></td>
+                    <td>开启<strong>上传前等待目标选择器</strong>后使用的轮询时长。</td>
+                  </tr>
+                  <tr>
+                    <td>验证文件已进入上传控件</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>附加后检查控件，文件缺失时失败。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-10">输出</h3>
+            <ul>
+              <li>
+                <code>{{lastUploadResult}}</code> 始终接收
+                <code>{ nodeId, selector, sourceMode, count, files? }</code
+                >，描述控件和已附加的文件。
+              </li>
+              <li>本算子没有自定义输出变量字段。</li>
+              <li>一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-10">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                <code>user-select</code> 在运行时显示 Browser Copilot 自己的文件卡片；<code
+                  >workflow-file</code
+                >
+                读取上游步骤已经产出的文件；<code>latest-download</code>
+                在设置的下载目录及其子目录中查找最新匹配文件；<code>file-path</code>
+                指定这些目录下的一个相对路径。
+              </li>
+              <li>
+                <strong>验证文件已进入上传控件</strong>默认开启。控件报告的文件数量不足或 MIME
+                类型不符时，步骤会失败。
+              </li>
+              <li>
+                目标必须是文件输入框，或页面内核能关联到文件输入框的控件；否则步骤会失败，而不是静默跳过。
+              </li>
+              <li>结果对象始终写入 <code>lastUploadResult</code>，后续步骤直接引用即可。</li>
+            </ul>
+          </section>
+          <section data-operator="hover-element">
+            <h2 id="operator-hover-element">悬停元素</h2>
+            <p>
+              把指针移动到定位器匹配到的第一个元素上。<a
+                href="https://www.goautoma.com/extension/docs/blocks/hover-element.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-11">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>目标元素的定位器，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择多个元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>通用定位选项；只悬停第一个匹配项。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>悬停前轮询等待元素出现。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>开启<strong>等待选择器</strong>后使用的轮询时长。</td>
+                  </tr>
+                  <tr>
+                    <td>执行时标记元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>运行时高亮目标。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-11">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-11">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                算子在页面内派发 <code>pointerover</code>、<code>mouseover</code> 和
+                <code>mousemove</code>。JavaScript 的悬停处理器会执行，但浏览器原生工具提示和 CSS
+                <code>:hover</code> 样式不保证出现。
+              </li>
+              <li>
+                只在原生指针移动时才展开的菜单，可能需要改用点击或
+                <strong>JavaScript 代码</strong>。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="save-assets">
+            <h2 id="operator-save-assets">
+              保存资源<span
+                class="ml-3 inline-flex translate-y-[-2px] items-center rounded-full border px-2 py-0.5 text-xs font-medium border-err/40 bg-err/10 text-err"
+                >尚未实现</span
+              >
+            </h2>
+            <p>
+              原本用于下载媒体元素或直接链接，但此算子尚未实现。<a
+                href="https://www.goautoma.com/extension/docs/blocks/save-assets.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-12">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>类型</td>
+                    <td>下拉选择</td>
+                    <td><code>element</code></td>
+                    <td><code>element</code> 使用定位器；<code>url</code> 使用网址字段。</td>
+                  </tr>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td>
+                      <code>element</code> 模式下的 <code>cssSelector</code>、<code>xpath</code> 或
+                      <code>text</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>媒体元素的定位器。</td>
+                  </tr>
+                  <tr>
+                    <td>网址</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td><code>url</code> 模式的直接资源地址。</td>
+                  </tr>
+                  <tr>
+                    <td>文件名（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>建议的文件名。</td>
+                  </tr>
+                  <tr>
+                    <td>冲突时</td>
+                    <td>下拉选择</td>
+                    <td><code>uniquify</code></td>
+                    <td><code>uniquify</code>、<code>overwrite</code> 或 <code>prompt</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>保存项目的下载 ID</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>原本用于发布下载 ID；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>开启下载 ID 后显示。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>开启下载 ID 后显示。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-12">输出</h3>
+            <p>无输出。执行器直接返回，不写变量、不写数据列，也不保存文件。</p>
+            <h3 id="browser-copilot-说明-12">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                <strong>尚未实现。</strong>
+                执行器只记录一条提示就继续运行；不会下载任何内容，文件名、冲突策略和下载 ID
+                选项都不生效。
+              </li>
+              <li>
+                需要把文本或字节写入文件时用<strong>保存到本地</strong>，需要导出表格时用<strong>导出数据</strong>；页面自身产生文件时，用下载流程加<strong>处理下载</strong>。
+              </li>
+              <li>在实现之前，不要生成或依赖此算子完成下载。</li>
+            </ul>
+          </section>
+          <section data-operator="press-key">
+            <h2 id="operator-press-key">按键</h2>
+            <p>
+              向当前焦点控件或指定元素发送单个按键或组合键。<a
+                href="https://www.goautoma.com/extension/docs/blocks/press-key.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-13">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>目标元素（可选）</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>需要先聚焦的元素的 CSS 选择器或 XPath。</td>
+                  </tr>
+                  <tr>
+                    <td>操作</td>
+                    <td>下拉选择</td>
+                    <td><code>press-key</code></td>
+                    <td>
+                      <code>press-key</code> 输入单个按键或组合键；<code>multiple-keys</code>
+                      显示自由文本字段。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>按键</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      按键或组合键，例如 <code>Enter</code>、<code>a</code> 或
+                      <code>Control+A</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>按键</td>
+                    <td>多行文本</td>
+                    <td>—</td>
+                    <td><code>multiple-keys</code> 的自由文本；两个字段写入同一个按键字符串。</td>
+                  </tr>
+                  <tr>
+                    <td>按压时长（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-13">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-13">Browser Copilot 说明</h3>
+            <ul>
+              <li>没有目标时，按键发送给页面当前聚焦的元素。有目标时，算子会先聚焦该元素。</li>
+              <li>
+                页面内核会派发 <code>keydown</code>、<code>keypress</code> 和
+                <code>keyup</code>。在表单控件上按 <code>Enter</code> 还会提交表单。
+              </li>
+              <li><strong>按压时长</strong>会保存但被忽略；按键事件立即派发。</li>
+              <li>组合键用 <code>+</code> 连接，例如 <code>Control+Shift+Enter</code>。</li>
+            </ul>
+          </section>
+          <section data-operator="create-element">
+            <h2 id="operator-create-element">创建元素</h2>
+            <p>
+              向页面注入 HTML、CSS 和可选的 JavaScript。<a
+                href="https://www.goautoma.com/extension/docs/blocks/create-element.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-14">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td><code>body</code></td>
+                    <td>目标元素，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>注入前轮询等待目标出现。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>开启<strong>等待选择器</strong>后使用的轮询时长。</td>
+                  </tr>
+                  <tr>
+                    <td>插入元素</td>
+                    <td>下拉选择</td>
+                    <td><code>after</code></td>
+                    <td>
+                      <code>before</code>、<code>after</code>、<code>prev-sibling</code>、<code
+                        >next-sibling</code
+                      >
+                      或 <code>replace</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>页面加载前运行</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；详见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>HTML</td>
+                    <td>多行文本</td>
+                    <td>—</td>
+                    <td>要创建的标记，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>CSS</td>
+                    <td>多行文本</td>
+                    <td>—</td>
+                    <td>注入页面的样式。</td>
+                  </tr>
+                  <tr>
+                    <td>JavaScript</td>
+                    <td>多行文本</td>
+                    <td>—</td>
+                    <td>针对每个新建元素运行的脚本。</td>
+                  </tr>
+                  <tr>
+                    <td>预加载脚本</td>
+                    <td>列表</td>
+                    <td>空</td>
+                    <td>每项包含地址和类型（<code>script</code> 或 <code>style</code>）。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-14">输出</h3>
+            <p>无输出。一个主输出端口；错误按算子的<strong>出错时</strong>策略处理。</p>
+            <h3 id="browser-copilot-说明-14">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                执行器会转发 HTML、CSS 和
+                JavaScript，但不会转发目标选择器或<strong>插入元素</strong>。新建的标记会追加到
+                <code>document.body</code>，CSS 会作为样式元素加入页面。
+              </li>
+              <li>
+                <strong>页面加载前运行</strong
+                >和<strong>预加载脚本</strong>会保存，但当前构建不会应用。
+              </li>
+              <li>
+                JavaScript 针对每个新建元素运行一次，<code>this</code> 指向该元素，并可通过
+                <code>automaRefData()</code> 读取变量。
+              </li>
+              <li>
+                由于目标选择器被忽略，此算子适合在页面末尾添加横幅、浮层或辅助元素，不适合插入到某个具体节点旁边。
+              </li>
+            </ul>
+          </section>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">本页目录</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#operator-event-click"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >点击元素</a
+            ><a
+              href="#operator-get-text"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >获取文本</a
+            ><a
+              href="#operator-element-scroll"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >滚动元素</a
+            ><a
+              href="#operator-link"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >点击链接</a
+            ><a
+              href="#operator-attribute-value"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >属性值</a
+            ><a
+              href="#operator-forms"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >填写表单</a
+            ><a
+              href="#operator-javascript-code"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >JavaScript 代码</a
+            ><a
+              href="#operator-trigger-event"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >触发事件</a
+            ><a
+              href="#operator-switch-to"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >切换框架/窗口</a
+            ><a
+              href="#operator-upload-file"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >上传文件</a
+            ><a
+              href="#operator-hover-element"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >悬停元素</a
+            ><a
+              href="#operator-save-assets"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >保存资源</a
+            ><a
+              href="#operator-press-key"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >按键</a
+            ><a
+              href="#operator-create-element"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >创建元素</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/operators-interaction.zh-CN.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >在 GitHub 上编辑此页</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>由 docs/workflow 生成</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="concepts-zh.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← 上一页</span
+            ><span class="text-sm text-ink">工作流概念</span></a
+          ><a
+            href="operators-browser-zh.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">下一页 →</span
+            ><span class="text-sm text-ink">浏览器</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">本页目录</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#operator-event-click"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >点击元素</a
+            ><a
+              href="#operator-get-text"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >获取文本</a
+            ><a
+              href="#operator-element-scroll"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >滚动元素</a
+            ><a
+              href="#operator-link"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >点击链接</a
+            ><a
+              href="#operator-attribute-value"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >属性值</a
+            ><a
+              href="#operator-forms"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >填写表单</a
+            ><a
+              href="#operator-javascript-code"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >JavaScript 代码</a
+            ><a
+              href="#operator-trigger-event"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >触发事件</a
+            ><a
+              href="#operator-switch-to"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >切换框架/窗口</a
+            ><a
+              href="#operator-upload-file"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >上传文件</a
+            ><a
+              href="#operator-hover-element"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >悬停元素</a
+            ><a
+              href="#operator-save-assets"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >保存资源</a
+            ><a
+              href="#operator-press-key"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >按键</a
+            ><a
+              href="#operator-create-element"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >创建元素</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm 非商业许可 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

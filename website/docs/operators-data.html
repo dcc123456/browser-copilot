@@ -1,0 +1,1565 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Data operators — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="Variables, regex, sorting, mapping, table rows, secrets, and spreadsheet parsing with 11 data operators."
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-data.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-data.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-data-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-data.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Data operators — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="Variables, regex, sorting, mapping, table rows, secrets, and spreadsheet parsing with 11 data operators."
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/operators-data.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Data operators — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="Variables, regex, sorting, mapping, table rows, secrets, and spreadsheet parsing with 11 data operators."
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index.html" class="text-sm text-ink">Docs</a>
+          <a
+            href="../index.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >Features</a
+          >
+          <a
+            href="../index.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >How it works</a
+          >
+          <a
+            href="operators-data-zh.html"
+            class="text-sm text-muted transition-colors hover:text-ink"
+            >中文</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">Start</p>
+            <nav class="space-y-1">
+              <a
+                href="index.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Overview</a
+              ><a
+                href="getting-started.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Getting started</a
+              ><a
+                href="concepts.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Workflow concepts</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+              Operators
+            </p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Web interaction</a
+              ><a
+                href="operators-browser.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Browser</a
+              ><a
+                href="operators-general.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >General</a
+              ><a
+                href="operators-data.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >Data</a
+              ><a
+                href="operators-conditions.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Control flow</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">Documentation menu</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Start
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Overview</a
+                ><a
+                  href="getting-started.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Getting started</a
+                ><a
+                  href="concepts.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Workflow concepts</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Operators
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Web interaction</a
+                ><a
+                  href="operators-browser.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Browser</a
+                ><a
+                  href="operators-general.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >General</a
+                ><a
+                  href="operators-data.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >Data</a
+                ><a
+                  href="operators-conditions.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Control flow</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a><span>/</span
+          ><span class="text-muted">Data</span>
+        </div>
+        <article class="docs-prose">
+          <h1>Data operators</h1>
+          <p>
+            Data operators work on what a workflow carries between steps: the run&#39;s data table,
+            individual variables, and spreadsheet files. They read and write values without touching
+            the page. The shared rules for variables, interpolation, the data table, and the
+            download folder live in <a href="concepts.html">Workflow concepts</a>; the common
+            <strong>Description</strong>, <strong>Disable block</strong>, <strong>Timeout</strong>,
+            and <strong>On error</strong> settings apply to every node and are not repeated below.
+          </p>
+          <section data-operator="insert-data">
+            <h2 id="operator-insert-data">Insert data</h2>
+            <p>
+              Adds records to the run&#39;s data table or writes a value into a variable.
+              <a href="https://www.goautoma.com/extension/docs/blocks/insert-data.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Row type</td>
+                    <td>Select</td>
+                    <td><code>table</code></td>
+                    <td>
+                      <code>table</code> fills a column; <code>variable</code> writes a variable.
+                      The selector is unlabelled and sits at the start of each row.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Table column</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Column that receives the value. Shown for <code>table</code> rows; type the
+                      column id or name because the editor has no live column list.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Variable that receives the value. Shown for <code>variable</code> rows.</td>
+                  </tr>
+                  <tr>
+                    <td>Value</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Interpolated, then written. Supports <code>{{variables}}</code>.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs">Outputs</h3>
+            <ul>
+              <li>
+                A <code>table</code> row writes its value into that column on every row that already
+                exists. On an empty table it creates one row first; it never adds rows per item.
+              </li>
+              <li>A <code>variable</code> row creates or replaces the variable.</li>
+              <li>
+                A record-shaped item such as <code>{&quot;sku&quot;: &quot;A-1&quot;}</code> is
+                appended as a new row. Generated workflows use this shape; the form does not produce
+                it.
+              </li>
+              <li>No output variable of its own. One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The stored list may also be a JSON string; imported workflows use that form and it
+                is parsed the same way.
+              </li>
+              <li>
+                A stored <code>action: &quot;append&quot;</code> concatenates onto the
+                variable&#39;s current value instead of replacing it. Only imported nodes carry that
+                flag; the form always replaces.
+              </li>
+              <li>
+                The file-import fields (<code>filePath</code>, <code>isFile</code>) are kept for
+                imported workflows but are not applied by this build; the form states that file
+                import is unsupported.
+              </li>
+              <li>
+                Rows are edited in an <strong>Insert data</strong> modal, one block per row, with
+                <strong>Add</strong> and a bin icon per row.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="delete-data">
+            <h2 id="operator-delete-data">Delete data</h2>
+            <p>
+              Removes columns from the data table or deletes variables.
+              <a href="https://www.goautoma.com/extension/docs/blocks/delete-data.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-2">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Data from</td>
+                    <td>Select</td>
+                    <td><code>table</code></td>
+                    <td>
+                      <code>Table</code> targets the data table; <code>Variable</code> targets one
+                      variable.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Column</td>
+                    <td>Select</td>
+                    <td><code>[All columns]</code></td>
+                    <td>
+                      <code>[All columns]</code> empties the table; <code>Column</code> reveals a
+                      text field for the column id or name.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Column (name)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Column to remove from every row. Shown only after choosing
+                      <code>Column</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Variable to delete. Shown instead of <strong>Column</strong> for
+                      <code>Variable</code> entries.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-2">Outputs</h3>
+            <p>
+              No output variable. One main output port; the run log reports how many columns and
+              variables were removed.
+            </p>
+            <h3 id="browser-copilot-notes-2">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                <code>[All columns]</code> replaces <code>dataTable</code> with an empty array, so
+                the rows go away as well. Removing a named column keeps the rows and strips only
+                that field.
+              </li>
+              <li>
+                Each entry is its own row with a remove button; an empty list is a no-op and the log
+                says no delete entry was configured.
+              </li>
+              <li>
+                Deleting a variable that does not exist is skipped silently. Deleting a column that
+                no row has is also counted as done.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="log-data">
+            <h2 id="operator-log-data">Get log data</h2>
+            <p>
+              Collects the current run&#39;s log as text and stores it in a variable and,
+              optionally, in a data-table column.
+              <a href="https://www.goautoma.com/extension/docs/blocks/log-data.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-3">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Workflow (workflow id)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Keep empty. Only the current run&#39;s log exists in this build; a value here
+                      makes the step fail.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Assign to a variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Publish the transcript under a variable name.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Output variable. Shown when <strong>Assign to a variable</strong> is on.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Insert to table</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>
+                      Stored by the operator. A row is written only when a column name is set.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Select column</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Column that receives the transcript as one new row. The form shows this field
+                      only after a workflow id is entered.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-3">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{&lt;name&gt;}}</code> with the run log, when
+                <strong>Assign to a variable</strong> is on.
+              </li>
+              <li>
+                One appended row <code>{ &lt;column&gt;: &lt;log&gt; }</code> when
+                <strong>Insert to table</strong> is on and a column is named.
+              </li>
+              <li>
+                No fallback variable such as <code>lastLog</code> is written. One main output port.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-3">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The transcript is the lines emitted so far in this run, joined with newlines. Steps
+                after this node are not included.
+              </li>
+              <li>
+                A non-empty workflow id fails the step with an explanation that past runs are not
+                stored in either host. The editor has no workflow list, so the id field is a stub:
+                leave it blank.
+              </li>
+              <li>
+                The log is also echoed to the run log, so a node that only needs to mark progress
+                can leave both outputs off.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="slice-variable">
+            <h2 id="operator-slice-variable">Slice variable</h2>
+            <p>
+              Takes a segment of a string variable or a sub-array of an array variable.
+              <a href="https://www.goautoma.com/extension/docs/blocks/slice-variable.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-4">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Variable to slice. It is also where the result is written back.</td>
+                  </tr>
+                  <tr>
+                    <td>Start index</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Enables the start offset. Off means start at <code>0</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Start index (number)</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Offset where the segment begins.</td>
+                  </tr>
+                  <tr>
+                    <td>End index</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Enables the end offset. Off means slice to the end.</td>
+                  </tr>
+                  <tr>
+                    <td>End index (number)</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Exclusive offset where the segment stops.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-4">Outputs</h3>
+            <ul>
+              <li>
+                The segment is stored back into the same variable; there is no separate output-name
+                field. A string yields a substring, an array a shorter array.
+              </li>
+              <li>One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-4">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Indices follow JavaScript <code>slice</code> semantics: a negative index counts from
+                the end, and an end before the start yields an empty value.
+              </li>
+              <li>
+                A missing variable, or one holding a number or object, fails the step instead of
+                producing an empty string.
+              </li>
+              <li>
+                Imported nodes that carry only <code>start</code> / <code>end</code> are still read;
+                a legacy <code>end</code> with no toggle means &quot;use the end index&quot;.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="increase-variable">
+            <h2 id="operator-increase-variable">Increase variable</h2>
+            <p>
+              Adds a fixed amount to a numeric variable, starting from zero when the variable does
+              not exist yet.
+              <a href="https://www.goautoma.com/extension/docs/blocks/increase-variable.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-5">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Numeric variable to update. Required; an empty name fails the step.</td>
+                  </tr>
+                  <tr>
+                    <td>Increase by</td>
+                    <td>Number</td>
+                    <td><code>1</code></td>
+                    <td>
+                      Amount to add. It is interpolated, so <code>{{step}}</code> from an earlier
+                      step works.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-5">Outputs</h3>
+            <ul>
+              <li>The same variable, updated. The run log prints <code>name = value</code>.</li>
+              <li>One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-5">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                A variable that is absent starts at <code>0</code>, which makes this operator usable
+                as a loop counter without an initialiser.
+              </li>
+              <li>
+                A current value that is not numeric collapses to <code>0</code> on the way through,
+                because the computed <code>NaN</code> is replaced rather than stored. Keep the
+                variable numeric.
+              </li>
+              <li>
+                Imported nodes may carry <code>incType: &quot;multiply&quot;</code>, which
+                multiplies instead of adding and starts an absent variable at <code>1</code>. The
+                form exposes no such switch.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="regex-variable">
+            <h2 id="operator-regex-variable">RegEx variable</h2>
+            <p>
+              Applies a regular expression to a text variable and keeps either the matches or the
+              replaced text.
+              <a href="https://www.goautoma.com/extension/docs/blocks/regex-variable.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-6">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Variable to read. The result is written back to it.</td>
+                  </tr>
+                  <tr>
+                    <td>Method</td>
+                    <td>Select</td>
+                    <td><code>match</code></td>
+                    <td>
+                      <code>Match value</code> collects the hits;
+                      <code>Replace value</code> substitutes them.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Replace with</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Replacement text, interpolated. Shown only for <code>replace</code>; an empty
+                      value deletes each match.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>RegEx</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Pattern body without the surrounding slashes. Required.</td>
+                  </tr>
+                  <tr>
+                    <td>Expression flags</td>
+                    <td>Multi-select</td>
+                    <td>None</td>
+                    <td>
+                      <code>g</code>, <code>i</code>, and <code>m</code> checkboxes, stored as a
+                      list and joined at run time.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-6">Outputs</h3>
+            <ul>
+              <li>
+                With <code>match</code>, a JSON text of the hits, for example
+                <code>[&quot;id-1&quot;,&quot;id-2&quot;]</code>. The variable holds a string, not
+                an array; use <code>{{name}}</code> downstream or parse it with
+                <strong>JavaScript code</strong> if you need indexing.
+              </li>
+              <li>With <code>replace</code>, the rewritten string.</li>
+              <li>
+                Written back to the same variable; there is no separate output-name field. One main
+                output port.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-6">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Without the <code>g</code> flag only the first hit is collected. With no hit at all
+                the value becomes <code>[]</code>.
+              </li>
+              <li>
+                An invalid pattern fails the step and leaves the variable untouched, so a later step
+                cannot silently read a stale value.
+              </li>
+              <li>
+                A node with no stored flags field at all is read as <code>g</code>; an explicitly
+                empty list means no flags.
+              </li>
+              <li>
+                <strong>Replace with</strong> is the only interpolated field; the pattern and flags
+                are used literally.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="data-mapping">
+            <h2 id="operator-data-mapping">Data mapping</h2>
+            <p>
+              Renames fields of table rows or of an array held in a variable.
+              <a href="https://www.goautoma.com/extension/docs/blocks/data-mapping.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-7">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Data source</td>
+                    <td>Select</td>
+                    <td><code>table</code></td>
+                    <td>
+                      <code>Table</code> reads <code>dataTable</code>; <code>Variable</code> reads
+                      the named variable.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Source variable, shown when <strong>Data source</strong> is
+                      <code>Variable</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Source</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Property to rename. One row per source property.</td>
+                  </tr>
+                  <tr>
+                    <td>Destination</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      New property name. A source can list several destinations; the value is copied
+                      to each and the source key is removed.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Insert to table</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored by the operator; not applied by this build (see notes).</td>
+                  </tr>
+                  <tr>
+                    <td>Select column</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Stored by the operator; not applied by this build (see notes).</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to a variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Store the mapped array under a variable.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Output variable, shown when <strong>Assign to a variable</strong> is on.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-7">Outputs</h3>
+            <ul>
+              <li>
+                The mapped array, written back to the source variable when
+                <strong>Data source</strong> is <code>Variable</code>.
+              </li>
+              <li><code>{{lastMappedData}}</code> always receives the mapped array.</li>
+              <li>
+                <code>{{&lt;name&gt;}}</code> when <strong>Assign to a variable</strong> is on.
+              </li>
+              <li>One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-7">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                With <strong>Data source</strong> = <code>Table</code> the mapped rows are
+                <strong>not</strong> written back into the table. Turn on
+                <strong>Assign to a variable</strong> (or read <code>{{lastMappedData}}</code>) to
+                keep the result.
+              </li>
+              <li>
+                <strong>Insert to table</strong> and <strong>Select column</strong> are persisted so
+                imported workflows keep their settings, but this build performs no table write for
+                them.
+              </li>
+              <li>
+                Only top-level properties are renamed. Rows that lack a source property are passed
+                through unchanged, and a destination equal to the source name is ignored.
+              </li>
+              <li>
+                The mapping list is edited in a modal with a <strong>Source</strong> column and one
+                or more <strong>Destination</strong> rows per source.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="sort-data">
+            <h2 id="operator-sort-data">Sort data</h2>
+            <p>
+              Orders the data table or an array held in a variable, optionally by up to three item
+              properties.
+              <a href="https://www.goautoma.com/extension/docs/blocks/sort-data.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-8">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Data source</td>
+                    <td>Select</td>
+                    <td><code>table</code></td>
+                    <td>
+                      <code>Table</code> sorts <code>dataTable</code>; <code>Variable</code> sorts
+                      the named variable.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Source variable, shown when <strong>Data source</strong> is
+                      <code>Variable</code>. The sorted array is written back to it.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Sort by the item&#39;s property</td>
+                    <td>Switch</td>
+                    <td>Off</td>
+                    <td>Off compares the items themselves; on reveals the property rows.</td>
+                  </tr>
+                  <tr>
+                    <td>Property 1–3</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Property name to compare by. At most three property rows.</td>
+                  </tr>
+                  <tr>
+                    <td>Order</td>
+                    <td>Select</td>
+                    <td><code>asc</code></td>
+                    <td><code>Ascending</code> or <code>Descending</code>, one per property.</td>
+                  </tr>
+                  <tr>
+                    <td>Insert to table</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored by the operator; not applied by this build (see notes).</td>
+                  </tr>
+                  <tr>
+                    <td>Select column</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Stored by the operator; not applied by this build (see notes).</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to a variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Also store the sorted array under a variable.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Output variable, shown when <strong>Assign to a variable</strong> is on.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-8">Outputs</h3>
+            <ul>
+              <li>
+                The sorted copy replaces <code>dataTable</code> for a table source, or overwrites
+                the source variable for a variable source.
+              </li>
+              <li>
+                <code>{{&lt;name&gt;}}</code> when <strong>Assign to a variable</strong> is on.
+              </li>
+              <li>The run log reports the leading property and the row count.</li>
+              <li>One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-8">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                With <strong>Sort by the item&#39;s property</strong> off, or with no property rows,
+                the whole item is compared directly. That is what a plain list of strings or numbers
+                needs.
+              </li>
+              <li>
+                <strong>Insert to table</strong> and <strong>Select column</strong> are persisted
+                but not applied: no column is written by this build. Use
+                <strong>Assign to a variable</strong> to keep the result.
+              </li>
+              <li>
+                Property rows are evaluated left to right, so the second property only decides ties
+                left by the first.
+              </li>
+              <li>
+                Sorting copies the array first, so the previous order is not mutated mid-run before
+                the result is written.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="set-variable">
+            <h2 id="operator-set-variable">Set variable</h2>
+            <p>
+              Writes one or more workflow variables in a single step. Browser Copilot-only operator.
+            </p>
+            <h3 id="settings-9">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Variables</td>
+                    <td>List</td>
+                    <td>One blank row</td>
+                    <td>
+                      Each row pairs a variable name with a value. Rows apply from top to bottom.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Name to create or replace, per row. A row with an empty name is skipped.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Value</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Text to store. Interpolated, so it may read <code>{{variables}}</code> written
+                      by an earlier row.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-9">Outputs</h3>
+            <ul>
+              <li>Every named variable, holding its row&#39;s interpolated text.</li>
+              <li>No other output variable. One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-9">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Rows run in order, so <code>{{token}}</code> set on row one can be used as
+                <code>Bearer {{token}}</code> on row two.
+              </li>
+              <li>
+                A node with no named row fails with a message that nothing was set, instead of
+                running as a no-op.
+              </li>
+              <li>
+                Values are stored as text. For numbers or arrays, follow this step with
+                <strong>Increase variable</strong>, <strong>Parse Excel</strong>, or
+                <strong>JavaScript code</strong>.
+              </li>
+              <li>
+                The form writes the row list and clears the legacy <code>variableName</code> /
+                <code>value</code> pair; imported nodes that only carry the pair still run it as a
+                single row.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="get-secret">
+            <h2 id="operator-get-secret">Get secret</h2>
+            <p>
+              Copies stored credential fields into workflow variables at run time. Browser
+              Copilot-only operator.
+            </p>
+            <h3 id="settings-10">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Credentials this node fetches</td>
+                    <td>List</td>
+                    <td>One blank row</td>
+                    <td>One credential field per row, each writing its own variable.</td>
+                  </tr>
+                  <tr>
+                    <td>Credential</td>
+                    <td>Select</td>
+                    <td>—</td>
+                    <td>
+                      Entries read <code>credential label · field key</code>. Only metadata is
+                      listed; no value appears in the editor or the workflow.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Output variable for that row. Picking a credential fills it with the field
+                      key, for example <code>apiKey</code>; a name typed by hand is kept.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-10">Outputs</h3>
+            <ul>
+              <li>One variable per row, holding that credential field&#39;s value.</li>
+              <li>
+                The run log names the field and the target variable and states that the value is
+                hidden.
+              </li>
+              <li>One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-10">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Values come from <strong>Settings → Secrets</strong>, which is the credential store
+                described in <a href="concepts.html#secrets">Workflow concepts</a>. Nothing is
+                embedded in the workflow JSON, and rotating a password there takes effect on the
+                next run.
+              </li>
+              <li>
+                The stored reference is <code>credentialId::fieldKey</code>. A reference with no
+                field key falls back to the entry&#39;s <code>password</code> field, then to its
+                first field.
+              </li>
+              <li>
+                A missing credential, a missing field, or an unnamed output variable fails the step.
+                It never writes an empty string, so a downstream form fill cannot submit a blank
+                password.
+              </li>
+              <li>
+                All rows on the node read the credential store once per run, not once per row.
+              </li>
+              <li>
+                Downstream steps read the values as ordinary variables, for example
+                <code>{{password}}</code>. Keep those variables out of logs and exported files.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="parse-excel">
+            <h2 id="operator-parse-excel">Parse Excel</h2>
+            <p>
+              Reads an <code>.xlsx</code> or <code>.csv</code> spreadsheet into row objects plus the
+              raw cell grid. Browser Copilot-only operator.
+            </p>
+            <h3 id="settings-11">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Spreadsheet source</td>
+                    <td>Select</td>
+                    <td><code>user-select</code></td>
+                    <td>
+                      <code>User picks a file</code>, <code>File from an earlier step</code>, or
+                      <code>Specific file path</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>File path in the download folder</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      For <code>file-path</code>. Relative to the configured download folder or the
+                      internal downloads folder; subfolders allowed,
+                      <code>{{variables}}</code> interpolated.
+                      <strong>Browse downloads</strong> lists what is there.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Variable holding the file</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      For <code>workflow-file</code>. Must hold exactly one spreadsheet artifact or
+                      data URL produced by an earlier block.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Worksheet name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Exact sheet name; empty means the first sheet. Applies to
+                      <code>.xlsx</code> only.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>First row is the header</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>
+                      Turn the first row into object keys. The raw array keeps that row either way.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Object rows variable</td>
+                    <td>Text</td>
+                    <td><code>lastExcelRows</code></td>
+                    <td>Receives an array of objects, one per data row.</td>
+                  </tr>
+                  <tr>
+                    <td>Raw rows variable</td>
+                    <td>Text</td>
+                    <td><code>lastExcelRawRows</code></td>
+                    <td>Receives the two-dimensional array of typed cells, header row included.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-11">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastExcelRows}}</code>, or the name in
+                <strong>Object rows variable</strong>: one object per data row, keyed by the header
+                row.
+              </li>
+              <li>
+                <code>{{lastExcelRawRows}}</code>, or the name in
+                <strong>Raw rows variable</strong>: the cell grid as parsed, including the header
+                row.
+              </li>
+              <li>
+                <code>{{lastExcelSheet}}</code>: the sheet that was read. For a CSV this is the
+                file&#39;s base name.
+              </li>
+              <li>One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-11">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                <code>user-select</code> opens a file picker during the run, so someone must be
+                present. Unattended runs should use a relative path or a file from an earlier step.
+              </li>
+              <li>
+                With <strong>First row is the header</strong> off, keys are <code>column1</code>,
+                <code>column2</code>, and so on. Empty header cells get the same generated names,
+                and duplicate names get a <code>_2</code>, <code>_3</code> suffix so no cell is
+                lost.
+              </li>
+              <li>
+                Cells are typed: numbers become numbers, date-formatted cells become ISO strings,
+                booleans become booleans, and empty cells become <code>null</code>. Fully blank rows
+                are dropped and trailing blank cells are trimmed.
+              </li>
+              <li>
+                <code>.xlsx</code> is read from its OOXML parts directly, so no spreadsheet library
+                is needed; shared strings, inline strings, styles, one worksheet, and the workbook
+                relationships are supported. <code>.csv</code> reads RFC-4180 quoting and detects
+                <code>,</code>, <code>;</code>, or tab separators, with or without a BOM.
+              </li>
+              <li>
+                Legacy <code>.xls</code> workbooks and password-protected files are rejected with a
+                message to re-save as <code>.xlsx</code> or <code>.csv</code>; Zip64 workbooks are
+                rejected too.
+              </li>
+              <li>
+                The row limit of the data table does not apply to these variables; the file is
+                parsed into the two variables only, and nothing is written to
+                <code>dataTable</code>. Send the rows there with <strong>Insert data</strong> when
+                needed.
+              </li>
+            </ul>
+          </section>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">On this page</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#operator-insert-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Insert data</a
+            ><a
+              href="#operator-delete-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Delete data</a
+            ><a
+              href="#operator-log-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Get log data</a
+            ><a
+              href="#operator-slice-variable"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Slice variable</a
+            ><a
+              href="#operator-increase-variable"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Increase variable</a
+            ><a
+              href="#operator-regex-variable"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >RegEx variable</a
+            ><a
+              href="#operator-data-mapping"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Data mapping</a
+            ><a
+              href="#operator-sort-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Sort data</a
+            ><a
+              href="#operator-set-variable"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Set variable</a
+            ><a
+              href="#operator-get-secret"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Get secret</a
+            ><a
+              href="#operator-parse-excel"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Parse Excel</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/operators-data.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >Edit this page on GitHub</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>Generated from docs/workflow</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="operators-general.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← Previous</span
+            ><span class="text-sm text-ink">General</span></a
+          ><a
+            href="operators-conditions.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">Next →</span
+            ><span class="text-sm text-ink">Control flow</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">On this page</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#operator-insert-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Insert data</a
+            ><a
+              href="#operator-delete-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Delete data</a
+            ><a
+              href="#operator-log-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Get log data</a
+            ><a
+              href="#operator-slice-variable"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Slice variable</a
+            ><a
+              href="#operator-increase-variable"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Increase variable</a
+            ><a
+              href="#operator-regex-variable"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >RegEx variable</a
+            ><a
+              href="#operator-data-mapping"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Data mapping</a
+            ><a
+              href="#operator-sort-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Sort data</a
+            ><a
+              href="#operator-set-variable"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Set variable</a
+            ><a
+              href="#operator-get-secret"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Get secret</a
+            ><a
+              href="#operator-parse-excel"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Parse Excel</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm Noncommercial 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

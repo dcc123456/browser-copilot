@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Getting started — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="Build, run, debug, and export your first Browser Copilot workflow."
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/getting-started.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/getting-started.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/getting-started-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/getting-started.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Getting started — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="Build, run, debug, and export your first Browser Copilot workflow."
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/getting-started.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Getting started — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="Build, run, debug, and export your first Browser Copilot workflow."
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index.html" class="text-sm text-ink">Docs</a>
+          <a
+            href="../index.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >Features</a
+          >
+          <a
+            href="../index.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >How it works</a
+          >
+          <a
+            href="getting-started-zh.html"
+            class="text-sm text-muted transition-colors hover:text-ink"
+            >中文</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">Start</p>
+            <nav class="space-y-1">
+              <a
+                href="index.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Overview</a
+              ><a
+                href="getting-started.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >Getting started</a
+              ><a
+                href="concepts.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Workflow concepts</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+              Operators
+            </p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Web interaction</a
+              ><a
+                href="operators-browser.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Browser</a
+              ><a
+                href="operators-general.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >General</a
+              ><a
+                href="operators-data.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Data</a
+              ><a
+                href="operators-conditions.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Control flow</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">Documentation menu</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Start
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Overview</a
+                ><a
+                  href="getting-started.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >Getting started</a
+                ><a
+                  href="concepts.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Workflow concepts</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Operators
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Web interaction</a
+                ><a
+                  href="operators-browser.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Browser</a
+                ><a
+                  href="operators-general.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >General</a
+                ><a
+                  href="operators-data.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Data</a
+                ><a
+                  href="operators-conditions.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Control flow</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a><span>/</span
+          ><span class="text-muted">Getting started</span>
+        </div>
+        <article class="docs-prose">
+          <h1>Getting started</h1>
+          <p>
+            This page walks through the workflow editor and builds a complete workflow you can run:
+            open a page, read its headline, put the text into a variable, and write it to a file.
+          </p>
+          <h2 id="open-the-workflow-editor">Open the workflow editor</h2>
+          <ol>
+            <li>
+              Open the Browser Copilot side panel and select the <strong>Workflows</strong> tab.
+            </li>
+            <li>
+              Select <strong>New</strong> to create a workflow, or <strong>Edit</strong> on an
+              existing one to open the canvas.
+            </li>
+            <li>
+              The editor opens with the graph on the left and the block inspector on the right.
+              <strong>Add blocks</strong> toggles the palette; <strong>Workflow</strong> and
+              <strong>Logs</strong> switch the right-hand panel between the selected block, the
+              trigger and run settings, and the run history.
+            </li>
+          </ol>
+          <p>
+            The toolbar holds <strong>Save</strong> and <strong>Run</strong> (Ctrl+Enter). Running
+            saves the workflow first, so the graph the background executes is always the graph you
+            are looking at. <strong>Debug mode</strong> enables breakpoints and step-by-step
+            execution for the next run.
+          </p>
+          <p>
+            You can also record a session instead of building it by hand:
+            <strong>Record workflow</strong> captures the actions you perform on a page and opens
+            the result as a graph.
+          </p>
+          <h2 id="meet-the-canvas">Meet the canvas</h2>
+          <ul>
+            <li>
+              Every workflow starts from a <strong>Trigger</strong> block. Workflow name,
+              description, launch triggers, and run settings live on it.
+            </li>
+            <li>The palette groups operators by category. Search by name to narrow the list.</li>
+            <li>
+              Select a block to edit it in the inspector. Drag the node header to move it, or use
+              <strong>Auto-layout</strong> to tidy the graph.
+            </li>
+            <li>
+              Connections run from a block&#39;s output on the right to the next block&#39;s input
+              on the left. Branches, fallbacks, and loop returns use additional named ports; see
+              <a href="concepts.html#ports-branches-and-loops">Ports, branches, and loops</a>.
+            </li>
+            <li>
+              Canvas edits are undoable. Deleting an edge or node does not touch the saved workflow
+              until you save.
+            </li>
+          </ul>
+          <h2 id="configure-the-trigger">Configure the trigger</h2>
+          <p>
+            The Trigger block is where a workflow starts. Select it and add one or more triggers
+            with <strong>Add trigger</strong>; the first one is the primary trigger, whose type is
+            shown on the workflow card. Each trigger can be enabled or disabled independently.
+          </p>
+          <p>The supported kinds are:</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Kind</th>
+                  <th>Fires when</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Manually</td>
+                  <td>You run the workflow from the editor or the Workflows tab.</td>
+                </tr>
+                <tr>
+                  <td>Interval</td>
+                  <td>A fixed number of minutes passes between runs.</td>
+                </tr>
+                <tr>
+                  <td>On a specific date</td>
+                  <td>A one-off date and time arrives.</td>
+                </tr>
+                <tr>
+                  <td>On a specific day</td>
+                  <td>The selected weekdays arrive at the configured local time.</td>
+                </tr>
+                <tr>
+                  <td>When visiting a website</td>
+                  <td>A tab opens a URL that matches the pattern (glob or regular expression).</td>
+                </tr>
+                <tr>
+                  <td>Keyboard shortcut</td>
+                  <td>You press the configured shortcut, optionally only outside input fields.</td>
+                </tr>
+                <tr>
+                  <td>Context menu</td>
+                  <td>You choose the workflow from the browser&#39;s right-click menu.</td>
+                </tr>
+                <tr>
+                  <td>On browser startup</td>
+                  <td>The browser starts.</td>
+                </tr>
+                <tr>
+                  <td>On element change</td>
+                  <td>An element matching a CSS selector is inserted or mutated on a page.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Triggers that need a parameter show a field for it. An incomplete trigger is saved but
+            will not fire; the run preflight warns you.
+          </p>
+          <p>
+            A trigger can also declare <strong>inputs</strong> (parameters with a name, type, and
+            default). Declared inputs are seeded into the run&#39;s variables, so
+            <code>{{keyword}}</code> resolves even when the caller passed nothing. This is how a
+            generated workflow stays runnable while still being editable.
+          </p>
+          <h2 id="add-and-connect-operators">Add and connect operators</h2>
+          <ol>
+            <li>Select <strong>Add blocks</strong> and find the operator you need.</li>
+            <li>Click or drag it onto the canvas. A new node appears with its default settings.</li>
+            <li>
+              Connect the previous block&#39;s output handle to the new block&#39;s input handle.
+            </li>
+            <li>Select the node and fill in its settings in the inspector.</li>
+          </ol>
+          <p>Most operators have one input and one output. Some add extra ports:</p>
+          <ul>
+            <li>
+              <strong>Conditions</strong> creates one output per configured path plus a
+              <strong>fallback</strong> output.
+            </li>
+            <li><strong>Element exists</strong> exposes true and false outputs.</li>
+            <li>Loop and error-handling blocks add return or fallback ports.</li>
+          </ul>
+          <p>
+            Ports are described on each operator page and in
+            <a href="concepts.html#ports-branches-and-loops">Workflow concepts</a>.
+          </p>
+          <h2 id="configure-a-block">Configure a block</h2>
+          <p>
+            The inspector follows the operator&#39;s form. Common sections appear near the bottom on
+            most nodes:
+          </p>
+          <ul>
+            <li>
+              <strong>Output variable</strong> — where the step publishes its result. Name it after
+              the data, not the operator (<code>headline</code>, not <code>text2</code>).
+            </li>
+            <li><strong>Disable block</strong> — skip this node without deleting it.</li>
+            <li>
+              <strong>Timeout</strong> — fail the step when it runs longer than the limit;
+              <code>0</code> disables the limit.
+            </li>
+            <li>
+              <strong>On error</strong> — retry, fail, continue, or route to the fallback branch.
+            </li>
+            <li>
+              <strong>Goal &amp; success criteria</strong> — optional checkable facts used by
+              generation, verification, and AI repair.
+            </li>
+            <li><strong>Breakpoint</strong> — pause before this node in Debug mode.</li>
+          </ul>
+          <p>
+            Any text field that accepts <code>{{...}}</code> can reference a workflow variable,
+            including selectors, URLs, file names, and JSON values. The rules and limits are in
+            <a href="concepts.html#variables-and-interpolation">Variables and interpolation</a>.
+          </p>
+          <h2 id="run-debug-and-read-logs">Run, debug, and read logs</h2>
+          <p>
+            Select <strong>Run</strong> (Ctrl+Enter) to execute the workflow against the current
+            browser. The first run may ask you to confirm the page context if the workflow was
+            generated elsewhere.
+          </p>
+          <ul>
+            <li>
+              The <strong>Logs</strong> panel lists the run and one row per block. Select a row to
+              locate that block on the canvas.
+            </li>
+            <li>
+              A step that throws stops the run unless its <strong>On error</strong> policy says
+              otherwise.
+            </li>
+            <li>
+              If required parameters are missing, the run stops before the first such block; the log
+              names each one.
+            </li>
+          </ul>
+          <p>
+            Turn on <strong>Debug mode</strong> to pause before every block with a breakpoint. The
+            debug bar offers <strong>Resume</strong>, <strong>Next</strong>, and
+            <strong>Stop</strong>, and the <strong>Variables</strong> panel shows the variable
+            values captured at the paused block. Use <strong>Run workflow from here</strong> on a
+            node to start in the middle of the graph.
+          </p>
+          <p>Optional run settings on the Trigger block:</p>
+          <ul>
+            <li><strong>Save execution logs</strong> keeps the transcript in run history.</li>
+            <li>
+              <strong>Notify when finished</strong> posts a browser notification when the run
+              settles.
+            </li>
+            <li>
+              <strong>Workflow goal</strong> records success conditions checked after the final
+              step.
+            </li>
+          </ul>
+          <h2 id="save-export-and-import">Save, export, and import</h2>
+          <p>
+            <strong>Save</strong> stores the workflow. The Workflows tab offers
+            <strong>Export</strong> for a single workflow, the current selection, or a group; each
+            produces a JSON file. <strong>Import</strong> accepts those files, including group
+            exports, and restores workflows (and the group) without overwriting unrelated ones.
+          </p>
+          <p>
+            A workflow that contains a cloud operator or an operator unavailable in this build is
+            imported intact but cannot run it; see the
+            <a href="index.html#status-legend">status legend</a>.
+          </p>
+          <h2 id="your-first-workflow">Your first workflow</h2>
+          <p>
+            Goal: open a page, read its headline into a variable, compose a one-line report, and
+            write it to a text file.
+          </p>
+          <ol>
+            <li>Create a workflow in the Workflows tab and open it in the editor.</li>
+            <li>Leave the Trigger block on <strong>Manual</strong>.</li>
+            <li>
+              Add <strong>New tab</strong>, connect Trigger → New tab, and set the URL to
+              <code>https://example.com</code>.
+            </li>
+            <li>
+              Add <strong>Get text</strong>, connect New tab → Get text, set the selector to
+              <code>h1</code>, and set <strong>Output variable</strong> to <code>headline</code>.
+            </li>
+            <li>
+              Add <strong>Set variable</strong>, connect Get text → Set variable. Add a row with
+              name <code>report</code> and value <code>Headline: {{headline}}</code>.
+            </li>
+            <li>
+              Add <strong>Export data</strong>, connect Set variable → Export data:
+              <ul>
+                <li><strong>Data to export</strong>: Variable.</li>
+                <li><strong>Variable name</strong>: <code>report</code>.</li>
+                <li><strong>Export as</strong>: Plain text.</li>
+                <li>File name: <code>headline.txt</code>.</li>
+              </ul>
+            </li>
+            <li>
+              Select <strong>Run</strong>. The first export opens a save dialog unless you
+              configured a download folder in Settings → Download folder; with a folder configured,
+              the file is written there without prompting.
+            </li>
+            <li>
+              Open <code>headline.txt</code> and check that it contains
+              <code>Headline: </code> followed by the page&#39;s <code>h1</code> text.
+            </li>
+          </ol>
+          <p>
+            If the text is empty, open the log for the Get text block. It fails rather than silently
+            exporting nothing when the selector matches no element.
+          </p>
+          <h2 id="next-steps">Next steps</h2>
+          <ul>
+            <li>
+              <a href="concepts.html">Workflow concepts</a> — variables, the data table, loops,
+              errors, files, secrets, and AI features.
+            </li>
+            <li>
+              <a href="operators-interaction.html">Web interaction operators</a> — clicking,
+              reading, filling, and scripts.
+            </li>
+            <li>
+              <a href="operators-browser.html">Browser operators</a> — tabs, downloads, cookies, and
+              OCR.
+            </li>
+            <li>
+              <a href="operators-conditions.html">Control flow operators</a> — branches and loops.
+            </li>
+          </ul>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">On this page</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#open-the-workflow-editor"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Open the workflow editor</a
+            ><a
+              href="#meet-the-canvas"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Meet the canvas</a
+            ><a
+              href="#configure-the-trigger"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Configure the trigger</a
+            ><a
+              href="#add-and-connect-operators"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Add and connect operators</a
+            ><a
+              href="#configure-a-block"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Configure a block</a
+            ><a
+              href="#run-debug-and-read-logs"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Run, debug, and read logs</a
+            ><a
+              href="#save-export-and-import"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Save, export, and import</a
+            ><a
+              href="#your-first-workflow"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Your first workflow</a
+            ><a
+              href="#next-steps"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Next steps</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/getting-started.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >Edit this page on GitHub</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>Generated from docs/workflow</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="index.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← Previous</span
+            ><span class="text-sm text-ink">Overview</span></a
+          ><a
+            href="concepts.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">Next →</span
+            ><span class="text-sm text-ink">Workflow concepts</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">On this page</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#open-the-workflow-editor"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Open the workflow editor</a
+            ><a
+              href="#meet-the-canvas"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Meet the canvas</a
+            ><a
+              href="#configure-the-trigger"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Configure the trigger</a
+            ><a
+              href="#add-and-connect-operators"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Add and connect operators</a
+            ><a
+              href="#configure-a-block"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Configure a block</a
+            ><a
+              href="#run-debug-and-read-logs"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Run, debug, and read logs</a
+            ><a
+              href="#save-export-and-import"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Save, export, and import</a
+            ><a
+              href="#your-first-workflow"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Your first workflow</a
+            ><a
+              href="#next-steps"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Next steps</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm Noncommercial 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

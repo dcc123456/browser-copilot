@@ -1,0 +1,1113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>工作流概念 — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="变量、插值、数据表、端口、循环、错误处理、文件、凭证、AI 能力与触发器。"
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/concepts-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/concepts.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/concepts-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/concepts.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="工作流概念 — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="变量、插值、数据表、端口、循环、错误处理、文件、凭证、AI 能力与触发器。"
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/concepts-zh.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="工作流概念 — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="变量、插值、数据表、端口、循环、错误处理、文件、凭证、AI 能力与触发器。"
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index-zh.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index-zh.html" class="text-sm text-ink">文档</a>
+          <a
+            href="../index-zh.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >功能</a
+          >
+          <a
+            href="../index-zh.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >工作原理</a
+          >
+          <a href="concepts.html" class="text-sm text-muted transition-colors hover:text-ink">EN</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">开始</p>
+            <nav class="space-y-1">
+              <a
+                href="index-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >文档概览</a
+              ><a
+                href="getting-started-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >快速上手</a
+              ><a
+                href="concepts-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >工作流概念</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">算子</p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >页面交互</a
+              ><a
+                href="operators-browser-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >浏览器</a
+              ><a
+                href="operators-general-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >通用</a
+              ><a
+                href="operators-data-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >数据</a
+              ><a
+                href="operators-conditions-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >条件控制</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">文档菜单</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                开始
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >文档概览</a
+                ><a
+                  href="getting-started-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >快速上手</a
+                ><a
+                  href="concepts-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >工作流概念</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                算子
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >页面交互</a
+                ><a
+                  href="operators-browser-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >浏览器</a
+                ><a
+                  href="operators-general-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >通用</a
+                ><a
+                  href="operators-data-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >数据</a
+                ><a
+                  href="operators-conditions-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >条件控制</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a><span>/</span
+          ><span class="text-muted">工作流概念</span>
+        </div>
+        <article class="docs-prose">
+          <h1>工作流概念</h1>
+          <p>这些概念适用于所有算子。先读一遍，再看单个算子页会更容易理解。</p>
+          <h2 id="工作流结构">工作流结构</h2>
+          <p>工作流是一张有向图：</p>
+          <ul>
+            <li>
+              <strong>触发器</strong> —
+              入口。它保存工作流名称、一个或多个启动配置、声明的输入参数，以及运行设置。
+            </li>
+            <li>
+              <strong>步骤</strong> —
+              画布上的算子。每一步读取变量与页面状态，执行一个动作，通常写出一个结果。
+            </li>
+            <li>
+              <strong>连线</strong> — 告诉引擎下一步执行谁。命名端口用来表达分支、回退与循环返回。
+            </li>
+          </ul>
+          <p>
+            运行时从触发器开始沿连线执行，直到没有可走的出边或某一步结束了整张图。每次运行都有一份全新的<strong>变量表</strong>：先写入声明的输入，之后每个步骤在执行时新增或覆盖变量。后续步骤能看到之前所有步骤产出的值。
+          </p>
+          <p>属性面板有两个作用域：</p>
+          <ul>
+            <li>
+              选中
+              <strong>触发器</strong>
+              算子，编辑工作流名称、描述、触发器，以及保存日志、完成通知等运行设置。
+            </li>
+            <li>选中其他算子，编辑该算子的设置、输出变量、错误策略与目标契约。</li>
+          </ul>
+          <h2 id="变量与插值">变量与插值</h2>
+          <p>变量是步骤之间唯一的数据通道。</p>
+          <ul>
+            <li>
+              会产出结果的步骤都有
+              <strong>输出变量名</strong> 字段。按数据本身命名，而不是按算子命名。
+            </li>
+            <li>任何支持模板的文本字段都能用 <code>{{name}}</code> 读取变量。</li>
+            <li>后面的步骤可以覆盖同名变量；再往后的步骤看到的是最新值。</li>
+          </ul>
+          <h3 id="引用语法">引用语法</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>写法</th>
+                  <th>读取的内容</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>{{headline}}</code></td>
+                  <td>顶层变量。</td>
+                </tr>
+                <tr>
+                  <td><code>{{user.email}}</code></td>
+                  <td>对象的属性。</td>
+                </tr>
+                <tr>
+                  <td><code>{{rows[0].name}}</code></td>
+                  <td>先按下标取数组元素，再取属性。</td>
+                </tr>
+                <tr>
+                  <td><code>{{map[&quot;key&quot;]}}</code></td>
+                  <td>名称里含点号或空格的属性。</td>
+                </tr>
+                <tr>
+                  <td><code>{{rows[0]}}</code></td>
+                  <td>该位置上的整个对象。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            引用允许在 token
+            内出现空格。格式错误的表达式会原样保留，与引用一个不存在的变量表现相同。
+          </p>
+          <h3 id="以文本保存的对象">以文本保存的对象</h3>
+          <p>
+            模型输出和部分页面读取结果是字符串。当引用在这种字符串上继续取属性或下标时（例如
+            <code>article</code> 保存的是
+            <code>{&quot;title&quot;: &quot;…&quot;}</code>，而模板写的是
+            <code>{{article.title}}</code>），引擎会先把字符串按 JSON 解析，包括自动去掉外层
+            <code>```json</code> 代码围栏。因此同一份 AI
+            回答既可以整体读取（<code>{{article}}</code>），也可以逐字段读取（<code>{{article.title}}</code>），不需要改变它的存储方式。
+          </p>
+          <h3 id="插值的作用范围">插值的作用范围</h3>
+          <p>
+            算子参数包中的每个字符串都会被插值，包括嵌套对象与数组：条件比较值、嵌套的元素定位、由循环变量拼出的选择器、文件名。<strong
+              >JavaScript 代码</strong
+            >
+            的 <code>code</code> 参数还会额外做 JavaScript
+            字符串字面量转义，值里的引号或换行不会破坏脚本。
+          </p>
+          <p>
+            非文本设置不参与插值：下拉选项、复选框、数字边界以及输出变量名本身。这些位置需要通过算子自己的字段来接收数据。
+          </p>
+          <h3 id="缺失与空值">缺失与空值</h3>
+          <ul>
+            <li>
+              token 解析不到任何值时，会<strong>原样留在文本里</strong>，而不是替换成空字符串。
+            </li>
+            <li>
+              引擎会记录本次运行中残留的 token。那些绝不能把字面量
+              <code>{{name}}</code> 输入页面的动作步骤会直接让该步失败，并报“未解析输入”错误。
+            </li>
+            <li>
+              token
+              解析成空字符串时，步骤看到的确实是空值。会因此清空表单字段或用空值覆盖数据的算子会识别这种情况并拒绝或报告。
+            </li>
+          </ul>
+          <p>
+            这个区分是有意设计的：<code>{{missing}}</code> 代表工作流本身有问题，而
+            <code>{{optionalNote}}</code> 解析成 <code>&quot;&quot;</code> 是合法的空值。
+          </p>
+          <h3 id="运行时变量">运行时变量</h3>
+          <p>有些变量由引擎提供，而不是由某个算子写出：</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>变量</th>
+                  <th>可用位置</th>
+                  <th>值</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>loopIndex</code></td>
+                  <td>循环体</td>
+                  <td>从 0 开始的迭代序号。</td>
+                </tr>
+                <tr>
+                  <td><code>loopItem</code></td>
+                  <td>数据循环</td>
+                  <td>当前数组项。</td>
+                </tr>
+                <tr>
+                  <td><code>loopElementSelector</code></td>
+                  <td>元素循环</td>
+                  <td>指向当前匹配元素的 CSS 选择器。</td>
+                </tr>
+                <tr>
+                  <td><code>dataTable</code></td>
+                  <td>整次运行</td>
+                  <td>本次运行的行对象数组。</td>
+                </tr>
+                <tr>
+                  <td><code>lastExport</code></td>
+                  <td><strong>导出数据</strong>之后</td>
+                  <td>已导出的文本内容。</td>
+                </tr>
+                <tr>
+                  <td><code>lastExportPath</code></td>
+                  <td>导出成功之后</td>
+                  <td>实际写入的文件名。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>各算子页还会列出自己的输出变量与回退变量名。</p>
+          <h2 id="数据表">数据表</h2>
+          <p>
+            <code>dataTable</code> 是运行期间的行对象数组，相当于工作流的电子表格。<strong
+              >导出数据</strong
+            >
+            选择导出 <strong>Table</strong> 时，读取的就是它。
+          </p>
+          <ul>
+            <li>
+              <a href="operators-interaction-zh.html#operator-get-text">获取文本</a>、<a
+                href="operators-browser-zh.html#operator-read-page"
+                >读取页面</a
+              >
+              等读取算子可以把读到的内容写进数据表：勾选 <strong>保存到数据表</strong>，填写
+              <strong>数据列</strong>，每个匹配结果就成为该列的一个单元格。
+            </li>
+            <li>
+              在循环内，一次迭代写入
+              <code>loopIndex</code> 对应的那一行；不在循环内时，多个匹配结果会各占一行。
+            </li>
+            <li>再次写入同一列是替换单元格，因此两次读取可以拼出两列表格，而不是把行数翻倍。</li>
+            <li>
+              <a href="operators-data-zh.html#operator-insert-data">插入数据</a>、<a
+                href="operators-data-zh.html#operator-delete-data"
+                >删除数据</a
+              >、<a href="operators-data-zh.html#operator-sort-data">排序数据</a>
+              等数据算子编辑的是同一张表。
+            </li>
+            <li>数据表最多保存 100,000 行；超出后的写入会被忽略并报告。</li>
+          </ul>
+          <p>
+            空表无法导出：<strong>导出数据</strong>
+            会明确报错，而不是写出一个空文件。如果只需要一个值，请改成导出
+            <strong>Variable（变量）</strong>。
+          </p>
+          <h2 id="端口分支与循环">端口、分支与循环</h2>
+          <p>大多数算子只有一个输出，直接连到下一步。额外端口让一个节点可以选择不同路径：</p>
+          <ul>
+            <li>
+              <strong
+                ><a href="operators-conditions-zh.html#operator-conditions">条件判断</a></strong
+              >
+              — 按顺序排列的多条路径，各有自己的输出。运行走第一条所有条件都匹配的路径；<strong
+                >fallback</strong
+              >
+              输出始终存在，在没有路径匹配时使用。
+            </li>
+            <li>
+              <strong
+                ><a href="operators-conditions-zh.html#operator-element-exists"
+                  >元素是否存在</a
+                ></strong
+              >
+              — 元素存在时走一个输出，不存在时走另一个。
+            </li>
+            <li>
+              <strong>错误回退</strong> — 当某一步的
+              <strong>出错时</strong> 策略是“执行回退分支”时，失败路径走额外的 fallback 端口。
+            </li>
+            <li>
+              <strong>循环</strong> — 循环体从循环节点连出，通过 loop-back
+              端口回到循环节点，然后重复。
+            </li>
+          </ul>
+          <p>循环会提供上面列出的运行时变量：</p>
+          <ul>
+            <li>
+              <strong
+                ><a href="operators-conditions-zh.html#operator-repeat-task">重复任务</a></strong
+              >
+              按固定次数重复循环体。
+            </li>
+            <li>
+              <strong
+                ><a href="operators-conditions-zh.html#operator-while-loop">While 循环</a></strong
+              >
+              在条件成立时重复，最多 1,000 次。
+            </li>
+            <li>
+              <strong
+                ><a href="operators-conditions-zh.html#operator-loop-data">循环数据</a></strong
+              >
+              遍历 JSON 数组（<code>loopItem</code>、<code>loopIndex</code>）。
+            </li>
+            <li>
+              <strong
+                ><a href="operators-conditions-zh.html#operator-loop-elements">循环元素</a></strong
+              >
+              遍历页面元素（<code>loopElementSelector</code>、<code>loopIndex</code>）。
+            </li>
+            <li>
+              <strong
+                ><a href="operators-conditions-zh.html#operator-loop-breakpoint"
+                  >循环断点</a
+                ></strong
+              >
+              结束当前循环，继续执行循环之后的步骤。
+            </li>
+          </ul>
+          <p>
+            把分支连回更早的算子会让那个算子重复执行。编辑器会提示这种回跳形状；请确保条件最终会改变，否则运行会在迭代上限处停止。
+          </p>
+          <h2 id="错误重试与可靠性">错误、重试与可靠性</h2>
+          <p>算子抛错时，默认会让整次运行失败。属性面板为每个算子提供这些控制：</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>设置</th>
+                  <th>作用</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>禁用算子</strong></td>
+                  <td>跳过该步骤（包括副作用），但不删除它。</td>
+                </tr>
+                <tr>
+                  <td><strong>超时</strong></td>
+                  <td>运行超过限制时让该步失败。填 <code>0</code> 表示不限制。</td>
+                </tr>
+                <tr>
+                  <td><strong>出错时 → 重试</strong></td>
+                  <td>按配置的间隔重试动作，并指定次数。</td>
+                </tr>
+                <tr>
+                  <td><strong>出错时 → 抛出错误</strong></td>
+                  <td>用指定消息让运行失败。</td>
+                </tr>
+                <tr>
+                  <td><strong>出错时 → 继续执行</strong></td>
+                  <td>把该步标记为失败，然后继续执行下一步。</td>
+                </tr>
+                <tr>
+                  <td><strong>出错时 → 回退分支</strong></td>
+                  <td>沿该节点的 fallback 连线继续。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>运行级行为：</p>
+          <ul>
+            <li>
+              开始前引擎会检查必填参数。缺失值会写入运行日志，运行在第一个无法工作的算子前停止，而不是执行到一半才失败且没有上下文。
+            </li>
+            <li>失败的运行会保留日志。点击日志行可在画布上定位对应算子。</li>
+            <li>
+              <strong>调试模式</strong>
+              会在带断点的算子前暂停，显示该处捕获的变量，并支持继续、单步与停止。
+            </li>
+            <li>
+              <strong>从此处运行</strong>
+              从选中的节点开始执行，而不是从触发器开始，并使用当前页面状态。
+            </li>
+            <li>
+              工作流卡片上的
+              <strong>继续运行</strong>
+              会从最后一个干净完成的步骤之后继续，已经执行过的登录或提交不会重复。
+            </li>
+            <li>
+              <strong>保存执行日志</strong> 把运行记录留在历史中；<strong>完成时通知</strong>
+              在运行结束时发送通知。
+            </li>
+          </ul>
+          <h3 id="目标与校验">目标与校验</h3>
+          <p>
+            工作流可以带一个
+            <strong>工作流目标</strong
+            >：一句摘要，加上最后一步之后要检查的成功条件。生成的工作流还会给单个步骤写入目标契约——这一步要达成什么，以及哪些可观察事实可以证明它。
+          </p>
+          <p>这些契约用于：</p>
+          <ul>
+            <li>
+              <strong>认证</strong> —
+              从执行、逐步契约到工作流目标的分级校验。修改契约或图之后，工作流会回到未认证状态，直到重新校验通过。
+            </li>
+            <li>
+              <strong>AI 修复</strong> —
+              运行失败后，修复智能体依据目标契约与失败信息修改节点，并报告工作流能否在没有 AI
+              参与的情况下成功。
+            </li>
+            <li>
+              <strong>AI 接管</strong> —
+              可选地在真实页面上完成一次失败的步骤，修复建议以待确认状态保留，不会静默写入。
+            </li>
+          </ul>
+          <p>
+            手工搭建的工作流可以不写目标契约。它让“成功”成为可检查的事实，而不是“运行没有抛错”。
+          </p>
+          <h3 id="ai-种子召回">AI 种子召回</h3>
+          <p>
+            生成工作流时，曾解决过类似目标的已认证工作流可以作为步骤证据提供给生成器。种子只提供步骤建议；生成出来的图仍然要像其他工作流一样保存并执行。
+          </p>
+          <h2 id="文件下载与上传">文件、下载与上传</h2>
+          <h3 id="文件写到哪里">文件写到哪里</h3>
+          <p>扩展按以下顺序决定目标位置：</p>
+          <ol>
+            <li><strong>已配置的下载目录</strong> — 在 设置 → 下载目录 中选择。文件会静默写入。</li>
+            <li><strong>保存对话框</strong> — 未配置目录且侧边栏打开时，由你选择位置。</li>
+            <li>
+              <strong>扩展内部目录</strong> — 无人值守运行没人能点对话框时，文件写入扩展存储中的
+              <code>browser-copilot-downloads/</code>，运行日志会给出文件名。
+            </li>
+          </ol>
+          <p>
+            会产出文件的算子都走这条链：<strong>导出数据</strong>、<strong>截图</strong>（勾选保存到电脑时）、<strong
+              >保存到本地</strong
+            >
+            等。<strong>处理下载</strong> 会等待浏览器下载，并可通过同一路径保存文件。
+          </p>
+          <p>
+            算子接受文件路径时，路径是<strong>相对于下载目录</strong>的，不是宿主机绝对路径。允许子目录（<code>reports/sales.xlsx</code>），路径中的
+            <code>{{变量}}</code> 会在运行时插值。
+          </p>
+          <h3 id="上传来源">上传来源</h3>
+          <p>
+            <a href="operators-interaction-zh.html#operator-upload-file">上传文件</a> 支持四种来源：
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>来源</th>
+                  <th>适用场景</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>用户选择文件</td>
+                  <td>运行时有人在旁边选择文件。</td>
+                </tr>
+                <tr>
+                  <td>来自前面步骤的文件</td>
+                  <td>变量里已经保存了 data URL、文件产物或产物数组。</td>
+                </tr>
+                <tr>
+                  <td>最新下载的文件</td>
+                  <td>按文件名模式与类型过滤，上传最新的下载文件。</td>
+                </tr>
+                <tr>
+                  <td>指定文件路径</td>
+                  <td>上传下载目录中某个具体文件。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3 id="电子表格">电子表格</h3>
+          <p>
+            <a href="operators-data-zh.html#operator-parse-excel">解析 Excel</a>
+            从用户选择的文件、前面步骤保存在变量里的文件，或下载目录中的相对路径读取
+            <code>.xlsx</code> /
+            <code>.csv</code>。存在表头行时会产出按列名索引的对象数组，同时保留原始二维数组。
+          </p>
+          <h2 id="凭证">凭证</h2>
+          <p>
+            <a href="operators-data-zh.html#operator-get-secret">获取凭证</a>
+            在运行时把已保存的凭据字段读入变量。凭据保存在扩展的凭据库中（数据 →
+            密码与账号），不会写进工作流 JSON，并且每次运行都会重新读取。
+          </p>
+          <p>
+            它只适合必须保密的值：密码、API
+            key、token。用户名或搜索关键词不需要这个算子——放进表单值或触发器输入参数即可，保持可见、可编辑。
+          </p>
+          <p>读取的是字段引用，因此在数据页更新密码后，下一次运行就会生效，不需要修改工作流。</p>
+          <h2 id="ai-能力">AI 能力</h2>
+          <p>Browser Copilot 在多个位置使用 AI。这些能力彼此独立，运行工作流并不依赖它们。</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>能力</th>
+                  <th>出现位置</th>
+                  <th>作用</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>AI Agent</strong></td>
+                  <td>通用分类中的算子</td>
+                  <td>
+                    读取页面或元素，按你的提示分析，可选择在页面上操作，并把文本答案存入变量。
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>AI 接管</strong></td>
+                  <td>设置；失败运行（启用时）</td>
+                  <td>
+                    让智能体在真实页面上完成一次失败步骤，修复建议以待确认状态提供，不会静默应用。
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>AI 修复</strong></td>
+                  <td>运行结果与工作流工具栏</td>
+                  <td>根据运行日志与目标契约诊断失败，修改图并验证结果。</td>
+                </tr>
+                <tr>
+                  <td><strong>目标契约</strong></td>
+                  <td>触发器与每个算子的面板</td>
+                  <td>定义可供校验与修复使用的成功事实。</td>
+                </tr>
+                <tr>
+                  <td><strong>种子召回</strong></td>
+                  <td>工作流生成</td>
+                  <td>把之前认证通过的工作流作为步骤证据提供给生成器。</td>
+                </tr>
+                <tr>
+                  <td><strong>OCR</strong></td>
+                  <td>OCR 算子</td>
+                  <td>使用 Tesseract.js 在本地识别文字，不发起网络请求。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            调用模型的 AI
+            能力使用设置中配置的提供方，并各自带有预算或轮数上限，单个步骤不会无限循环。模型调用失败时，AI
+            Agent 步骤会像其他步骤一样报错，由它的 <strong>出错时</strong> 策略决定后续行为。
+          </p>
+          <h2 id="触发器与定时任务">触发器与定时任务</h2>
+          <p>
+            一个工作流可以配置多个触发器。第一个是<strong>主触发器</strong>，会同步到工作流记录上，供列表与调度器显示工作流的启动方式。禁用一个触发器不会影响其他触发器。
+          </p>
+          <p>各类触发器的细节：</p>
+          <ul>
+            <li>
+              <strong>手动</strong> 工作流从编辑器、工作流标签页，或右键菜单/快捷键触发器启动。
+            </li>
+            <li>
+              <strong>时间类</strong>
+              触发器（间隔、指定日期、每周的某几天）注册为浏览器闹钟，浏览器运行期间到点触发。
+            </li>
+            <li>
+              <strong>页面类</strong>
+              触发器（访问网页时、元素变化时）由注入页面的观察器实现，按网址或选择器匹配。
+            </li>
+            <li>
+              <strong>浏览器类</strong> 触发器（浏览器启动时、键盘快捷键、右键菜单）由扩展自身注册。
+            </li>
+          </ul>
+          <p>
+            <strong>定时任务</strong>
+            是另一个入口：任务拥有自己的调度配置，可以用自己的变量载荷运行一个已保存的工作流。启动逻辑属于工作流本身时用触发器；多个任务共享同一套调度，或任务之间需要串联时，用定时任务。
+          </p>
+          <h2 id="ocr-构建变体">OCR 构建变体</h2>
+          <p>Browser Copilot 有两种构建变体：</p>
+          <ul>
+            <li>
+              <strong>完整版</strong> — 包含 Tesseract.js 与语言数据，<a
+                href="operators-browser-zh.html#operator-ocr"
+                >OCR 文字识别</a
+              >
+              可离线工作。
+            </li>
+            <li>
+              <strong>精简版</strong>（<code>no-ocr</code>）— 移除 OCR 引擎与语言文件。OCR
+              算子显示为不可用，并拒绝运行。
+            </li>
+          </ul>
+          <p>其他功能在两种构建中行为一致。OCR 算子页带有 <strong>仅完整版可用</strong> 徽章。</p>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">本页目录</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#工作流结构"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >工作流结构</a
+            ><a
+              href="#变量与插值"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >变量与插值</a
+            ><a
+              href="#引用语法"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >引用语法</a
+            ><a
+              href="#以文本保存的对象"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >以文本保存的对象</a
+            ><a
+              href="#插值的作用范围"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >插值的作用范围</a
+            ><a
+              href="#缺失与空值"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >缺失与空值</a
+            ><a
+              href="#运行时变量"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >运行时变量</a
+            ><a
+              href="#数据表"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >数据表</a
+            ><a
+              href="#端口分支与循环"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >端口、分支与循环</a
+            ><a
+              href="#错误重试与可靠性"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >错误、重试与可靠性</a
+            ><a
+              href="#目标与校验"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >目标与校验</a
+            ><a
+              href="#ai-种子召回"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >AI 种子召回</a
+            ><a
+              href="#文件下载与上传"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >文件、下载与上传</a
+            ><a
+              href="#文件写到哪里"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >文件写到哪里</a
+            ><a
+              href="#上传来源"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >上传来源</a
+            ><a
+              href="#电子表格"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >电子表格</a
+            ><a href="#凭证" class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >凭证</a
+            ><a
+              href="#ai-能力"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >AI 能力</a
+            ><a
+              href="#触发器与定时任务"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >触发器与定时任务</a
+            ><a
+              href="#ocr-构建变体"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >OCR 构建变体</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/concepts.zh-CN.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >在 GitHub 上编辑此页</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>由 docs/workflow 生成</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="getting-started-zh.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← 上一页</span
+            ><span class="text-sm text-ink">快速上手</span></a
+          ><a
+            href="operators-interaction-zh.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">下一页 →</span
+            ><span class="text-sm text-ink">页面交互</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">本页目录</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#工作流结构"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >工作流结构</a
+            ><a
+              href="#变量与插值"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >变量与插值</a
+            ><a
+              href="#引用语法"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >引用语法</a
+            ><a
+              href="#以文本保存的对象"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >以文本保存的对象</a
+            ><a
+              href="#插值的作用范围"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >插值的作用范围</a
+            ><a
+              href="#缺失与空值"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >缺失与空值</a
+            ><a
+              href="#运行时变量"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >运行时变量</a
+            ><a
+              href="#数据表"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >数据表</a
+            ><a
+              href="#端口分支与循环"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >端口、分支与循环</a
+            ><a
+              href="#错误重试与可靠性"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >错误、重试与可靠性</a
+            ><a
+              href="#目标与校验"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >目标与校验</a
+            ><a
+              href="#ai-种子召回"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >AI 种子召回</a
+            ><a
+              href="#文件下载与上传"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >文件、下载与上传</a
+            ><a
+              href="#文件写到哪里"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >文件写到哪里</a
+            ><a
+              href="#上传来源"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >上传来源</a
+            ><a
+              href="#电子表格"
+              class="block py-1 pl-3 text-xs text-muted transition-colors hover:text-ink"
+              >电子表格</a
+            ><a href="#凭证" class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >凭证</a
+            ><a
+              href="#ai-能力"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >AI 能力</a
+            ><a
+              href="#触发器与定时任务"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >触发器与定时任务</a
+            ><a
+              href="#ocr-构建变体"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >OCR 构建变体</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm 非商业许可 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

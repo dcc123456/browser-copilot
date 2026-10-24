@@ -1,0 +1,1252 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>条件控制算子 — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="条件分支、元素判断、While 循环、数据循环、元素循环、重复任务与循环断点。"
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-conditions-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-conditions.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-conditions-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-conditions.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="条件控制算子 — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="条件分支、元素判断、While 循环、数据循环、元素循环、重复任务与循环断点。"
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/operators-conditions-zh.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="条件控制算子 — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="条件分支、元素判断、While 循环、数据循环、元素循环、重复任务与循环断点。"
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index-zh.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index-zh.html" class="text-sm text-ink">文档</a>
+          <a
+            href="../index-zh.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >功能</a
+          >
+          <a
+            href="../index-zh.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >工作原理</a
+          >
+          <a
+            href="operators-conditions.html"
+            class="text-sm text-muted transition-colors hover:text-ink"
+            >EN</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">开始</p>
+            <nav class="space-y-1">
+              <a
+                href="index-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >文档概览</a
+              ><a
+                href="getting-started-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >快速上手</a
+              ><a
+                href="concepts-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >工作流概念</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">算子</p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >页面交互</a
+              ><a
+                href="operators-browser-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >浏览器</a
+              ><a
+                href="operators-general-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >通用</a
+              ><a
+                href="operators-data-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >数据</a
+              ><a
+                href="operators-conditions-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >条件控制</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">文档菜单</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                开始
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >文档概览</a
+                ><a
+                  href="getting-started-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >快速上手</a
+                ><a
+                  href="concepts-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >工作流概念</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                算子
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >页面交互</a
+                ><a
+                  href="operators-browser-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >浏览器</a
+                ><a
+                  href="operators-general-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >通用</a
+                ><a
+                  href="operators-data-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >数据</a
+                ><a
+                  href="operators-conditions-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >条件控制</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a><span>/</span
+          ><span class="text-muted">条件控制</span>
+        </div>
+        <article class="docs-prose">
+          <h1>条件控制算子</h1>
+          <p>
+            本页介绍决定运行走向和重复次数的算子：<strong>条件</strong>、<strong>元素是否存在</strong>、四种循环，以及提前结束循环的算子。每个算子都列出设置、输出以及
+            Browser Copilot 特有的行为。分支端口与回跳连接在<a
+              href="concepts-zh.html#%E7%AB%AF%E5%8F%A3%E5%88%86%E6%94%AF%E4%B8%8E%E5%BE%AA%E7%8E%AF"
+              >工作流概念</a
+            >中统一说明，步骤失败后的处理见<a
+              href="concepts-zh.html#%E9%94%99%E8%AF%AF%E9%87%8D%E8%AF%95%E4%B8%8E%E5%8F%AF%E9%9D%A0%E6%80%A7"
+              >错误、重试与可靠性</a
+            >；通用的<strong>描述</strong>、<strong>禁用算子</strong>、<strong>超时</strong>和<strong>出错时</strong>设置适用于整个节点，因此不在表格中重复。定位器支持
+            CSS 选择器或 XPath 表达式，数据字段支持 <code>{{variables}}</code>。
+          </p>
+          <section data-operator="repeat-task">
+            <h2 id="operator-repeat-task">重复任务</h2>
+            <p>
+              按固定次数运行所连接的分支，然后从 <strong>end</strong> 输出继续。<a
+                href="https://www.goautoma.com/extension/docs/blocks/repeat-task.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>重复次数</td>
+                    <td>数字</td>
+                    <td><code>1</code></td>
+                    <td>
+                      分支执行的次数。填 <code>0</code> 时循环体一次也不执行，直接从
+                      <strong>end</strong> 继续。
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出">输出</h3>
+            <ul>
+              <li>
+                <code>loopIndex</code> —— 从 0
+                开始的重复序号，每轮执行前写入，结束后保留最后一轮的值。
+              </li>
+              <li>
+                <strong>loop</strong
+                >（<code>output-1</code>）进入循环体；<strong>end</strong>（<code>output-2</code>）在最后一轮结束后继续。
+              </li>
+            </ul>
+            <h3 id="browser-copilot-说明">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                循环体通过把最后一步连回本节点来收尾；再次到达循环节点即表示一轮结束，详见<a
+                  href="concepts-zh.html#%E7%AB%AF%E5%8F%A3%E5%88%86%E6%94%AF%E4%B8%8E%E5%BE%AA%E7%8E%AF"
+                  >端口、分支与循环</a
+                >。
+              </li>
+              <li>填 <code>0</code> 时循环体不执行，但 <strong>end</strong> 分支照常运行。</li>
+              <li>不提供 <code>loopItem</code>，重复序号是这里唯一的循环上下文。</li>
+              <li>
+                循环体内某一步失败会同时终止循环与运行，<strong>end</strong> 分支不会执行，见<a
+                  href="concepts-zh.html#%E9%94%99%E8%AF%AF%E9%87%8D%E8%AF%95%E4%B8%8E%E5%8F%AF%E9%9D%A0%E6%80%A7"
+                  >错误、重试与可靠性</a
+                >。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="conditions">
+            <h2 id="operator-conditions">条件</h2>
+            <p>
+              自上而下依次判断命名的输出路径，运行走第一条所有条件都成立的路径；都不成立时走
+              <strong>fallback</strong>。<a
+                href="https://www.goautoma.com/extension/docs/blocks/conditions.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-2">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>输出路径</td>
+                    <td>列表</td>
+                    <td>无</td>
+                    <td>
+                      有序的分支列表。每条路径拥有一个输出端口和独立的条件树，最多 20
+                      条；达到上限后<strong>添加路径</strong>不可用。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>路径名称</td>
+                    <td>文本</td>
+                    <td><code>Path N</code></td>
+                    <td>
+                      显示在该路径端口和运行日志中的名称。改名不会改变路径 id，已有连线不受影响。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>路径条件</td>
+                    <td>条件树</td>
+                    <td>空</td>
+                    <td>
+                      OR 组套 AND
+                      行：同组内每一行都成立，且至少一个组成立，该路径才算命中。没有任何行的路径永不命中。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>无条件满足时重试</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；当前构建不会重新判断（见说明）。</td>
+                  </tr>
+                  <tr>
+                    <td>次数</td>
+                    <td>数字</td>
+                    <td><code>10</code></td>
+                    <td>仅在开启<strong>无条件满足时重试</strong>时显示。</td>
+                  </tr>
+                  <tr>
+                    <td>超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>1000</code></td>
+                    <td>仅在开启<strong>无条件满足时重试</strong>时显示。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-2">输出</h3>
+            <ul>
+              <li>
+                每条配置好的路径一个端口，key 为
+                <code>output-&lt;pathId&gt;</code>，标签是路径名称；另有始终存在的
+                <strong>fallback</strong> 端口（<code>output-none</code>）。
+              </li>
+              <li>不写入变量；运行日志会写明命中的路径，或提示全部不成立。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-2">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                只有第一条命中的路径会执行。调整判断顺序请用路径的上移 / 下移按钮，不要复制条件。
+              </li>
+              <li>空路径会被跳过，而不是当作恒真，所以配了一半的分支不会吞掉整次运行。</li>
+              <li>
+                端口互斥：路径命中但对应端口没有连线时，运行在该节点结束，不会落到其他路径，详见<a
+                  href="concepts-zh.html#%E7%AB%AF%E5%8F%A3%E5%88%86%E6%94%AF%E4%B8%8E%E5%BE%AA%E7%8E%AF"
+                  >端口、分支与循环</a
+                >。
+              </li>
+              <li>
+                导入的工作流可能带旧的 <code>code</code> 表达式；它的优先级高于
+                <code>paths</code>，此时节点使用 <code>output-1</code>（真）与
+                <code>output-2</code>（假）。编辑器写入的是
+                <code>paths</code>，只要该键存在就以它为准——包括空列表，那会把每次运行都送到
+                <strong>fallback</strong>。
+              </li>
+              <li>
+                <strong>无条件满足时重试</strong
+                >及其中两个数字只为往返保存，当前引擎不会应用。可行替代是在节点前加一个<strong>延时</strong>步骤，或用页面条件驱动的
+                <strong>While 循环</strong>。
+              </li>
+              <li>
+                条件行可以用运算符比较两侧的值（<code>Equals</code>、<code>Contains</code>、大小比较、正则等），也可以是独立判断：元素存在
+                / 不存在 / 可见、数据存在、代码片段。插值之后，元素判断在当前页面上执行。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="element-exists">
+            <h2 id="operator-element-exists">元素是否存在</h2>
+            <p>
+              定位器至少匹配到一个元素时走 <strong>exists</strong> 端口，一个都没有时走
+              <strong>not exists</strong> 端口。<a
+                href="https://www.goautoma.com/extension/docs/blocks/element-exists.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-3">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td>
+                      <code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。XPath
+                      由取值本身识别。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>要探测的定位器，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择多个元素</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>通用定位选项；本判断本来就是“一个或多个”，此项不改变行为。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>由通用定位选项保存；当前构建只探测一次（见说明）。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>仅在开启<strong>等待选择器</strong>时显示。</td>
+                  </tr>
+                  <tr>
+                    <td>Try for</td>
+                    <td>数字</td>
+                    <td><code>1</code></td>
+                    <td>表单记录的重试次数。</td>
+                  </tr>
+                  <tr>
+                    <td>超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>500</code></td>
+                    <td>表单记录的重试间隔。</td>
+                  </tr>
+                  <tr>
+                    <td>不存在时抛出错误</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>记录意图：不存在时让步骤失败，而不是走 <strong>not exists</strong>。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-3">输出</h3>
+            <ul>
+              <li>
+                <strong>exists</strong>（<code>output-1</code>）与
+                <strong>not exists</strong
+                >（<code>output-2</code>），两者互斥；端口未连线时运行在该节点结束。
+              </li>
+              <li>不写入变量，匹配数量只出现在运行日志里。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-3">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                引擎只探测一次。<strong>Try for</strong
+                >、<strong>超时（毫秒）</strong>、<strong>等待选择器</strong>和<strong>不存在时抛出错误</strong>会随算子保存，但这里都不会被读取，所以元素出现较晚时仍然会走
+                <strong>not exists</strong
+                >，即使勾选了抛出错误。请在本节点前加一个<strong>延时</strong>步骤，或在真正需要元素的那一步里等待。
+              </li>
+              <li>判断标准是“匹配数量大于 0”：隐藏元素同样计入，定位器也不需要唯一。</li>
+              <li>
+                <strong>查找元素方式 → text</strong>
+                会被保存，但不会转成文本搜索，取值仍按选择器查询。这里请用 CSS 或
+                XPath，或在<strong>条件</strong>里用<strong>元素文本</strong>条件行。
+              </li>
+              <li>
+                无论结果如何都要继续时，把两个端口都连上；留空的一侧会让运行在对应的判断结果处结束。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="while-loop">
+            <h2 id="operator-while-loop">While 循环</h2>
+            <p>
+              在条件成立期间重复运行所连接的分支，每轮开始前先判断条件。<a
+                href="https://www.goautoma.com/extension/docs/blocks/while-loop.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-4">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>While 循环条件</td>
+                    <td>条件树</td>
+                    <td>未设置</td>
+                    <td>
+                      OR 组套 AND 行，构建方式与<strong>条件</strong>算子相同。每轮开始前判断。
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-4">输出</h3>
+            <ul>
+              <li><code>loopIndex</code> —— 循环体内从 0 开始的轮次序号。</li>
+              <li>
+                <strong>loop</strong
+                >（<code>output-1</code>）运行循环体；<strong>end</strong>（<code>output-2</code>）在条件不再成立后继续。
+              </li>
+            </ul>
+            <h3 id="browser-copilot-说明-4">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                第一次判断就不成立时循环体一次也不执行，运行直接从 <strong>end</strong> 继续。
+              </li>
+              <li>
+                循环最多 1,000
+                轮。超过上限时运行以迭代超限错误失败，而不是一直空转；该节点记为失败，<strong
+                  >end</strong
+                >
+                不会执行。
+              </li>
+              <li>
+                没有保存条件的节点会记录一条错误并执行 0 轮。编辑器默认给出一组包含两个空行的 OR
+                组，但这些行只有在你编辑条件树后才会写入节点；而空值与空值比较是成立的，原样保存的默认条件会让循环跑到上限，请填入真实操作数。
+              </li>
+              <li>
+                <strong>结束循环</strong>从
+                <strong>end</strong>
+                离开。只跳过当前项的循环断点同样消耗一轮，因此“总是跳过”的循环体绕不过上限保护。
+              </li>
+              <li>
+                循环体内某一步失败会终止循环与运行，不经过 <strong>end</strong>，见<a
+                  href="concepts-zh.html#%E9%94%99%E8%AF%AF%E9%87%8D%E8%AF%95%E4%B8%8E%E5%8F%AF%E9%9D%A0%E6%80%A7"
+                  >错误、重试与可靠性</a
+                >。
+              </li>
+              <li>
+                导入的工作流可能用
+                <code>code</code>
+                表达式代替条件树。已保存的条件树优先，只有没有条件树时才使用表达式。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="loop-data">
+            <h2 id="operator-loop-data">循环数据</h2>
+            <p>
+              遍历数据表、数字区间、变量、JSON 数组或页面元素列表，把当前项写入
+              <code>loopItem</code>，把位置写入 <code>loopIndex</code>。<a
+                href="https://www.goautoma.com/extension/docs/blocks/loop-data.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-5">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>循环 ID</td>
+                    <td>文本</td>
+                    <td>自动（6 位）</td>
+                    <td>供<strong>循环断点</strong>定位本循环，也用于记录恢复进度。</td>
+                  </tr>
+                  <tr>
+                    <td>循环遍历</td>
+                    <td>下拉选择</td>
+                    <td><code>data-columns</code></td>
+                    <td>
+                      <code>data-columns</code
+                      >（数据表）、<code>numbers</code>、<code>google-sheets</code>、<code>variable</code>、<code>custom-data</code>、<code>elements</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>引用键</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>仅 Google 表格来源使用；当前构建不可用，见说明。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      仅变量来源使用。<code>order.items</code> 这类点路径与
+                      <code>{{order.items}}</code> 读法一致。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>元素选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>仅页面元素来源使用，支持 CSS 或 XPath；每个匹配项都会遍历。</td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>仅页面元素来源：轮询直到至少出现一个匹配项。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>仅页面元素来源；开启<strong>等待选择器</strong>时显示。</td>
+                  </tr>
+                  <tr>
+                    <td>自定义数据（JSON 数组）</td>
+                    <td>文本</td>
+                    <td><code>[]</code></td>
+                    <td>
+                      JSON 来源。<strong>导入文件</strong>还接受不超过 1MB 的
+                      <code>.json</code>、<code>.csv</code> 与 <code>.xlsx</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>首行作为表头</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>仅导入时使用；作用于表格文件，导入的每一行会变成按列名取值的对象。</td>
+                  </tr>
+                  <tr>
+                    <td>起始数字</td>
+                    <td>数字</td>
+                    <td><code>1</code></td>
+                    <td>数字序列来源的第一个值。</td>
+                  </tr>
+                  <tr>
+                    <td>目标数字</td>
+                    <td>数字</td>
+                    <td><code>10</code></td>
+                    <td>
+                      数字序列来源的最后一个值（含）；<strong>起始数字</strong>更大时倒序递减。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>循环最大数据量（0 为不限）</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td>迭代上限；<code>0</code> 表示遍历全部数据。</td>
+                  </tr>
+                  <tr>
+                    <td>从索引开始</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td>先跳过这么多项。开启<strong>恢复上一个工作流</strong>时隐藏。</td>
+                  </tr>
+                  <tr>
+                    <td>恢复上一个工作流</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>从上次记录的索引继续，未完成的那一项会重跑。</td>
+                  </tr>
+                  <tr>
+                    <td>倒序循环</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>反向遍历数据源，且在起始索引与上限之前生效。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-5">输出</h3>
+            <ul>
+              <li>
+                <code>loopIndex</code> —— 在数据源中的绝对位置；跳过 3 项后的第一项是
+                <code>3</code>。
+              </li>
+              <li>
+                <code>loopItem</code> —— 当前项：数据表行与 JSON
+                项是对象，数字区间是数字。页面元素来源把它设为 <code>null</code>。
+              </li>
+              <li>
+                只有一个输出端口：循环体。该循环没有 <code>end</code> 端口，循环结束后的走向见说明。
+              </li>
+            </ul>
+            <h3 id="browser-copilot-说明-5">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                <strong>循环之后的路径</strong
+                >：由于只有一个输出，循环结束后运行从循环体内<strong>循环断点</strong>的出边继续。循环体里没有循环断点时，循环结束后运行无处可去。带上旧
+                <code>end</code> 端口导入的图仍可用那条边兜底。
+              </li>
+              <li>
+                数据来源：
+                <ul>
+                  <li>
+                    <strong>数据表</strong>读取 <code>dataTable</code>；空表会记录一条提示并执行 0
+                    轮。
+                  </li>
+                  <li><strong>数字序列</strong>生成闭区间，忽略起始索引、上限、倒序与恢复。</li>
+                  <li>
+                    <strong>变量</strong>：数组按原样遍历；JSON
+                    文本先解析；普通字符串按字符遍历；数字遍历 <code>1..N</code>。
+                  </li>
+                  <li>
+                    <strong>自定义数据</strong>必须是 JSON
+                    数组；为空或格式错误时运行失败并给出具体原因。
+                  </li>
+                  <li>
+                    <strong>页面元素</strong>来源在循环开始时统计一次匹配数，并为每一项写入
+                    <code>loopElementSelector</code>。
+                  </li>
+                  <li>
+                    <strong>Google 表格</strong>在当前构建中被拒绝（需要 OAuth
+                    凭据）；请把表格作为自定义数据导入。
+                  </li>
+                </ul>
+              </li>
+              <li>
+                准备顺序是：先倒序，再跳过<strong>从索引开始</strong>，最后应用<strong>循环最大数据量</strong>。数据源在循环开始时取快照，循环体追加的行不会被本轮遍历。
+              </li>
+              <li>
+                <strong>恢复上一个工作流</strong
+                >会在每一项的循环体执行前记录当前索引，因此中断的运行会重跑未完成的那一项；正常结束与<strong>结束循环</strong>都会清除该记录。
+              </li>
+              <li>循环体内某一步失败会终止循环与运行，不经过循环之后的路径。</li>
+              <li>
+                数字区间起止值无效、变量内容不可遍历或来源未知时，运行失败并指出是哪一处循环，见<a
+                  href="concepts-zh.html#%E9%94%99%E8%AF%AF%E9%87%8D%E8%AF%95%E4%B8%8E%E5%8F%AF%E9%9D%A0%E6%80%A7"
+                  >错误、重试与可靠性</a
+                >。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="loop-elements">
+            <h2 id="operator-loop-elements">循环元素</h2>
+            <p>
+              遍历定位器匹配到的每个元素，并把当前元素的选择器写入
+              <code>loopElementSelector</code>。<a
+                href="https://www.goautoma.com/extension/docs/blocks/loop-elements.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-6">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>循环 ID</td>
+                    <td>文本</td>
+                    <td>自动（6 位）</td>
+                    <td>供<strong>循环断点</strong>定位本循环。</td>
+                  </tr>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>、<code>xpath</code> 或 <code>text</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      要遍历的集合的定位器，每个匹配项都会用到，支持 <code>{{variables}}</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>等待选择器</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>由通用定位选项保存；匹配数在循环开始时统计一次，不会轮询。</td>
+                  </tr>
+                  <tr>
+                    <td>选择器超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>5000</code></td>
+                    <td>仅在开启<strong>等待选择器</strong>时显示。</td>
+                  </tr>
+                  <tr>
+                    <td>循环最大数据量（0 为不限）</td>
+                    <td>数字</td>
+                    <td><code>0</code></td>
+                    <td>迭代上限；<code>0</code> 表示遍历全部匹配项。</td>
+                  </tr>
+                  <tr>
+                    <td>倒序循环</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>随算子保存；当前构建按文档顺序遍历。</td>
+                  </tr>
+                  <tr>
+                    <td>加载更多元素：操作</td>
+                    <td>下拉选择</td>
+                    <td><code>none</code></td>
+                    <td>
+                      <code>none</code>、点击元素、点击链接、向下滚动、向上滚动。只保存，见说明。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>加载更多元素：元素选择器</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>两个点击操作会显示。</td>
+                  </tr>
+                  <tr>
+                    <td>加载更多元素：等待更多元素的最长秒数</td>
+                    <td>数字</td>
+                    <td><code>5</code></td>
+                    <td>点击元素与两个滚动操作会显示。</td>
+                  </tr>
+                  <tr>
+                    <td>加载更多元素：滚动到底部 / 顶部</td>
+                    <td>复选框</td>
+                    <td>开启</td>
+                    <td>滚动操作会显示，标签随方向变化。</td>
+                  </tr>
+                  <tr>
+                    <td>加载更多元素：等待页面加载的最长秒数</td>
+                    <td>数字</td>
+                    <td><code>10</code></td>
+                    <td>点击链接时显示。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-6">输出</h3>
+            <ul>
+              <li><code>loopIndex</code> —— 在匹配集合中从 0 开始的位置。</li>
+              <li>
+                <code>loopElementSelector</code> ——
+                指向当前元素的选择器，用于拼进循环体自己的定位器。
+              </li>
+              <li>元素循环不写 <code>loopItem</code>。</li>
+              <li>
+                只有一个输出端口：循环体。循环结束后的走向从循环体内的<strong>循环断点</strong>出边离开，与<strong>循环数据</strong>一致。
+              </li>
+            </ul>
+            <h3 id="browser-copilot-说明-6">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                在循环体里这样使用：<code>{{loopElementSelector}} .price</code>，或作为点击 /
+                读取步骤的定位器。
+              </li>
+              <li>
+                匹配数在循环开始时统计一次；之后新增的元素不会被遍历。循环体执行期间才加载出来的内容需要另起一个循环。
+              </li>
+              <li>
+                某一轮无法生成唯一选择器时，循环会记录一条错误并把
+                <code>loopElementSelector</code>
+                留空；循环体会因未解析的标记失败，而不是悄悄重复第一个元素。
+              </li>
+              <li>
+                <strong>加载更多元素</strong
+                >区块与<strong>倒序循环</strong>会随工作流往返保存，但当前构建不执行。请在循环体末尾用<strong>滚动元素</strong>或点击步骤加载更多内容。
+              </li>
+              <li>
+                循环体内某一步失败会终止循环与运行，不经过循环之后的路径，见<a
+                  href="concepts-zh.html#%E9%94%99%E8%AF%AF%E9%87%8D%E8%AF%95%E4%B8%8E%E5%8F%AF%E9%9D%A0%E6%80%A7"
+                  >错误、重试与可靠性</a
+                >。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="loop-breakpoint">
+            <h2 id="operator-loop-breakpoint">循环断点</h2>
+            <p>
+              在循环体内的任意位置结束当前这一轮，或结束整个循环。<a
+                href="https://www.goautoma.com/extension/docs/blocks/loop-breakpoint.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-7">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>循环 ID</td>
+                    <td>文本</td>
+                    <td>—</td>
+                    <td>
+                      要结束的循环：填循环的<strong>循环 ID</strong>或其节点
+                      id。留空则作用于最内层循环。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>结束循环</td>
+                    <td>复选框</td>
+                    <td>关闭</td>
+                    <td>关闭时跳过当前项剩余步骤，进入下一项；开启时直接离开整个循环。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-7">输出</h3>
+            <ul>
+              <li>
+                一个输出端口。对<strong>循环数据</strong>和<strong>循环元素</strong>来说，它就是循环之后的路径，因为这两种循环没有自己的
+                <code>end</code> 端口。
+              </li>
+              <li>不写入变量。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-7">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                在<strong>循环数据</strong>和<strong>循环元素</strong>中，循环结束后运行沿本节点的出边继续。只跳过当前项时，运行进入下一项，并把这条出边留到循环结束时使用；<strong>结束循环</strong>会立即跳到那条出边。
+              </li>
+              <li>
+                在 <strong>While 循环</strong>和<strong>重复任务</strong>中，离开循环走的是循环的
+                <strong>end</strong> 端口，而不是本节点的出边；跳过当前项仍会为 While
+                循环的上限计一轮。
+              </li>
+              <li>
+                <strong>循环 ID</strong> 留空作用于最内层循环。填写外层循环的 ID
+                会一并解开内层循环，由外层循环接手处理。
+              </li>
+              <li>
+                不在任何循环内，或填写的 ID
+                匹配不到任何外层循环时，该算子会被忽略并记录一条提示，运行仍然成功。
+              </li>
+              <li>
+                该算子不会重试、不会失败、也不会走错误回退：它的哨兵异常绕过<strong>出错时</strong>，直接由循环捕获。见<a
+                  href="concepts-zh.html#%E9%94%99%E8%AF%AF%E9%87%8D%E8%AF%95%E4%B8%8E%E5%8F%AF%E9%9D%A0%E6%80%A7"
+                  >错误、重试与可靠性</a
+                >。
+              </li>
+              <li>
+                它不是调试断点。调试暂停来自块数据里的
+                <code>$breakpoint</code>
+                标记（在算子菜单里切换），会在测试运行到达该算子前暂停，与结束循环无关。检查点按每个已完成的步骤写入，因此恢复运行会从最后一个检查点之后的步骤继续。
+              </li>
+            </ul>
+          </section>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">本页目录</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#operator-repeat-task"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >重复任务</a
+            ><a
+              href="#operator-conditions"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >条件</a
+            ><a
+              href="#operator-element-exists"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >元素是否存在</a
+            ><a
+              href="#operator-while-loop"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >While 循环</a
+            ><a
+              href="#operator-loop-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >循环数据</a
+            ><a
+              href="#operator-loop-elements"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >循环元素</a
+            ><a
+              href="#operator-loop-breakpoint"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >循环断点</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/operators-conditions.zh-CN.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >在 GitHub 上编辑此页</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>由 docs/workflow 生成</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="operators-data-zh.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← 上一页</span
+            ><span class="text-sm text-ink">数据</span></a
+          ><span></span>
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">本页目录</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#operator-repeat-task"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >重复任务</a
+            ><a
+              href="#operator-conditions"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >条件</a
+            ><a
+              href="#operator-element-exists"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >元素是否存在</a
+            ><a
+              href="#operator-while-loop"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >While 循环</a
+            ><a
+              href="#operator-loop-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >循环数据</a
+            ><a
+              href="#operator-loop-elements"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >循环元素</a
+            ><a
+              href="#operator-loop-breakpoint"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >循环断点</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm 非商业许可 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

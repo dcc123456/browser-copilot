@@ -1,0 +1,2124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Browser operators — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="Tabs, windows, history, screenshots, downloads, cookies, and OCR with 18 browser operators."
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-browser.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-browser.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-browser-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-browser.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Browser operators — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="Tabs, windows, history, screenshots, downloads, cookies, and OCR with 18 browser operators."
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/operators-browser.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Browser operators — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="Tabs, windows, history, screenshots, downloads, cookies, and OCR with 18 browser operators."
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index.html" class="text-sm text-ink">Docs</a>
+          <a
+            href="../index.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >Features</a
+          >
+          <a
+            href="../index.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >How it works</a
+          >
+          <a
+            href="operators-browser-zh.html"
+            class="text-sm text-muted transition-colors hover:text-ink"
+            >中文</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">Start</p>
+            <nav class="space-y-1">
+              <a
+                href="index.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Overview</a
+              ><a
+                href="getting-started.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Getting started</a
+              ><a
+                href="concepts.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Workflow concepts</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+              Operators
+            </p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Web interaction</a
+              ><a
+                href="operators-browser.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >Browser</a
+              ><a
+                href="operators-general.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >General</a
+              ><a
+                href="operators-data.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Data</a
+              ><a
+                href="operators-conditions.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Control flow</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">Documentation menu</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Start
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Overview</a
+                ><a
+                  href="getting-started.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Getting started</a
+                ><a
+                  href="concepts.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Workflow concepts</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Operators
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Web interaction</a
+                ><a
+                  href="operators-browser.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >Browser</a
+                ><a
+                  href="operators-general.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >General</a
+                ><a
+                  href="operators-data.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Data</a
+                ><a
+                  href="operators-conditions.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Control flow</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a><span>/</span
+          ><span class="text-muted">Browser</span>
+        </div>
+        <article class="docs-prose">
+          <h1>Browser operators</h1>
+          <p>
+            These operators work with tabs, windows, navigation, downloads, dialogs, cookies, and
+            page capture. They either change which page the workflow is driving or read
+            browser-level state that is not part of the DOM.
+          </p>
+          <p>
+            All data fields accept <code>{{variables}}</code>. The common
+            <strong>Description</strong>, <strong>Disable block</strong>, <strong>Timeout</strong>,
+            and <strong>On error</strong> settings apply to every node and are not repeated in the
+            tables below. Fields that are stored but ignored by the current executor are called out
+            in each operator&#39;s notes.
+          </p>
+          <section data-operator="active-tab">
+            <h2 id="operator-active-tab">Active tab</h2>
+            <p>
+              Records the browser&#39;s active tab as the tab the workflow is working with.
+              <a href="https://www.goautoma.com/extension/docs/blocks/active-tab.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Disable block</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Standard setting; skips this operator at run time.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastActiveTab}}</code> receives <code>{ id, url, title, active }</code> for
+                the active tab.
+              </li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The operator reads the active tab but does not change the run&#39;s tab pin. Use
+                <strong>Switch tab</strong> when later steps must move to a specific tab.
+              </li>
+              <li>
+                There is no output-variable field for this operator; the result is always stored
+                under <code>lastActiveTab</code>.
+              </li>
+              <li>It has no editable settings beyond the standard block options.</li>
+            </ul>
+          </section>
+          <section data-operator="new-tab">
+            <h2 id="operator-new-tab">New tab</h2>
+            <p>
+              Opens a URL in a new tab and makes it the tab the workflow drives.
+              <a href="https://www.goautoma.com/extension/docs/blocks/new-tab.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-2">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>New tab URL</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Protocol plus address. An empty address opens a blank tab. Accepts
+                      <code>{{variables}}</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Update previously opened tab</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Reuse the tab opened by the previous <strong>New tab</strong> step instead of
+                      creating another.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Wait until the tab is loaded</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Wait for the tab to reach <code>complete</code> before continuing.</td>
+                  </tr>
+                  <tr>
+                    <td>Set as active tab</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Add tab to a group</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Use custom User-Agent</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>User-Agent</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Only shown when the custom User-Agent option is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Tab zoom</td>
+                    <td>Range</td>
+                    <td><code>1</code></td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-2">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-2">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The tab is always created active, so <strong>Set as active tab</strong> currently
+                has no effect. <strong>Add tab to a group</strong>, the custom User-Agent, and
+                <strong>Tab zoom</strong> are stored but not applied.
+              </li>
+              <li>
+                <strong>Update previously opened tab</strong> reuses only the tab created by this
+                block&#39;s previous run and switches its URL when one is provided. If that tab was
+                closed, a new tab is created.
+              </li>
+              <li>
+                The step pins the run to the new tab. If
+                <strong>Wait until the tab is loaded</strong> is off, a following read should use
+                <strong>Wait for selector</strong> or poll for its own content.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="switch-tab">
+            <h2 id="operator-switch-tab">Switch tab</h2>
+            <p>
+              Brings an open tab selected by pattern, title, position, or index to the foreground
+              and makes it the workflow&#39;s tab.
+              <a href="https://www.goautoma.com/extension/docs/blocks/switch-tab.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-3">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find tab by</td>
+                    <td>Select</td>
+                    <td><code>match-patterns</code></td>
+                    <td>
+                      <code>match-patterns</code>, <code>tab-title</code>, <code>next-tab</code>,
+                      <code>prev-tab</code>, or <code>tab-index</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Match patterns</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Glob matched against the tab URL, for example
+                      <code>https://example.com/*</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Tab title</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Substring matched against the tab title.</td>
+                  </tr>
+                  <tr>
+                    <td>Create if there&#39;s no match</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Create a tab when pattern or title matching finds nothing.</td>
+                  </tr>
+                  <tr>
+                    <td>New tab URL</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Address used by <strong>Create if there&#39;s no match</strong>.</td>
+                  </tr>
+                  <tr>
+                    <td>Index</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Zero-based tab index for <code>tab-index</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Set as active tab</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Focus the tab in the browser in addition to retargeting the workflow.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-3">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-3">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Tab indexes are zero-based and follow ascending tab id within the run&#39;s window,
+                not visual order.
+              </li>
+              <li>
+                Match patterns are glob patterns. Tab titles are matched by case-sensitive
+                substring. <strong>Next tab</strong> and <strong>Previous tab</strong> are relative
+                to the tab the run is driving and wrap around.
+              </li>
+              <li>
+                Unchecking <strong>Set as active tab</strong> still retargets the run to the matched
+                tab; it only avoids taking focus from the user.
+              </li>
+              <li>
+                <strong>Create if there&#39;s no match</strong> needs a non-empty URL; without one,
+                a missing match fails the step.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="new-window">
+            <h2 id="operator-new-window">New window</h2>
+            <p>
+              Opens a new browser window and points the workflow at it.
+              <a href="https://www.goautoma.com/extension/docs/blocks/new-window.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-4">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Type</td>
+                    <td>Select</td>
+                    <td><code>normal</code></td>
+                    <td><code>normal</code>, <code>popup</code>, or <code>panel</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>URL (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Address to open. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Window state</td>
+                    <td>Select</td>
+                    <td><code>normal</code></td>
+                    <td>
+                      <code>normal</code>, <code>minimized</code>, <code>maximized</code>, or
+                      <code>fullscreen</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Set as an incognito window</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Requires the extension&#39;s incognito permission.</td>
+                  </tr>
+                  <tr>
+                    <td>Top</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Screen position; <code>0</code> leaves the position to the browser.</td>
+                  </tr>
+                  <tr>
+                    <td>Left</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Screen position; <code>0</code> leaves the position to the browser.</td>
+                  </tr>
+                  <tr>
+                    <td>Height</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td><code>0</code> lets the browser choose.</td>
+                  </tr>
+                  <tr>
+                    <td>Width</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td><code>0</code> lets the browser choose.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-4">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-4">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Only the URL is forwarded to the browser. <strong>Type</strong>,
+                <strong>Window state</strong>, the incognito flag, and the position and size fields
+                are stored but not applied by this build.
+              </li>
+              <li>
+                The run&#39;s window and tab are retargeted to the new window, so later steps act
+                inside it.
+              </li>
+              <li>
+                The default <code>0</code> geometry means &quot;let the browser decide&quot;; it
+                does not mean a zero-sized window.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="proxy">
+            <h2 id="operator-proxy">
+              Proxy<span
+                class="ml-3 inline-flex translate-y-[-2px] items-center rounded-full border px-2 py-0.5 text-xs font-medium border-err/40 bg-err/10 text-err"
+                >Unavailable in MV3</span
+              >
+            </h2>
+            <p>
+              Routes browser traffic through a proxy in Automa, but is unavailable in Browser
+              Copilot&#39;s Manifest V3 build.
+              <a href="https://www.goautoma.com/extension/docs/blocks/proxy.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-5">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Host</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Proxy host, for example <code>socks5://1.2.3.4:1080</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Port</td>
+                    <td>Number</td>
+                    <td><code>443</code></td>
+                    <td>Proxy port.</td>
+                  </tr>
+                  <tr>
+                    <td>Bypass list</td>
+                    <td>Textarea</td>
+                    <td>—</td>
+                    <td>Comma-separated hosts that skip the proxy.</td>
+                  </tr>
+                  <tr>
+                    <td>Clear all proxies</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Would remove the configured proxy.</td>
+                  </tr>
+                  <tr>
+                    <td>Scheme</td>
+                    <td>Text</td>
+                    <td><code>https</code></td>
+                    <td>Stored with the operator; not exposed by the editor.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-5">Outputs</h3>
+            <p>No output. The step fails before producing a value.</p>
+            <h3 id="browser-copilot-notes-5">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                <strong>Not supported under Manifest V3.</strong> The <code>chrome.proxy</code> API
+                is unavailable and the extension declares no <code>proxy</code> permission, so the
+                executor throws instead of pretending to route traffic.
+              </li>
+              <li>
+                The step failing is intentional: a workflow that exists to hide its network origin
+                must not report success while connecting directly.
+              </li>
+              <li>
+                The settings are kept only so imported Automa workflows keep their data. Changing
+                them cannot make the operator work.
+              </li>
+              <li>
+                Run the workflow without this operator, or use an external proxy at the browser or
+                system level.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="go-back">
+            <h2 id="operator-go-back">Go back</h2>
+            <p>
+              Navigates the workflow&#39;s tab back one entry in browser history.
+              <a href="https://www.goautoma.com/extension/docs/blocks/go-back.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-6">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Disable block</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Standard setting; skips this operator at run time.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-6">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-6">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The navigation is issued on the tab the workflow is driving, not necessarily the tab
+                that is visible.
+              </li>
+              <li>
+                The step returns after issuing the navigation; a following read should poll for its
+                selector, and a following action should use <strong>Wait for selector</strong>.
+              </li>
+              <li>
+                The tab must have a previous history entry; otherwise the browser reports an error
+                and the step fails.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="forward-page">
+            <h2 id="operator-forward-page">Go forward</h2>
+            <p>
+              Navigates the workflow&#39;s tab forward one entry in browser history. No upstream
+              Automa page.
+            </p>
+            <h3 id="settings-7">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Disable block</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Standard setting; skips this operator at run time.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-7">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-7">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                This operator exists in Browser Copilot for symmetry with <strong>Go back</strong>;
+                the upstream documentation has no page for it.
+              </li>
+              <li>
+                It calls the browser&#39;s forward navigation on the run&#39;s tab and does not wait
+                for the page to finish loading.
+              </li>
+              <li>
+                The tab must have a forward history entry, which usually means
+                <strong>Go back</strong> ran earlier in the same tab.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="close-tab">
+            <h2 id="operator-close-tab">Close tab/window</h2>
+            <p>
+              Closes the tab the workflow is driving and follows the tab the browser focuses in its
+              place.
+              <a href="https://www.goautoma.com/extension/docs/blocks/close-tab.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-8">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Close</td>
+                    <td>Select</td>
+                    <td><code>tab</code></td>
+                    <td><code>tab</code> or <code>window</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Close active tab</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Close the run&#39;s active tab.</td>
+                  </tr>
+                  <tr>
+                    <td>Match patterns</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>URL pattern shown when <strong>Close active tab</strong> is off.</td>
+                  </tr>
+                  <tr>
+                    <td>Close all windows</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Shown for <code>window</code>.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-8">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-8">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                This build ignores <strong>Close</strong>, the match pattern, and
+                <strong>Close all windows</strong>: it always closes the active tab of the run&#39;s
+                window.
+              </li>
+              <li>
+                After closing, the run is pinned to the tab the browser activates next, so later
+                steps do not keep pointing at a dead tab id.
+              </li>
+              <li>Closing the last tab of a window closes that window as well.</li>
+            </ul>
+          </section>
+          <section data-operator="take-screenshot">
+            <h2 id="operator-take-screenshot">Take screenshot</h2>
+            <p>
+              Captures the visible page, the full page, or one element and stores the image.
+              <a href="https://www.goautoma.com/extension/docs/blocks/take-screenshot.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-9">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Take a screenshot of</td>
+                    <td>Select</td>
+                    <td><code>page</code></td>
+                    <td>
+                      <code>page</code> (visible area), <code>fullpage</code>, or
+                      <code>element</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>CSS Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Locator for <code>element</code>. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Image quality (100%)</td>
+                    <td>Range</td>
+                    <td><code>100</code></td>
+                    <td>JPEG quality; only shown and applied for visible-page JPEG captures.</td>
+                  </tr>
+                  <tr>
+                    <td>Save screenshot to computer</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Write the image to a file.</td>
+                  </tr>
+                  <tr>
+                    <td>File name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Base name for the saved file. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Type</td>
+                    <td>Select</td>
+                    <td><code>png</code></td>
+                    <td><code>png</code> or <code>jpeg</code> for saved visible-page captures.</td>
+                  </tr>
+                  <tr>
+                    <td>Insert screenshot to table</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Append the image as a data URL in the chosen column.</td>
+                  </tr>
+                  <tr>
+                    <td>Select column</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Column used when <strong>Insert screenshot to table</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Publish the image under a custom variable name.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Custom output name.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-9">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastScreenshot}}</code> when <strong>Variable name</strong> is empty,
+                otherwise <code>{{&lt;name&gt;}}</code>. The image is a data URL.
+              </li>
+              <li>
+                <code>{{lastScreenshotPath}}</code> receives the file name when
+                <strong>Save screenshot to computer</strong> succeeds.
+              </li>
+              <li>
+                With <strong>Insert screenshot to table</strong>, the data URL is appended to the
+                chosen column.
+              </li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-9">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Full-page and element captures are always PNG. Choosing JPEG for those modes saves a
+                <code>.png</code> file and logs a warning; JPEG quality applies only to visible-page
+                captures.
+              </li>
+              <li>
+                Saving to disk uses the configured download folder first, then the side-panel save
+                picker, then the unattended folder <code>browser-copilot-downloads/</code> inside
+                extension storage.
+              </li>
+              <li>
+                Storing screenshots in a data column makes the workflow&#39;s data table large;
+                prefer <strong>Save screenshot to computer</strong> for full-page images.
+              </li>
+              <li>
+                The visible-page capture restores a minimized window when necessary, and a failed
+                capture surfaces the underlying browser error.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="read-page">
+            <h2 id="operator-read-page">Read page</h2>
+            <p>
+              Reads the active tab&#39;s visible text, selected text, or HTML into a variable and
+              optionally the data table. No upstream Automa page.
+            </p>
+            <h3 id="settings-10">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Read</td>
+                    <td>Select</td>
+                    <td><code>text</code></td>
+                    <td>
+                      <code>text</code> (visible text), <code>selection</code>, or
+                      <code>html</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Element (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      CSS selector that scopes text or HTML reads; empty reads the whole document.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Max characters</td>
+                    <td>Number</td>
+                    <td><code>20000</code></td>
+                    <td>Caps the returned string; a trimmed body logs an informational message.</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Publish the result under a custom variable name.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Custom output name for the result.</td>
+                  </tr>
+                  <tr>
+                    <td>Insert to table</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Write the result into the data table.</td>
+                  </tr>
+                  <tr>
+                    <td>Select column</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Column that receives the result.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-10">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastReadPage}}</code> when <strong>Variable name</strong> is empty,
+                otherwise <code>{{&lt;name&gt;}}</code>. <code>lastReadPage</code> is updated in
+                both cases.
+              </li>
+              <li>
+                With <strong>Insert to table</strong>, one value is written per run, or one per loop
+                iteration.
+              </li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-10">Browser Copilot notes</h3>
+            <ul>
+              <li>This operator is specific to Browser Copilot; Automa has no equivalent page.</li>
+              <li>
+                <code>selection</code> ignores the element scope and reads the user&#39;s current
+                selection. An empty selection logs an error but does not fail the step.
+              </li>
+              <li>
+                <code>html</code> returns <code>outerHTML</code> for the scoped element or the whole
+                document, capped by <strong>Max characters</strong>.
+              </li>
+              <li>
+                Empty text or element-scoped HTML reads fail the step, the same way
+                <strong>Get text</strong> does.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="browser-event">
+            <h2 id="operator-browser-event">
+              Browser event<span
+                class="ml-3 inline-flex translate-y-[-2px] items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                >Placeholder</span
+              >
+            </h2>
+            <p>
+              Would pause until a tab, network, or download event fires, but the operator is a
+              placeholder in this build.
+              <a href="https://www.goautoma.com/extension/docs/blocks/browser-event.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-11">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Event</td>
+                    <td>Select</td>
+                    <td><code>tab:loaded</code></td>
+                    <td>Tab, network, or download event from the editor&#39;s list.</td>
+                  </tr>
+                  <tr>
+                    <td>Timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>10000</code></td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Set as active tab</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Tab events only.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for tab URL</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>URL pattern for <code>tab:loaded</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Download filename query</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Filename substring for <code>download:created</code>.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-11">Outputs</h3>
+            <p>No output. The executor returns immediately after logging a notice.</p>
+            <h3 id="browser-copilot-notes-11">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                <strong>Placeholder.</strong> The executor neither subscribes to browser events nor
+                waits; the step completes as soon as it starts.
+              </li>
+              <li>
+                <strong>Timeout</strong>, <strong>Set as active tab</strong>, and the filters are
+                stored but have no effect.
+              </li>
+              <li>
+                Use <strong>Delay</strong> plus a read or <strong>Element exists</strong> when you
+                need to wait for page state, and <strong>Handle download</strong> when you need the
+                resulting file.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="handle-dialog">
+            <h2 id="operator-handle-dialog">Handle dialog</h2>
+            <p>
+              Installs handlers that accept or dismiss the page&#39;s JavaScript dialogs.
+              <a href="https://www.goautoma.com/extension/docs/blocks/handle-dialog.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-12">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Accept dialog</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Accept rather than dismiss <code>confirm()</code> dialogs.</td>
+                  </tr>
+                  <tr>
+                    <td>Prompt text (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Answer used by <code>prompt()</code>; only shown while accepting.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-12">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-12">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The operator patches the page&#39;s dialog handlers for later dialogs:
+                <code>confirm()</code> returns the accept value, <code>prompt()</code> returns the
+                configured text when one is set, and <code>beforeunload</code> prompts are
+                suppressed.
+              </li>
+              <li>
+                It does not dismiss an <code>alert()</code> that is already open, because page
+                scripts cannot run while a native dialog blocks the page.
+              </li>
+              <li>
+                A page that freezes or redefines its dialog functions may not be patchable; the step
+                still reports success, so verify the next action when a dialog is critical.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="handle-download">
+            <h2 id="operator-handle-download">Handle download</h2>
+            <p>
+              Waits for a browser download and stores its details.
+              <a href="https://www.goautoma.com/extension/docs/blocks/handle-download.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-13">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Timeout (milliseconds)</td>
+                    <td>Number</td>
+                    <td><code>20000</code></td>
+                    <td>How long to look for a matching download.</td>
+                  </tr>
+                  <tr>
+                    <td>File download ID (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>File name (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Substring matched against the downloaded file&#39;s full path.</td>
+                  </tr>
+                  <tr>
+                    <td>On conflict</td>
+                    <td>Select</td>
+                    <td><code>uniquify</code></td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for the file to be downloaded</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Poll until a matching download appears or the timeout expires.</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Publish the record under a custom variable name.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Custom output name.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-13">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastDownload}}</code> when <strong>Variable name</strong> is empty,
+                otherwise <code>{{&lt;name&gt;}}</code>.
+              </li>
+              <li>
+                The value is <code>{ id, filename, url }</code> for the match, or
+                <code>null</code> when none appears within the timeout.
+              </li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-13">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Matching is a filename substring test. With no file name, the most recent download
+                returned by the browser is used.
+              </li>
+              <li>
+                <strong>File download ID</strong> and <strong>On conflict</strong> are stored but
+                not used; the operator only records metadata and never renames, moves, or deletes a
+                file.
+              </li>
+              <li>
+                A missing download is not an error: the output is <code>null</code>, so a following
+                condition can branch on it.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="save-local">
+            <h2 id="operator-save-local">Save to local</h2>
+            <p>Writes interpolated text to a local file. No upstream Automa page.</p>
+            <h3 id="settings-14">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Content</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Text to write. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Filename (with extension)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      File name, including its extension. An empty name falls back to
+                      <code>file.txt</code>. Accepts <code>{{variables}}</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Save mode</td>
+                    <td>Select</td>
+                    <td><code>auto</code></td>
+                    <td>
+                      <code>auto</code>, <code>force</code>, or <code>manual</code>; see the notes.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Variable name (output path)</td>
+                    <td>Text</td>
+                    <td><code>lastSavedPath</code></td>
+                    <td>Variable that receives the saved file name.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-14">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastSavedPath}}</code>, or the custom <strong>Variable name</strong>,
+                receives the file name when a file is written.
+              </li>
+              <li>The variable is left unchanged when the save is canceled or fails.</li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-14">Browser Copilot notes</h3>
+            <ul>
+              <li>This operator is specific to Browser Copilot; Automa has no equivalent page.</li>
+              <li>
+                <strong>Save mode</strong> is stored but not applied by this build. The writer uses
+                the configured download folder first, then the side-panel save picker, then the
+                unattended folder <code>browser-copilot-downloads/</code> inside extension storage.
+              </li>
+              <li>
+                Empty content fails the step. A value whose references resolved to an empty string
+                also fails, so the operator never writes a zero-byte file by accident.
+              </li>
+              <li>
+                Use <strong>Export data</strong> for tables and <strong>Save assets</strong> for
+                media; this operator writes text only.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="reload-tab">
+            <h2 id="operator-reload-tab">Reload tab</h2>
+            <p>
+              Reloads the workflow&#39;s tab, or navigates it to a URL when one is set.
+              <a href="https://www.goautoma.com/extension/docs/blocks/reload-tab.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-15">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>URL (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Empty reloads the current page; a value loads that address in the run&#39;s
+                      tab. Accepts <code>{{variables}}</code>.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-15">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-15">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                An empty URL reloads the tab the run is driving, not whichever tab happens to be
+                visible.
+              </li>
+              <li>
+                A non-empty URL navigates that same tab and waits for the new document; it does not
+                open a second tab. Use <strong>New tab</strong> for that.
+              </li>
+              <li>
+                After a reload, a following read should poll for its selector because the page
+                renders again.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="tab-url">
+            <h2 id="operator-tab-url">Get tab URL</h2>
+            <p>
+              Reads the URL of the active tab or of every tab in the window.
+              <a href="https://www.goautoma.com/extension/docs/blocks/tab-url.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-16">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Select tab</td>
+                    <td>Select</td>
+                    <td><code>active-tab</code></td>
+                    <td>
+                      <code>active-tab</code> returns one URL; <code>all</code> returns every tab in
+                      the run&#39;s window.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Match Patterns (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Stored with the operator for <code>all</code>; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Tab title (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Stored with the operator for <code>all</code>; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Publish the URL under a custom variable name.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Custom output name.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-16">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastTabUrl}}</code> when <strong>Variable name</strong> is empty, otherwise
+                <code>{{&lt;name&gt;}}</code>.
+              </li>
+              <li>
+                <code>active-tab</code> returns one URL string. <code>all</code> returns the URLs
+                joined with newlines.
+              </li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-16">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The optional match-pattern and title filters are stored but ignored by this build;
+                <code>all</code> always returns every tab in the run&#39;s window.
+              </li>
+              <li>
+                Only the URL is returned, not the title or tab id. Use
+                <strong>Active tab</strong> when you need the tab object.
+              </li>
+              <li>There is no data-column field in the editor; the result is a variable only.</li>
+            </ul>
+          </section>
+          <section data-operator="cookie">
+            <h2 id="operator-cookie">Cookie</h2>
+            <p>
+              Gets, sets, or removes browser cookies.
+              <a href="https://www.goautoma.com/extension/docs/blocks/cookie.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-17">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Action</td>
+                    <td>Select</td>
+                    <td><code>get</code></td>
+                    <td><code>get</code>, <code>set</code>, or <code>remove</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Get all cookies</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Read every cookie instead of one named cookie.</td>
+                  </tr>
+                  <tr>
+                    <td>Use JSON format</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Store the cookie operation as JSON; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>URL</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Cookie URL. Required for <code>set</code> and <code>remove</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Cookie name. Required for <code>get</code>, <code>set</code>, and
+                      <code>remove</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Value (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Value written by <code>set</code>. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Path (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Domain (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>sameSite (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>expirationDate (seconds) (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Expiry used by <code>set</code>; empty means a session cookie.</td>
+                  </tr>
+                  <tr>
+                    <td>httpOnly</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>secure</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Publish a read under a custom variable name.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Custom output name for <code>get</code>.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-17">Outputs</h3>
+            <ul>
+              <li>
+                <code>get</code>: <code>{{lastCookie}}</code> when <strong>Variable name</strong> is
+                empty, otherwise <code>{{&lt;name&gt;}}</code>, containing the cookie value or an
+                empty string.
+              </li>
+              <li>
+                <code>get</code> with <strong>Get all cookies</strong>: the variable receives an
+                array of cookie objects.
+              </li>
+              <li><code>set</code> and <code>remove</code>: no output.</li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-17">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Only the URL, name, value, and expiration date are forwarded to the browser API.
+                <strong>Path</strong>, <strong>Domain</strong>, <strong>sameSite</strong>,
+                <strong>httpOnly</strong>, <strong>secure</strong>, <strong>session</strong>, and
+                the JSON editor are stored but not applied by this build.
+              </li>
+              <li>
+                <code>set</code> and <code>remove</code> require a URL; <code>remove</code> also
+                requires the name.
+              </li>
+              <li>
+                Reading a cookie that does not exist stores an empty string rather than failing, so
+                check the value before depending on it.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="ocr">
+            <h2 id="operator-ocr">
+              OCR text recognition<span
+                class="ml-3 inline-flex translate-y-[-2px] items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                >Full build only</span
+              >
+            </h2>
+            <p>
+              Runs local Tesseract.js OCR on an image variable, a page element, or the previous page
+              snapshot. No upstream Automa page. This operator exists only in Browser Copilot.
+            </p>
+            <h3 id="settings-18">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Input image</td>
+                    <td>Select</td>
+                    <td><code>page</code></td>
+                    <td>
+                      <code>variable</code>, <code>element</code>, or <code>page</code> (the
+                      previous visible-page snapshot).
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Image variable (data URL / base64 / link)</td>
+                    <td>Text</td>
+                    <td><code>lastScreenshot</code></td>
+                    <td>Variable read by <code>variable</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>CSS Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Element read by <code>element</code>; an <code>img</code>,
+                      <code>canvas</code>, or text-less container.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Language (empty = global setting)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Tesseract language codes joined with <code>+</code>, for example
+                      <code>eng+chi_sim</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Enhance image before OCR (upscale + contrast)</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Preprocess the image; failures fall back to the original.</td>
+                  </tr>
+                  <tr>
+                    <td>Output variable (type: string)</td>
+                    <td>Text</td>
+                    <td><code>lastOcrText</code></td>
+                    <td>Variable that receives the recognized text.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-18">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastOcrText}}</code> when <strong>Output variable</strong> is empty,
+                otherwise <code>{{&lt;name&gt;}}</code>. The value is always a string.
+              </li>
+              <li>
+                An empty recognition result fails the step with diagnostics about the capture,
+                language, and preprocessing.
+              </li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-18">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                <strong>Full OCR build only.</strong> The no-OCR variant compiles without
+                Tesseract.js (<code>OCR_SUPPORTED</code> is false); the editor disables the operator
+                and the executor refuses to run it.
+              </li>
+              <li>
+                OCR runs locally with Tesseract.js and local language data; images are not uploaded
+                anywhere.
+              </li>
+              <li>
+                The element source uses a CSS selector only. The imported
+                <strong>Find by</strong> value is ignored, and an XPath expression will not resolve.
+              </li>
+              <li>
+                Empty <strong>Language</strong> uses the global
+                <strong>Local OCR language</strong> setting. A missing language pack fails
+                recognition rather than falling back silently.
+              </li>
+            </ul>
+          </section>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">On this page</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#operator-active-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Active tab</a
+            ><a
+              href="#operator-new-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >New tab</a
+            ><a
+              href="#operator-switch-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Switch tab</a
+            ><a
+              href="#operator-new-window"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >New window</a
+            ><a
+              href="#operator-proxy"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Proxy</a
+            ><a
+              href="#operator-go-back"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Go back</a
+            ><a
+              href="#operator-forward-page"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Go forward</a
+            ><a
+              href="#operator-close-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Close tab/window</a
+            ><a
+              href="#operator-take-screenshot"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Take screenshot</a
+            ><a
+              href="#operator-read-page"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Read page</a
+            ><a
+              href="#operator-browser-event"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Browser event</a
+            ><a
+              href="#operator-handle-dialog"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Handle dialog</a
+            ><a
+              href="#operator-handle-download"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Handle download</a
+            ><a
+              href="#operator-save-local"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Save to local</a
+            ><a
+              href="#operator-reload-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Reload tab</a
+            ><a
+              href="#operator-tab-url"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Get tab URL</a
+            ><a
+              href="#operator-cookie"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Cookie</a
+            ><a
+              href="#operator-ocr"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >OCR text recognition</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/operators-browser.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >Edit this page on GitHub</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>Generated from docs/workflow</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="operators-interaction.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← Previous</span
+            ><span class="text-sm text-ink">Web interaction</span></a
+          ><a
+            href="operators-general.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">Next →</span
+            ><span class="text-sm text-ink">General</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">On this page</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#operator-active-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Active tab</a
+            ><a
+              href="#operator-new-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >New tab</a
+            ><a
+              href="#operator-switch-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Switch tab</a
+            ><a
+              href="#operator-new-window"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >New window</a
+            ><a
+              href="#operator-proxy"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Proxy</a
+            ><a
+              href="#operator-go-back"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Go back</a
+            ><a
+              href="#operator-forward-page"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Go forward</a
+            ><a
+              href="#operator-close-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Close tab/window</a
+            ><a
+              href="#operator-take-screenshot"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Take screenshot</a
+            ><a
+              href="#operator-read-page"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Read page</a
+            ><a
+              href="#operator-browser-event"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Browser event</a
+            ><a
+              href="#operator-handle-dialog"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Handle dialog</a
+            ><a
+              href="#operator-handle-download"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Handle download</a
+            ><a
+              href="#operator-save-local"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Save to local</a
+            ><a
+              href="#operator-reload-tab"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Reload tab</a
+            ><a
+              href="#operator-tab-url"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Get tab URL</a
+            ><a
+              href="#operator-cookie"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Cookie</a
+            ><a
+              href="#operator-ocr"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >OCR text recognition</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm Noncommercial 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

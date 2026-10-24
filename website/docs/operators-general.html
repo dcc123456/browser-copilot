@@ -1,0 +1,1791 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>General operators — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="Triggers, sub-workflows, HTTP requests, notifications, exports, groups, and AI agents with 13 general operators."
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-general.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-general.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-general-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-general.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="General operators — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="Triggers, sub-workflows, HTTP requests, notifications, exports, groups, and AI agents with 13 general operators."
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/operators-general.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="General operators — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="Triggers, sub-workflows, HTTP requests, notifications, exports, groups, and AI agents with 13 general operators."
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index.html" class="text-sm text-ink">Docs</a>
+          <a
+            href="../index.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >Features</a
+          >
+          <a
+            href="../index.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >How it works</a
+          >
+          <a
+            href="operators-general-zh.html"
+            class="text-sm text-muted transition-colors hover:text-ink"
+            >中文</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">Start</p>
+            <nav class="space-y-1">
+              <a
+                href="index.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Overview</a
+              ><a
+                href="getting-started.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Getting started</a
+              ><a
+                href="concepts.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Workflow concepts</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+              Operators
+            </p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Web interaction</a
+              ><a
+                href="operators-browser.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Browser</a
+              ><a
+                href="operators-general.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >General</a
+              ><a
+                href="operators-data.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Data</a
+              ><a
+                href="operators-conditions.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Control flow</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">Documentation menu</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Start
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Overview</a
+                ><a
+                  href="getting-started.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Getting started</a
+                ><a
+                  href="concepts.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Workflow concepts</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Operators
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Web interaction</a
+                ><a
+                  href="operators-browser.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Browser</a
+                ><a
+                  href="operators-general.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >General</a
+                ><a
+                  href="operators-data.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Data</a
+                ><a
+                  href="operators-conditions.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Control flow</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a><span>/</span
+          ><span class="text-muted">General</span>
+        </div>
+        <article class="docs-prose">
+          <h1>General operators</h1>
+          <p>
+            This page covers the operators that start a workflow, connect runs, pause and export,
+            and the utility blocks that sit around the main automation steps. Each section lists the
+            settings the inspector exposes, the values the operator publishes, and the behavior that
+            is specific to Browser Copilot. Shared inspector settings —
+            <strong>Description</strong>, <strong>Disable block</strong>,
+            <strong>Block timeout</strong>, and <strong>On error</strong> — are not repeated in
+            every table; see <a href="concepts.html">Workflow concepts</a> for variables, ports,
+            errors, files, and trigger scheduling.
+          </p>
+          <section data-operator="trigger">
+            <h2 id="operator-trigger">Trigger</h2>
+            <p>
+              The entry point of a workflow. It carries the workflow&#39;s name and run settings,
+              one or more launch configurations, and the declared inputs that seed the run&#39;s
+              variables.
+              <a href="https://www.goautoma.com/extension/docs/blocks/trigger.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Trigger workflow</td>
+                    <td>Select</td>
+                    <td><code>manual</code></td>
+                    <td>
+                      <code>manual</code>, <code>interval</code>, <code>date</code>,
+                      <code>specific-day</code>, <code>visit-web</code>,
+                      <code>keyboard-shortcut</code>, <code>context-menu</code>,
+                      <code>on-startup</code>, or <code>element-change</code>. Changing the kind
+                      starts that trigger from the new kind&#39;s defaults.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Interval (minutes)</td>
+                    <td>Number</td>
+                    <td><code>60</code></td>
+                    <td>Interval triggers only; 1 to 360.</td>
+                  </tr>
+                  <tr>
+                    <td>Delay (minutes)</td>
+                    <td>Number</td>
+                    <td><code>5</code></td>
+                    <td>Interval triggers only; 0 to 20.</td>
+                  </tr>
+                  <tr>
+                    <td>Date</td>
+                    <td>Date</td>
+                    <td>Empty</td>
+                    <td>Date triggers only.</td>
+                  </tr>
+                  <tr>
+                    <td>Time</td>
+                    <td>Time</td>
+                    <td><code>00:00</code></td>
+                    <td>Date and weekday triggers.</td>
+                  </tr>
+                  <tr>
+                    <td>Select day</td>
+                    <td>Checkbox set</td>
+                    <td>None</td>
+                    <td>
+                      Weekday triggers; Sunday is stored as <code>0</code>, Saturday as
+                      <code>6</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>URL or Regex</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Visit-web triggers; a URL match pattern or a regular expression.</td>
+                  </tr>
+                  <tr>
+                    <td>Use regex</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Treats <strong>URL or Regex</strong> as a regular expression instead of a
+                      match pattern.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Shortcut</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>
+                      Keyboard trigger; record the combination with the button next to the field.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Active while in input</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Let the shortcut fire while the focus is inside an input element.</td>
+                  </tr>
+                  <tr>
+                    <td>Workflow name in the context menu</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Context-menu trigger; the label shown in the browser menu.</td>
+                  </tr>
+                  <tr>
+                    <td>Will appear in</td>
+                    <td>Checkbox set</td>
+                    <td>None</td>
+                    <td>
+                      Context-menu trigger; <code>audio</code>, <code>editable</code>,
+                      <code>image</code>, <code>link</code>, <code>page</code>,
+                      <code>password</code>, <code>selection</code>, and <code>video</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Match pattern</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Element-change trigger; limits observation to matching pages.</td>
+                  </tr>
+                  <tr>
+                    <td>Element selector</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>
+                      Element-change trigger; the element to observe, with pick and verify controls.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Target element options</td>
+                    <td>Checkbox set</td>
+                    <td>Child list on</td>
+                    <td>
+                      MutationObserver flags: subtree, child list, attributes, character data, plus
+                      an attribute filter.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Base element (optional)</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>
+                      Element-change trigger; a change to this element restarts observation of the
+                      target.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Base element options</td>
+                    <td>Checkbox set</td>
+                    <td>Child list on</td>
+                    <td>Same observer flags, applied to the base element.</td>
+                  </tr>
+                  <tr>
+                    <td>Parameters</td>
+                    <td>List</td>
+                    <td>Empty</td>
+                    <td>
+                      Workflow-level inputs; each entry has a name, a required flag, and an optional
+                      default.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Prefer asking parameters in the active tab</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Ask for the declared inputs in the active tab rather than the side panel.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs">Outputs</h3>
+            <p>No variables. One output port; the run starts here and follows that connection.</p>
+            <h3 id="browser-copilot-notes">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                A workflow can hold several triggers. The <strong>Workflow triggers</strong> dialog
+                adds, selects, and removes them; the first one is primary and is mirrored onto the
+                workflow record. The last remaining trigger cannot be removed.
+              </li>
+              <li>
+                Trigger matching is performed by the extension, not by this block: interval, date,
+                and weekday triggers are browser alarms, page triggers are injected observers, and
+                startup, shortcut, and context-menu triggers are browser registrations. See
+                <a href="concepts.html">Workflow concepts</a>.
+              </li>
+              <li>
+                The trigger executor itself is a no-op. Its out-edge is what starts the graph.
+              </li>
+              <li>
+                Element change observes the target with a MutationObserver. The optional base
+                element controls when observation restarts, and the attribute filter accepts
+                comma-separated names.
+              </li>
+              <li>
+                Parameters declared here are the workflow&#39;s inputs. They seed the variable bag
+                before the first step, and <strong>Parameter prompt</strong> resolves against the
+                same declarations.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="execute-workflow">
+            <h2 id="operator-execute-workflow">Execute workflow</h2>
+            <p>
+              Runs another saved workflow as a nested run, then continues on the main output.
+              <a href="https://www.goautoma.com/extension/docs/blocks/execute-workflow.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-2">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Workflow to execute</td>
+                    <td>Select</td>
+                    <td>Empty</td>
+                    <td>
+                      Saved workflows, loaded when the form opens; the workflow being edited is
+                      excluded. Use the reload button to refresh the list.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Execute Id (optional)</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Stored with the node; the graph engine does not read it.</td>
+                  </tr>
+                  <tr>
+                    <td>Global data (JSON)</td>
+                    <td>JSON</td>
+                    <td>Empty</td>
+                    <td>
+                      Edited in a popup. Stored with the node; not applied by the nested-run path.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Use all current workflow globalData</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the node; not applied by the nested-run path.</td>
+                  </tr>
+                  <tr>
+                    <td>Use all current workflow variables</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the node; not applied by the nested-run path.</td>
+                  </tr>
+                  <tr>
+                    <td>Insert current workflow variables</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>
+                      Comma-separated names; shown when the previous option is off. Stored but not
+                      applied.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-2">Outputs</h3>
+            <p>
+              No output variable. One main output port. The child starts at its own trigger and, in
+              this build, shares the parent&#39;s variable bag, so values written by child steps
+              remain visible to later parent steps.
+            </p>
+            <h3 id="browser-copilot-notes-2">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Only <strong>Workflow to execute</strong> changes execution. The global-data and
+                variable-insert settings are persisted for round-tripping but are not read by the
+                nested-run path; variables already flow because the two runs share the same bag.
+              </li>
+              <li>
+                A stored workflow id that no longer resolves stays selectable instead of being
+                silently rewritten, so opening and saving the form never drops the reference.
+              </li>
+              <li>
+                A missing child and a self-referencing child are both reported in the run log, and
+                the parent continues on its main output. A failing child does not fail the parent
+                step by itself.
+              </li>
+              <li>
+                Breakpoints inside the child pause the parent run, and loop progress and checkpoints
+                are shared between parent and child.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="delay">
+            <h2 id="operator-delay">Delay</h2>
+            <p>
+              Pauses the run for a fixed time before the next step.
+              <a href="https://www.goautoma.com/extension/docs/blocks/delay.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-3">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Delay time (millisecond)</td>
+                    <td>Text</td>
+                    <td><code>500</code></td>
+                    <td>
+                      Free text so it can hold a template. <code>{{variables}}</code> are
+                      interpolated before the value is read.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-3">Outputs</h3>
+            <p>No variables. One main output port.</p>
+            <h3 id="browser-copilot-notes-3">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                A non-numeric or missing value falls back to 500 ms instead of failing the step.
+              </li>
+              <li>The wait is abortable: stopping the run interrupts the delay immediately.</li>
+              <li>
+                The legacy <code>ms</code> key is still read when <code>time</code> is absent, so
+                older graphs keep working.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="export-data">
+            <h2 id="operator-export-data">Export data</h2>
+            <p>
+              Writes the run&#39;s data table or one variable to a downloaded file.
+              <a href="https://www.goautoma.com/extension/docs/blocks/export-data.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-4">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Data to export</td>
+                    <td>Select</td>
+                    <td><code>data-columns</code></td>
+                    <td>
+                      <code>data-columns</code> exports the data table;
+                      <code>variable</code> exports one named variable.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>
+                      Shown for <strong>Variable</strong>; the variable must already hold a value.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>File name</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>
+                      Relative file name; <code>{{variables}}</code> are interpolated. When empty,
+                      the fallback name <code>export.json</code>, <code>export.csv</code>, or
+                      <code>export.txt</code> is used.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>On conflict</td>
+                    <td>Select</td>
+                    <td><code>uniquify</code></td>
+                    <td>
+                      <code>uniquify</code>, <code>overwrite</code>, or <code>prompt</code>. Stored
+                      but not read by the executor.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Export as</td>
+                    <td>Select</td>
+                    <td><code>json</code></td>
+                    <td><code>json</code>, <code>csv</code>, or <code>plain-text</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Add UTF-8 BOM</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>CSV only; makes Excel read non-ASCII cells correctly.</td>
+                  </tr>
+                  <tr>
+                    <td>Delimiter</td>
+                    <td>Text</td>
+                    <td><code>,</code></td>
+                    <td>CSV and plain-text exports.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-4">Outputs</h3>
+            <ul>
+              <li>
+                <code>lastExport</code> — the exact text written, regardless of whether the file
+                save succeeded.
+              </li>
+              <li>
+                <code>lastExportPath</code> — the file name, set only after a successful save.
+              </li>
+              <li>One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-4">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                <strong>Table</strong> reads <code>dataTable</code>; an empty table fails the step
+                instead of writing an empty file, and the error names the usual causes: no read
+                step, no column, or a read that matched nothing.
+              </li>
+              <li>
+                <strong>Variable</strong> fails when the name is empty or the variable has no value.
+                JSON export serializes the value; other formats convert it to text.
+              </li>
+              <li>
+                The file is saved through the normal download destination chain described in
+                <a href="concepts.html">Workflow concepts</a>. A canceled save dialog is not an
+                error, but it does not set <code>lastExportPath</code>.
+              </li>
+              <li>
+                <strong>On conflict</strong> is persisted but ignored by this build: the executor
+                passes the chosen file name straight to the save path.
+              </li>
+              <li>
+                For CSV and plain text, <code>addBOMHeader</code> is honored only for CSV; plain
+                text uses the delimiter but no header row and no quoting.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="blocks-group">
+            <h2 id="operator-blocks-group">Blocks group</h2>
+            <p>
+              Bundles a set of steps into one node so a long canvas stays readable. The group runs
+              its children in their stored order and then leaves through its own output.
+              <a href="https://www.goautoma.com/extension/docs/blocks/blocks-group.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-5">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Group name</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Inline name on the group node; <code>Group</code> is shown when empty.</td>
+                  </tr>
+                  <tr>
+                    <td>Steps</td>
+                    <td>List</td>
+                    <td>Empty</td>
+                    <td>
+                      Child blocks stored under <code>data.blocks</code>; children can be reordered,
+                      edited, or removed from the node.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-5">Outputs</h3>
+            <p>No variables. One main output port. An empty group is a pass-through.</p>
+            <h3 id="browser-copilot-notes-5">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                This block has no separate inspector. Its name and children are edited directly on
+                the canvas node.
+              </li>
+              <li>
+                Children are not graph nodes. They are registered as transient steps while the group
+                runs, appear individually in the run log, and are excluded from the completed-node
+                ledger used by checkpoints.
+              </li>
+              <li>
+                Packing selected steps requires at least two steps that form one continuous chain
+                with no connections leaving the selection. Some block types cannot be children.
+                <strong>Ungroup</strong> returns the children to the canvas.
+              </li>
+              <li>
+                A malformed child is reported and fails the run instead of being skipped silently.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="clipboard">
+            <h2 id="operator-clipboard">Clipboard</h2>
+            <p>
+              Reads the system clipboard, or the current page selection, into a variable; or writes
+              workflow text into the clipboard.
+              <a href="https://www.goautoma.com/extension/docs/blocks/clipboard.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-6">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Action</td>
+                    <td>Select</td>
+                    <td><code>get</code></td>
+                    <td><code>get</code> reads; <code>insert</code> writes.</td>
+                  </tr>
+                  <tr>
+                    <td>Text</td>
+                    <td>Multi-line text</td>
+                    <td>Empty</td>
+                    <td>
+                      Insert mode only; supports <code>{{variables}}</code>. Hidden when
+                      <strong>Copy the selected text on page</strong> is on.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Copy the selected text on page</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      In get mode, read the page selection instead of the system clipboard. In
+                      insert mode, hides the <strong>Text</strong> field.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Assign to variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Shows the variable-name field for a get. The read is always stored.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Defaults to <code>lastClipboard</code> when empty.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-6">Outputs</h3>
+            <ul>
+              <li>
+                Get: the read text under <code>{{&lt;variable name&gt;}}</code>, or
+                <code>{{lastClipboard}}</code> when the name is empty.
+              </li>
+              <li>Insert: no variable. The result line confirms that the clipboard was written.</li>
+              <li>One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-6">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The read always writes a variable; <strong>Assign to variable</strong> only controls
+                whether the name field is shown. An empty name is not an error because
+                <code>lastClipboard</code> is the fallback.
+              </li>
+              <li>
+                The stored schema also carries <code>saveData</code> and <code>dataColumn</code>,
+                but this form neither shows nor applies them; the clipboard block does not write the
+                data table.
+              </li>
+              <li>
+                The <strong>Copy the selected text on page</strong> flag is applied in get mode. In
+                insert mode the executor still writes the <strong>Text</strong> value, so leave the
+                flag off when the text must be predictable.
+              </li>
+              <li>
+                Clipboard access depends on browser focus and permission. A refusal fails the step
+                with the underlying reason.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="wait-connections">
+            <h2 id="operator-wait-connections">Wait connections</h2>
+            <p>
+              Pauses briefly so a navigation started by the previous step can settle, then waits for
+              the tab being driven to report that it has loaded. In this build it waits on the tab,
+              not on other incoming graph branches.
+              <a href="https://www.goautoma.com/extension/docs/blocks/wait-connections.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-7">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Timeout (milliseconds)</td>
+                    <td>Number</td>
+                    <td><code>10000</code></td>
+                    <td>
+                      Upper bound for the tab-load wait; values below 1000 are raised to 1000.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Only continue a specific flow</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the node; not applied.</td>
+                  </tr>
+                  <tr>
+                    <td>Select flow (block id)</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>
+                      Shown when the previous option is on; stored with the node and not applied.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-7">Outputs</h3>
+            <p>
+              No variables. One main output port. The result line reports that the page has loaded.
+            </p>
+            <h3 id="browser-copilot-notes-7">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The step always waits 300 ms before listening, because a tab can still report
+                <code>complete</code> for the page that is being navigated away from.
+              </li>
+              <li>
+                <strong>Only continue a specific flow</strong> and its block id are persisted for
+                imported workflows but are ignored by this executor; there is no flow-level wait in
+                this build.
+              </li>
+              <li>
+                With no resolvable tab the step returns immediately. Waiting is best effort: when
+                the timeout expires, the step still continues and reports the page as loaded.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="notification">
+            <h2 id="operator-notification">Notification</h2>
+            <p>
+              Shows a desktop notification, and can forward the same text to a Feishu bot.
+              <a href="https://www.goautoma.com/extension/docs/blocks/notification.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-8">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Title</td>
+                    <td>Text</td>
+                    <td><code>Hello world!</code></td>
+                    <td>Supports <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Message</td>
+                    <td>Multi-line text</td>
+                    <td>Empty</td>
+                    <td>Supports <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Send to Feishu</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Uses the Feishu webhook configured in Settings.</td>
+                  </tr>
+                  <tr>
+                    <td>Icon URL (optional)</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Stored with the node; not applied by this build.</td>
+                  </tr>
+                  <tr>
+                    <td>Image URL (optional)</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Stored with the node; not applied by this build.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-8">Outputs</h3>
+            <p>
+              No variables. One main output port; the result line confirms that the notification was
+              sent.
+            </p>
+            <h3 id="browser-copilot-notes-8">Browser Copilot notes</h3>
+            <ul>
+              <li>Title and message are interpolated before the notification is created.</li>
+              <li>
+                This build always uses the extension&#39;s own icon
+                (<code>icons/icon-48.png</code>). <strong>Icon URL</strong> and
+                <strong>Image URL</strong> are kept for round-tripping but do not change the
+                notification.
+              </li>
+              <li>
+                Feishu delivery uses the webhook from Settings. A missing webhook or a failed
+                delivery is logged, but the step still succeeds because the desktop notification
+                already went out.
+              </li>
+              <li>
+                When the notifications API is unavailable, the step records an informational message
+                and continues.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="note">
+            <h2 id="operator-note">Note</h2>
+            <p>
+              A free-form annotation placed on the canvas. It documents the workflow and has no
+              effect on execution. No upstream Automa page exists for this operator.
+            </p>
+            <h3 id="settings-9">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Description</td>
+                    <td>Multi-line text</td>
+                    <td>Empty</td>
+                    <td>
+                      The note body, stored as <code>note</code>; edited on the canvas or in the
+                      sidebar.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-9">Outputs</h3>
+            <p>No variables. One pass-through output port.</p>
+            <h3 id="browser-copilot-notes-9">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Width, height, color, font size, and the drawing flag are presentation fields stored
+                with the note; they only affect how the annotation looks on the canvas.
+              </li>
+              <li>
+                The note text stays on the canvas in this build: the executor reads a legacy
+                <code>text</code> key while the editor writes <code>note</code>, so nothing is
+                printed to the run log.
+              </li>
+              <li>
+                A note can be connected like any other node without changing the path, which makes
+                it safe to leave in a chain while documenting it.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="workflow-state">
+            <h2 id="operator-workflow-state">Workflow State</h2>
+            <p>
+              Asks the run to stop itself, another workflow, or a named set of workflows. In this
+              build a block cannot reach the scheduler, so every stop action ends the step with an
+              error instead.
+              <a href="https://www.goautoma.com/extension/docs/blocks/workflow-state.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-10">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Action</td>
+                    <td>Select</td>
+                    <td><code>stop-current</code></td>
+                    <td>
+                      <code>stop-all</code>, <code>stop-current</code>, or
+                      <code>stop-specific</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Except for the current workflow</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stop-all only; stored but not applied.</td>
+                  </tr>
+                  <tr>
+                    <td>Workflow IDs (comma separated)</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Stop-specific only; stored but not applied.</td>
+                  </tr>
+                  <tr>
+                    <td>Throw error</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Stop-current only in the form; when on, <strong>Error message</strong> becomes
+                      the failure text.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Error message</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>
+                      Shown when <strong>Throw error</strong> is on; supports
+                      <code>{{variables}}</code>.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-10">Outputs</h3>
+            <p>
+              No variables. One main output port, which a stop action never reaches because the step
+              throws.
+            </p>
+            <h3 id="browser-copilot-notes-10">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Stopping a run belongs to the scheduler, and no block-reachable hook exists in this
+                build. <code>stop-all</code>, <code>stop-current</code>, and
+                <code>stop-specific</code> all fail the step rather than pretending the workflow
+                stopped.
+              </li>
+              <li>
+                With <strong>Throw error</strong> on, the step throws
+                <strong>Error message</strong> (or a generic message when it is empty). With it off,
+                it throws a generic error that names the requested action.
+              </li>
+              <li>
+                <strong>Except for the current workflow</strong> and
+                <strong>Workflow IDs</strong> are saved for imported workflows but are not read on
+                this path.
+              </li>
+              <li>
+                For tool-schema nodes the executor also understands <code>get</code> and
+                <code>set</code> for a variable named <code>state</code>; <code>get</code> publishes
+                <code>lastState</code>. The inspector does not offer those actions.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="parameter-prompt">
+            <h2 id="operator-parameter-prompt">Parameter prompt</h2>
+            <p>
+              Resolves the workflow&#39;s declared inputs before the following steps run. This build
+              shows no interactive dialog: values come from the run scope, and defaults fill the
+              gaps.
+              <a href="https://www.goautoma.com/extension/docs/blocks/parameter-prompt.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-11">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Timeout (millisecond) (0 to disable)</td>
+                    <td>Number</td>
+                    <td><code>60000</code></td>
+                    <td>Stored with the node; not applied because no prompt is displayed.</td>
+                  </tr>
+                  <tr>
+                    <td>Parameters</td>
+                    <td>List</td>
+                    <td>Empty</td>
+                    <td>
+                      Declared inputs; each entry has a name, a required flag, and an optional
+                      default.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-11">Outputs</h3>
+            <ul>
+              <li>One variable per parameter, using the parameter&#39;s name.</li>
+              <li>
+                The result line lists the resolved pairs as <code>name=value</code>, separated by
+                <code>·</code>.
+              </li>
+              <li>One main output port.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-11">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                A value already present in the run scope wins; a default is written only when the
+                variable is undefined, so a trigger payload or an earlier step is never overwritten.
+              </li>
+              <li>Defaults are interpolated before they are stored.</li>
+              <li>
+                A missing required parameter fails the step and names every missing input, instead
+                of driving later steps with a blank value.
+              </li>
+              <li>
+                With no parameters declared, the step records an informational message and
+                continues.
+              </li>
+              <li>
+                The timeout and any prompt or placeholder text are persisted but have no effect
+                while no prompt is shown.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="webhook">
+            <h2 id="operator-webhook">HTTP Request</h2>
+            <p>
+              Sends an HTTP request to a remote endpoint and decodes the response into variables or
+              the data table.
+              <a href="https://www.goautoma.com/extension/docs/blocks/webhook.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-12">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Request method</td>
+                    <td>Select</td>
+                    <td><code>POST</code></td>
+                    <td>
+                      <code>GET</code>, <code>POST</code>, <code>PUT</code>, <code>PATCH</code>,
+                      <code>DELETE</code>, or <code>HEAD</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Request URL *</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Supports <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Content type</td>
+                    <td>Select</td>
+                    <td><code>json</code></td>
+                    <td>
+                      <code>text/plain</code>, <code>application/json</code>,
+                      <code>multipart/form-data</code>, or
+                      <code>application/x-www-form-urlencoded</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Timeout (ms) (0 to disable)</td>
+                    <td>Number</td>
+                    <td><code>10000</code></td>
+                    <td>Applies to the request itself.</td>
+                  </tr>
+                  <tr>
+                    <td>Headers</td>
+                    <td>List</td>
+                    <td>Empty</td>
+                    <td>
+                      Rows of header name and value; each value can use <code>{{variables}}</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Request body</td>
+                    <td>JSON</td>
+                    <td><code>{}</code></td>
+                    <td>Hidden for <code>GET</code> and <code>HEAD</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Response type</td>
+                    <td>Select</td>
+                    <td><code>json</code></td>
+                    <td><code>json</code>, <code>text</code>, or <code>base64</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Data path</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>JSON responses only; narrows the response before it is stored.</td>
+                  </tr>
+                  <tr>
+                    <td>Assign response to a variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Store the decoded, data-path-narrowed value under
+                      <strong>Variable name</strong>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>
+                      When set, the decoded response is stored here instead of
+                      <code>lastHttpResponse</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Save response to a table</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Append response rows to the data table.</td>
+                  </tr>
+                  <tr>
+                    <td>Column name</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>Required for a table write.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-12">Outputs</h3>
+            <ul>
+              <li>
+                The decoded response is stored under <strong>Variable name</strong> when that field
+                is set, otherwise under <code>lastHttpResponse</code>.
+              </li>
+              <li>
+                With <strong>Assign response to a variable</strong> on, the same variable receives
+                the value after <strong>Data path</strong> is applied.
+              </li>
+              <li>
+                With <strong>Save response to a table</strong> on, rows are appended to
+                <strong>Column name</strong>; an empty column logs an informational message and
+                skips the write.
+              </li>
+              <li>
+                Two output ports: the main port for a successful response, and the fallback port for
+                a transport error or a non-2xx status when that port is connected.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-12">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Only request failures use the fallback port. A configuration error — an unreadable
+                URL, header, or body — fails the step even when a fallback edge exists.
+              </li>
+              <li>
+                <code>GET</code> and <code>HEAD</code> send no body. Other methods encode the body
+                according to the selected content type.
+              </li>
+              <li>
+                <strong>Data path</strong> is applied only to JSON responses. Text and base64
+                responses are stored as they arrive.
+              </li>
+              <li>
+                A timeout of <code>0</code> removes the request limit. Aborting the run aborts the
+                request.
+              </li>
+              <li>
+                A non-2xx response without a fallback edge fails the step with the method, status,
+                and URL.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="ai-agent">
+            <h2 id="operator-ai-agent">AI agent</h2>
+            <p>
+              Reads an optional target element and hands it, together with your prompt, to a
+              tool-calling AI agent. The agent returns a text answer and, when allowed, can act on
+              the page. Browser Copilot-only operator.
+            </p>
+            <h3 id="settings-13">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td>
+                      <code>cssSelector</code>, <code>xpath</code>, or <code>text</code> for the
+                      optional target element.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Target element (optional)</td>
+                    <td>Text</td>
+                    <td>Empty</td>
+                    <td>
+                      The matched element&#39;s text is read at run time. Leave it empty and the
+                      agent reads the page itself.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Prompt *</td>
+                    <td>Multi-line text</td>
+                    <td>Empty</td>
+                    <td>The instruction for the agent; supports <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Allow the agent to act on the page (click, fill, navigate)</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Off is read-only analysis; on lets the agent click, type, and navigate
+                      autonomously.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Max tool rounds</td>
+                    <td>Number</td>
+                    <td><code>20</code></td>
+                    <td>Per-node cap on model and tool round trips, 1 to 50.</td>
+                  </tr>
+                  <tr>
+                    <td>Output variable name</td>
+                    <td>Text</td>
+                    <td><code>lastAIAgent</code></td>
+                    <td>Receives the agent&#39;s final text answer.</td>
+                  </tr>
+                  <tr>
+                    <td>Take a page snapshot before acting</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>
+                      Lets the agent list buttons, links, and fields so it can locate elements
+                      itself.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-13">Outputs</h3>
+            <ul>
+              <li>
+                The agent&#39;s final answer as text, under
+                <strong>Output variable name</strong> (default <code>{{lastAIAgent}}</code>).
+              </li>
+              <li>One main output port. The block does not write the data table.</li>
+            </ul>
+            <h3 id="browser-copilot-notes-13">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                With no target element, the agent reads the page through its tools; with a target,
+                that element&#39;s text is read first and included in the task.
+              </li>
+              <li>
+                In read-only mode the agent can inspect the page and answer but cannot click, type,
+                or navigate. In full-auto mode every action is written to the run log; there is no
+                per-step confirmation.
+              </li>
+              <li>
+                <strong>Max tool rounds</strong> bounds this node independently of the global
+                setting, so one step cannot loop forever.
+              </li>
+              <li>
+                The model provider comes from Settings. A failed model call fails the step and
+                follows the node&#39;s <strong>On error</strong> policy.
+              </li>
+              <li>
+                The prompt is interpolated before the agent starts, so a prior step can supply the
+                instruction or part of it.
+              </li>
+            </ul>
+          </section>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">On this page</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#operator-trigger"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Trigger</a
+            ><a
+              href="#operator-execute-workflow"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Execute workflow</a
+            ><a
+              href="#operator-delay"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Delay</a
+            ><a
+              href="#operator-export-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Export data</a
+            ><a
+              href="#operator-blocks-group"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Blocks group</a
+            ><a
+              href="#operator-clipboard"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Clipboard</a
+            ><a
+              href="#operator-wait-connections"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Wait connections</a
+            ><a
+              href="#operator-notification"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Notification</a
+            ><a
+              href="#operator-note"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Note</a
+            ><a
+              href="#operator-workflow-state"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Workflow State</a
+            ><a
+              href="#operator-parameter-prompt"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Parameter prompt</a
+            ><a
+              href="#operator-webhook"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >HTTP Request</a
+            ><a
+              href="#operator-ai-agent"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >AI agent</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/operators-general.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >Edit this page on GitHub</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>Generated from docs/workflow</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="operators-browser.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← Previous</span
+            ><span class="text-sm text-ink">Browser</span></a
+          ><a
+            href="operators-data.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">Next →</span
+            ><span class="text-sm text-ink">Data</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">On this page</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#operator-trigger"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Trigger</a
+            ><a
+              href="#operator-execute-workflow"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Execute workflow</a
+            ><a
+              href="#operator-delay"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Delay</a
+            ><a
+              href="#operator-export-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Export data</a
+            ><a
+              href="#operator-blocks-group"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Blocks group</a
+            ><a
+              href="#operator-clipboard"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Clipboard</a
+            ><a
+              href="#operator-wait-connections"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Wait connections</a
+            ><a
+              href="#operator-notification"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Notification</a
+            ><a
+              href="#operator-note"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Note</a
+            ><a
+              href="#operator-workflow-state"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Workflow State</a
+            ><a
+              href="#operator-parameter-prompt"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Parameter prompt</a
+            ><a
+              href="#operator-webhook"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >HTTP Request</a
+            ><a
+              href="#operator-ai-agent"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >AI agent</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm Noncommercial 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

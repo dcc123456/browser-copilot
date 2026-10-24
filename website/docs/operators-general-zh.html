@@ -1,0 +1,1620 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>通用算子 — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="使用 13 个通用算子处理触发器、子工作流、HTTP 请求、通知、导出、分组与 AI Agent。"
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-general-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-general.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-general-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-general.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="通用算子 — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="使用 13 个通用算子处理触发器、子工作流、HTTP 请求、通知、导出、分组与 AI Agent。"
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/operators-general-zh.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="通用算子 — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="使用 13 个通用算子处理触发器、子工作流、HTTP 请求、通知、导出、分组与 AI Agent。"
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index-zh.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index-zh.html" class="text-sm text-ink">文档</a>
+          <a
+            href="../index-zh.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >功能</a
+          >
+          <a
+            href="../index-zh.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >工作原理</a
+          >
+          <a
+            href="operators-general.html"
+            class="text-sm text-muted transition-colors hover:text-ink"
+            >EN</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">开始</p>
+            <nav class="space-y-1">
+              <a
+                href="index-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >文档概览</a
+              ><a
+                href="getting-started-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >快速上手</a
+              ><a
+                href="concepts-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >工作流概念</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">算子</p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >页面交互</a
+              ><a
+                href="operators-browser-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >浏览器</a
+              ><a
+                href="operators-general-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >通用</a
+              ><a
+                href="operators-data-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >数据</a
+              ><a
+                href="operators-conditions-zh.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >条件控制</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">文档菜单</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                开始
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >文档概览</a
+                ><a
+                  href="getting-started-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >快速上手</a
+                ><a
+                  href="concepts-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >工作流概念</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                算子
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >页面交互</a
+                ><a
+                  href="operators-browser-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >浏览器</a
+                ><a
+                  href="operators-general-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >通用</a
+                ><a
+                  href="operators-data-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >数据</a
+                ><a
+                  href="operators-conditions-zh.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >条件控制</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a><span>/</span
+          ><span class="text-muted">通用</span>
+        </div>
+        <article class="docs-prose">
+          <h1>通用算子</h1>
+          <p>
+            本页介绍负责启动工作流、连接子流程、暂停与导出，以及围绕主要自动化步骤的通用算子。每一节都会说明检查器里可配置的字段、算子会写入的变量，以及
+            Browser Copilot
+            特有的行为。<strong>描述</strong>、<strong>禁用算子</strong>、<strong>算子超时</strong>、<strong
+              >出错时</strong
+            >
+            这些所有算子共用的设置不在每张表中重复；变量、端口、错误、文件与触发器调度请参阅<a
+              href="concepts-zh.html"
+              >工作流概念</a
+            >。
+          </p>
+          <section data-operator="trigger">
+            <h2 id="operator-trigger">触发器</h2>
+            <p>
+              工作流的入口。它保存工作流名称与运行设置、一个或多个启动方式，以及用于初始化运行变量的已声明输入。<a
+                href="https://www.goautoma.com/extension/docs/blocks/trigger.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>触发工作流</td>
+                    <td>下拉选择</td>
+                    <td><code>manual</code></td>
+                    <td>
+                      <code>manual</code
+                      >、<code>interval</code>、<code>date</code>、<code>specific-day</code>、<code>visit-web</code>、<code>keyboard-shortcut</code>、<code>context-menu</code>、<code
+                        >on-startup</code
+                      >
+                      或 <code>element-change</code>。切换类型时该触发器会从新类型的默认值重新开始。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>间隔（分钟）</td>
+                    <td>数字</td>
+                    <td><code>60</code></td>
+                    <td>仅定时触发器；1 到 360。</td>
+                  </tr>
+                  <tr>
+                    <td>延时（分钟）</td>
+                    <td>数字</td>
+                    <td><code>5</code></td>
+                    <td>仅定时触发器；0 到 20。</td>
+                  </tr>
+                  <tr>
+                    <td>日期</td>
+                    <td>日期</td>
+                    <td>空</td>
+                    <td>仅指定日期触发器。</td>
+                  </tr>
+                  <tr>
+                    <td>时间</td>
+                    <td>时间</td>
+                    <td><code>00:00</code></td>
+                    <td>指定日期与每周某几天触发器。</td>
+                  </tr>
+                  <tr>
+                    <td>选择日期</td>
+                    <td>复选组</td>
+                    <td>无</td>
+                    <td>按星期触发；周日存为 <code>0</code>，周六存为 <code>6</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>网址或正则</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>访问网页触发器；既可填网址匹配模式，也可填正则表达式。</td>
+                  </tr>
+                  <tr>
+                    <td>使用正则</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>把<strong>网址或正则</strong>按正则表达式处理，而不是按匹配模式处理。</td>
+                  </tr>
+                  <tr>
+                    <td>快捷键</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>键盘触发器；用字段旁的按钮录制组合键。</td>
+                  </tr>
+                  <tr>
+                    <td>输入框中也生效</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>焦点位于输入框时仍然触发该快捷键。</td>
+                  </tr>
+                  <tr>
+                    <td>右键菜单中的工作流名称</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>右键菜单触发器；显示在浏览器菜单里的名称。</td>
+                  </tr>
+                  <tr>
+                    <td>将出现在</td>
+                    <td>复选组</td>
+                    <td>无</td>
+                    <td>
+                      右键菜单触发器；可选
+                      <code>audio</code
+                      >、<code>editable</code>、<code>image</code>、<code>link</code>、<code>page</code>、<code>password</code>、<code>selection</code>、<code>video</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>匹配模式</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>元素变化触发器；只观察匹配的页面。</td>
+                  </tr>
+                  <tr>
+                    <td>元素选择器</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>元素变化触发器；要观察的元素，支持拾取与校验。</td>
+                  </tr>
+                  <tr>
+                    <td>目标元素选项</td>
+                    <td>复选组</td>
+                    <td>子节点变动开</td>
+                    <td>
+                      MutationObserver
+                      选项：包含子树、子节点变动、属性变动、文本变动，以及属性过滤。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>基准元素（可选）</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>元素变化触发器；该元素变化后会重新开始观察目标元素。</td>
+                  </tr>
+                  <tr>
+                    <td>基准元素选项</td>
+                    <td>复选组</td>
+                    <td>子节点变动开</td>
+                    <td>同一组观察选项，作用于基准元素。</td>
+                  </tr>
+                  <tr>
+                    <td>参数</td>
+                    <td>列表</td>
+                    <td>空</td>
+                    <td>工作流级输入；每一项包含名称、是否必填和可选的默认值。</td>
+                  </tr>
+                  <tr>
+                    <td>优先在当前标签页询问参数</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>在当前标签页而不是侧边栏询问这些输入。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出">输出</h3>
+            <p>不写变量。只有一个输出端口；运行从这里开始，并沿该连接继续。</p>
+            <h3 id="browser-copilot-说明">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                一个工作流可以保存多个触发器。<strong>工作流触发器</strong>弹窗负责新增、选择和删除；第一个是主触发器，并会同步到工作流记录上。最后一个触发器不能删除。
+              </li>
+              <li>
+                触发匹配由扩展完成，而不是由这个算子执行：定时、指定日期和每周某几天注册为浏览器闹钟；页面类触发器由注入的观察器负责；启动、快捷键和右键菜单由浏览器注册。参见<a
+                  href="concepts-zh.html"
+                  >工作流概念</a
+                >。
+              </li>
+              <li>触发器执行器本身是一个空操作，真正启动图的是它的输出连线。</li>
+              <li>
+                元素变化通过 MutationObserver
+                观察目标元素。可选的基准元素决定何时重新开始观察，属性过滤接受逗号分隔的属性名。
+              </li>
+              <li>
+                这里声明的参数就是工作流输入。它们会在第一步之前写入变量集合，<strong>参数输入</strong>算子也按同一份声明解析。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="execute-workflow">
+            <h2 id="operator-execute-workflow">执行工作流</h2>
+            <p>
+              把另一个已保存的工作流作为嵌套运行启动，结束后沿主输出继续。<a
+                href="https://www.goautoma.com/extension/docs/blocks/execute-workflow.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-2">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>要执行的工作流</td>
+                    <td>下拉选择</td>
+                    <td>空</td>
+                    <td>
+                      打开表单时从已保存工作流加载；当前正在编辑的工作流会被排除。可用刷新按钮重新读取列表。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>执行 ID（可选）</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>随节点保存；图引擎不会读取。</td>
+                  </tr>
+                  <tr>
+                    <td>全局数据（JSON）</td>
+                    <td>JSON</td>
+                    <td>空</td>
+                    <td>在弹窗中编辑。随节点保存；嵌套运行路径不会应用。</td>
+                  </tr>
+                  <tr>
+                    <td>使用当前全部工作流全局数据</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>随节点保存；嵌套运行路径不会应用。</td>
+                  </tr>
+                  <tr>
+                    <td>使用当前全部工作流变量</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>随节点保存；嵌套运行路径不会应用。</td>
+                  </tr>
+                  <tr>
+                    <td>插入当前工作流变量</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>逗号分隔的变量名；上一项关闭时显示。会保存但不生效。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-2">输出</h3>
+            <p>
+              不写输出变量。只有一个主输出端口。子工作流从自己的触发器开始，在本版本中与父运行共用同一个变量集合，因此子步骤写入的值对父工作流后续步骤仍然可见。
+            </p>
+            <h3 id="browser-copilot-说明-2">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                只有<strong>要执行的工作流</strong>会影响执行。全局数据与变量插入相关设置会原样保存以便导入导出往返，但嵌套运行路径不读取它们；变量本来就能流动，因为两次运行共用同一个变量集合。
+              </li>
+              <li>
+                已保存但后来被删除的工作流 id 仍会作为选项保留，不会在打开并保存表单时被悄悄改写。
+              </li>
+              <li>
+                找不到子工作流或检测到自循环时，运行日志会记录错误，父工作流沿主输出继续。子运行失败本身不会让父步骤失败。
+              </li>
+              <li>子工作流中的断点会暂停整个父运行；循环进度和检查点由父子共享。</li>
+            </ul>
+          </section>
+          <section data-operator="delay">
+            <h2 id="operator-delay">延时</h2>
+            <p>
+              在下一步开始前按固定时长暂停运行。<a
+                href="https://www.goautoma.com/extension/docs/blocks/delay.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-3">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>延时时长（毫秒）</td>
+                    <td>文本</td>
+                    <td><code>500</code></td>
+                    <td>
+                      保留为自由文本，因此可以写模板。读取前会先对
+                      <code>{{variables}}</code> 做插值。
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-3">输出</h3>
+            <p>不写变量。只有一个主输出端口。</p>
+            <h3 id="browser-copilot-说明-3">Browser Copilot 说明</h3>
+            <ul>
+              <li>值不是数字或为空时回退到 500 毫秒，而不是让步骤失败。</li>
+              <li>等待过程可中断：停止运行时延时立即结束。</li>
+              <li>
+                没有 <code>time</code> 时仍会读取旧版 <code>ms</code> 键，旧工作流可以继续运行。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="export-data">
+            <h2 id="operator-export-data">导出数据</h2>
+            <p>
+              把本次运行的数据表或某个变量写入下载文件。<a
+                href="https://www.goautoma.com/extension/docs/blocks/export-data.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-4">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>要导出的数据</td>
+                    <td>下拉选择</td>
+                    <td><code>data-columns</code></td>
+                    <td>
+                      <code>data-columns</code> 导出数据表；<code>variable</code> 导出指定变量。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>选择<strong>变量</strong>时显示；该变量必须已经有值。</td>
+                  </tr>
+                  <tr>
+                    <td>文件名</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>
+                      相对文件名；会插值 <code>{{variables}}</code>。留空时使用兜底名称
+                      <code>export.json</code>、<code>export.csv</code> 或 <code>export.txt</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>冲突时</td>
+                    <td>下拉选择</td>
+                    <td><code>uniquify</code></td>
+                    <td>
+                      <code>uniquify</code>、<code>overwrite</code> 或
+                      <code>prompt</code>。会保存，但执行器不读取。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>导出为</td>
+                    <td>下拉选择</td>
+                    <td><code>json</code></td>
+                    <td><code>json</code>、<code>csv</code> 或 <code>plain-text</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>添加 UTF-8 BOM</td>
+                    <td>复选框</td>
+                    <td>开</td>
+                    <td>仅 CSV；让 Excel 正确读取非 ASCII 单元格。</td>
+                  </tr>
+                  <tr>
+                    <td>分隔符</td>
+                    <td>文本</td>
+                    <td><code>,</code></td>
+                    <td>用于 CSV 与纯文本导出。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-4">输出</h3>
+            <ul>
+              <li><code>lastExport</code>：实际写出的文本，无论文件是否保存成功。</li>
+              <li><code>lastExportPath</code>：文件名，仅在保存成功后设置。</li>
+              <li>一个主输出端口。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-4">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                <strong>数据表</strong>读取
+                <code>dataTable</code
+                >；空表会让步骤失败，而不是写一个空文件。错误信息会列常见原因：没有读取步骤、没有列名，或读取没有匹配到内容。
+              </li>
+              <li>
+                <strong>变量</strong>在名称为空或变量没有值时会失败。JSON
+                导出会序列化该值，其他格式转成文本。
+              </li>
+              <li>
+                文件通过<a href="concepts-zh.html">工作流概念</a
+                >里说明的下载目标链保存。取消保存对话框不算错误，但不会设置
+                <code>lastExportPath</code>。
+              </li>
+              <li>
+                <strong>冲突时</strong
+                >会随节点保存，但本版本不据此分支：执行器把选定的文件名直接交给保存路径。
+              </li>
+              <li>
+                CSV 与纯文本都会使用分隔符；<code>addBOMHeader</code> 只对 CSV
+                生效，纯文本不写表头也不做引号转义。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="blocks-group">
+            <h2 id="operator-blocks-group">分组</h2>
+            <p>
+              把一组步骤打包成一个节点，让长画布更易读。分组按保存顺序运行内部步骤，然后从自己的输出继续。<a
+                href="https://www.goautoma.com/extension/docs/blocks/blocks-group.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-5">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>分组名称</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>节点上直接显示的名称；为空时显示「分组」。</td>
+                  </tr>
+                  <tr>
+                    <td>步骤</td>
+                    <td>列表</td>
+                    <td>空</td>
+                    <td>
+                      子算子存放在 <code>data.blocks</code> 中；可在节点内调整顺序、编辑或移除。
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-5">输出</h3>
+            <p>不写变量。只有一个主输出端口。空分组相当于直通。</p>
+            <h3 id="browser-copilot-说明-5">Browser Copilot 说明</h3>
+            <ul>
+              <li>这个算子没有独立的检查器，名称和子步骤都直接在画布节点上编辑。</li>
+              <li>
+                子步骤不是图节点。分组运行期间它们会注册为临时步骤，每条步骤都有自己的运行日志，但不会进入检查点使用的已完成节点清单。
+              </li>
+              <li>
+                打包要求至少选中两个步骤，并且它们构成一条连续链路，选中范围不能还连着外部算子。部分算子类型不能作为分组内部步骤。<strong>解组</strong>会把子步骤放回画布。
+              </li>
+              <li>子步骤结构不合法时会报错并让运行失败，而不是静默跳过。</li>
+            </ul>
+          </section>
+          <section data-operator="clipboard">
+            <h2 id="operator-clipboard">剪贴板</h2>
+            <p>
+              把系统剪贴板或当前页面选中的文本读入变量，或把工作流中的文本写入剪贴板。<a
+                href="https://www.goautoma.com/extension/docs/blocks/clipboard.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-6">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>操作</td>
+                    <td>下拉选择</td>
+                    <td><code>get</code></td>
+                    <td><code>get</code> 读取；<code>insert</code> 写入。</td>
+                  </tr>
+                  <tr>
+                    <td>文本</td>
+                    <td>多行文本</td>
+                    <td>空</td>
+                    <td>
+                      仅写入模式；支持
+                      <code>{{variables}}</code>。勾选<strong>复制页面上选中的文本</strong>后隐藏。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>复制页面上选中的文本</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>
+                      读取模式下改为读取页面选区而不是系统剪贴板；写入模式下隐藏<strong>文本</strong>字段。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>读取时显示变量名输入框；读取结果始终会保存。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>为空时使用 <code>lastClipboard</code>。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-6">输出</h3>
+            <ul>
+              <li>
+                读取：文本写入 <code>{{&lt;变量名&gt;}}</code>；变量名为空时写入
+                <code>{{lastClipboard}}</code>。
+              </li>
+              <li>写入：不写变量，结果行确认已写入剪贴板。</li>
+              <li>一个主输出端口。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-6">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                读取总会写入变量；<strong>赋值到变量</strong>只决定是否显示名称输入框。名称为空不算错误，因为有
+                <code>lastClipboard</code> 兜底。
+              </li>
+              <li>
+                存储结构里还有 <code>saveData</code> 与
+                <code>dataColumn</code>，但本表单既不显示也不应用它们；剪贴板算子不会写数据表。
+              </li>
+              <li>
+                <strong>复制页面上选中的文本</strong
+                >只在读取模式生效。写入模式下执行器仍然写<strong>文本</strong>字段，所以需要稳定结果时应保持该选项关闭。
+              </li>
+              <li>剪贴板访问依赖浏览器焦点与权限。被拒绝时步骤失败，并附带底层原因。</li>
+            </ul>
+          </section>
+          <section data-operator="wait-connections">
+            <h2 id="operator-wait-connections">等待连接</h2>
+            <p>
+              先短暂停顿，让上一步触发的导航稳定下来，再等待正在操作的标签页报告加载完成。本版本等待的是标签页，而不是图中其他分支。<a
+                href="https://www.goautoma.com/extension/docs/blocks/wait-connections.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-7">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>超时（毫秒）</td>
+                    <td>数字</td>
+                    <td><code>10000</code></td>
+                    <td>等待标签页加载的上限；小于 1000 的值会按 1000 处理。</td>
+                  </tr>
+                  <tr>
+                    <td>仅继续指定流程</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>随节点保存；不生效。</td>
+                  </tr>
+                  <tr>
+                    <td>选择流程（算子 id）</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>上一项开启时显示；随节点保存，不生效。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-7">输出</h3>
+            <p>不写变量。只有一个主输出端口。结果行会报告页面已加载。</p>
+            <h3 id="browser-copilot-说明-7">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                步骤总是先等 300 毫秒再开始监听，因为标签页可能仍在上一个页面报告
+                <code>complete</code>。
+              </li>
+              <li>
+                <strong>仅继续指定流程</strong>及其算子 id
+                会为导入的工作流保留，但执行器会忽略它们；本版本没有按流程等待的行为。
+              </li>
+              <li>
+                找不到可操作的标签页时立即返回。等待是尽力而为：超时后步骤仍会继续，并报告页面已加载。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="notification">
+            <h2 id="operator-notification">通知</h2>
+            <p>
+              显示桌面通知，也可以把同样的文本转发到飞书机器人。<a
+                href="https://www.goautoma.com/extension/docs/blocks/notification.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-8">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>标题</td>
+                    <td>文本</td>
+                    <td><code>Hello world!</code></td>
+                    <td>支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>消息内容</td>
+                    <td>多行文本</td>
+                    <td>空</td>
+                    <td>支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>发送到飞书</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>使用设置中配置的飞书 Webhook。</td>
+                  </tr>
+                  <tr>
+                    <td>图标地址（可选）</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>随节点保存；本版本不应用。</td>
+                  </tr>
+                  <tr>
+                    <td>图片地址（可选）</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>随节点保存；本版本不应用。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-8">输出</h3>
+            <p>不写变量。只有一个主输出端口；结果行确认通知已发送。</p>
+            <h3 id="browser-copilot-说明-8">Browser Copilot 说明</h3>
+            <ul>
+              <li>标题和消息内容会先做变量插值，再创建通知。</li>
+              <li>
+                本版本始终使用扩展自带图标（<code>icons/icon-48.png</code>）。<strong>图标地址</strong>和<strong>图片地址</strong>会原样保留，但不会改变通知。
+              </li>
+              <li>
+                飞书投递使用设置中的
+                Webhook。未配置或发送失败都会记录日志，但步骤仍然成功，因为桌面通知已经发出。
+              </li>
+              <li>通知 API 不可用时，步骤记录一条提示并继续。</li>
+            </ul>
+          </section>
+          <section data-operator="note">
+            <h2 id="operator-note">便签</h2>
+            <p>
+              放在画布上的自由备注，用于说明工作流，不影响执行。该算子没有对应的 Automa 上游页面。
+            </p>
+            <h3 id="设置-9">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>描述</td>
+                    <td>多行文本</td>
+                    <td>空</td>
+                    <td>便签正文，保存在 <code>note</code> 中；可在画布或侧边栏编辑。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-9">输出</h3>
+            <p>不写变量。有一个直通输出端口。</p>
+            <h3 id="browser-copilot-说明-9">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                宽度、高度、颜色、字号和绘图标记是与便签一起保存的展示字段，只影响画布上的外观。
+              </li>
+              <li>
+                本版本中便签文字只留在画布上：执行器读取旧版的
+                <code>text</code> 键，而编辑器写入的是 <code>note</code>，因此不会输出到运行日志。
+              </li>
+              <li>便签可以像普通节点一样连接而不改变执行路径，适合留在链路中做说明。</li>
+            </ul>
+          </section>
+          <section data-operator="workflow-state">
+            <h2 id="operator-workflow-state">工作流状态</h2>
+            <p>
+              请求停止当前运行、另一个工作流或一组指定工作流。本版本中算子无法访问调度器，因此所有停止动作都会让步骤报错结束。<a
+                href="https://www.goautoma.com/extension/docs/blocks/workflow-state.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-10">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>操作</td>
+                    <td>下拉选择</td>
+                    <td><code>stop-current</code></td>
+                    <td>
+                      <code>stop-all</code>、<code>stop-current</code> 或
+                      <code>stop-specific</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>除当前工作流外</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>仅停止全部时显示；会保存但不生效。</td>
+                  </tr>
+                  <tr>
+                    <td>工作流 ID（逗号分隔）</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>仅停止指定工作流时显示；会保存但不生效。</td>
+                  </tr>
+                  <tr>
+                    <td>抛出错误</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>
+                      表单中仅停止当前工作流时显示；开启后用<strong>错误信息</strong>作为失败文本。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>错误信息</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td><strong>抛出错误</strong>开启时显示；支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-10">输出</h3>
+            <p>不写变量。只有一个主输出端口，但停止动作会抛错，因此不会走到该端口。</p>
+            <h3 id="browser-copilot-说明-10">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                停止运行属于调度器的职责，本版本的算子没有可达的调度器接口。<code>stop-all</code>、<code
+                  >stop-current</code
+                >
+                和 <code>stop-specific</code> 都会让步骤失败，而不是假装工作流已经停止。
+              </li>
+              <li>
+                <strong>抛出错误</strong
+                >开启时，步骤抛出<strong>错误信息</strong>（为空则用通用提示）；关闭时抛出一个点名所请求动作的通用错误。
+              </li>
+              <li>
+                <strong>除当前工作流外</strong>与<strong>工作流 ID</strong
+                >会为导入的工作流保留，但这条执行路径不会读取。
+              </li>
+              <li>
+                对工具协议生成的节点，执行器还支持对名为 <code>state</code> 的变量做
+                <code>get</code> 和 <code>set</code>；<code>get</code> 会写入
+                <code>lastState</code>。检查器不提供这些操作。
+              </li>
+            </ul>
+          </section>
+          <section data-operator="parameter-prompt">
+            <h2 id="operator-parameter-prompt">参数输入</h2>
+            <p>
+              在后续步骤运行前解析工作流已声明的输入。本版本不显示交互对话框：值来自运行作用域，缺失时用默认值补齐。<a
+                href="https://www.goautoma.com/extension/docs/blocks/parameter-prompt.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-11">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>超时（毫秒，0 为禁用）</td>
+                    <td>数字</td>
+                    <td><code>60000</code></td>
+                    <td>随节点保存；因为没有提示框，所以不生效。</td>
+                  </tr>
+                  <tr>
+                    <td>参数</td>
+                    <td>列表</td>
+                    <td>空</td>
+                    <td>已声明的输入；每项包含名称、是否必填和可选的默认值。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-11">输出</h3>
+            <ul>
+              <li>每个参数写入一个同名变量。</li>
+              <li>结果行按 <code>名称=值</code> 列出已解析的输入，用 <code>·</code> 分隔。</li>
+              <li>一个主输出端口。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-11">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                运行作用域里已有的值优先；默认值只在变量未定义时写入，因此不会覆盖触发器传入的值或前序步骤的结果。
+              </li>
+              <li>默认值写入前会先做变量插值。</li>
+              <li>必填参数缺失时步骤失败，并列出所有缺失项，避免后续步骤拿到空值继续运行。</li>
+              <li>没有声明参数时，步骤记录一条提示并继续。</li>
+              <li>超时以及参数上的提示文本、占位符会保存下来，但在没有提示框的情况下不起作用。</li>
+            </ul>
+          </section>
+          <section data-operator="webhook">
+            <h2 id="operator-webhook">Webhook</h2>
+            <p>
+              向远程端点发送 HTTP 请求，并把响应解析到变量或数据表。<a
+                href="https://www.goautoma.com/extension/docs/blocks/webhook.html"
+                >Automa 参考</a
+              >
+            </p>
+            <h3 id="设置-12">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>请求方法</td>
+                    <td>下拉选择</td>
+                    <td><code>POST</code></td>
+                    <td>
+                      <code>GET</code
+                      >、<code>POST</code>、<code>PUT</code>、<code>PATCH</code>、<code
+                        >DELETE</code
+                      >
+                      或 <code>HEAD</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>请求地址 *</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>内容类型</td>
+                    <td>下拉选择</td>
+                    <td><code>json</code></td>
+                    <td>
+                      <code>text/plain</code>、<code>application/json</code>、<code
+                        >multipart/form-data</code
+                      >
+                      或 <code>application/x-www-form-urlencoded</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>超时（毫秒，0 为禁用）</td>
+                    <td>数字</td>
+                    <td><code>10000</code></td>
+                    <td>作用于请求本身。</td>
+                  </tr>
+                  <tr>
+                    <td>请求头</td>
+                    <td>列表</td>
+                    <td>空</td>
+                    <td>名称与值成对的行；值可以写 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>请求体</td>
+                    <td>JSON</td>
+                    <td><code>{}</code></td>
+                    <td><code>GET</code> 与 <code>HEAD</code> 时隐藏。</td>
+                  </tr>
+                  <tr>
+                    <td>响应类型</td>
+                    <td>下拉选择</td>
+                    <td><code>json</code></td>
+                    <td><code>json</code>、<code>text</code> 或 <code>base64</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>数据路径</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>仅 JSON 响应；在保存前收窄响应内容。</td>
+                  </tr>
+                  <tr>
+                    <td>将响应赋值到变量</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>把解析并应用数据路径后的值写入<strong>变量名</strong>。</td>
+                  </tr>
+                  <tr>
+                    <td>变量名</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>填写后响应写入这里，而不是 <code>lastHttpResponse</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>保存响应到数据表</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>把响应行追加到数据表。</td>
+                  </tr>
+                  <tr>
+                    <td>列名</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>写数据表时必填。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-12">输出</h3>
+            <ul>
+              <li>
+                填写<strong>变量名</strong>时，解析后的响应写入该变量；否则写入
+                <code>lastHttpResponse</code>。
+              </li>
+              <li>
+                开启<strong>将响应赋值到变量</strong>后，同名变量会收到应用<strong>数据路径</strong>之后的值。
+              </li>
+              <li>
+                开启<strong>保存响应到数据表</strong>后，响应行会追加到<strong>列名</strong>；列名为空时记录提示并跳过写入。
+              </li>
+              <li>
+                两个输出端口：请求成功走主端口；发生传输错误或非 2xx
+                状态且已连接回退端口时走回退端口。
+              </li>
+            </ul>
+            <h3 id="browser-copilot-说明-12">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                只有请求本身失败才会走回退端口。URL、请求头或请求体无法解析这类配置错误即使有回退连线也会让步骤失败。
+              </li>
+              <li>
+                <code>GET</code> 与
+                <code>HEAD</code> 不发送请求体；其他方法按所选内容类型编码请求体。
+              </li>
+              <li><strong>数据路径</strong>只对 JSON 响应生效。文本与 base64 响应按原样保存。</li>
+              <li>超时填 <code>0</code> 表示不限制。中止运行会同时中止请求。</li>
+              <li>非 2xx 响应且没有回退连线时，步骤失败，错误信息包含方法、状态码和 URL。</li>
+            </ul>
+          </section>
+          <section data-operator="ai-agent">
+            <h2 id="operator-ai-agent">AI 智能体</h2>
+            <p>
+              读取可选的目标元素，把它和你的提示词一起交给可调用工具的 AI
+              智能体。智能体返回文本答案，在允许时还可以操作页面。Browser Copilot 独有算子。
+            </p>
+            <h3 id="设置-13">设置</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>默认值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>查找元素方式</td>
+                    <td>下拉选择</td>
+                    <td><code>cssSelector</code></td>
+                    <td>
+                      可选目标元素的定位方式：<code>cssSelector</code>、<code>xpath</code> 或
+                      <code>text</code>。
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>目标元素（可选）</td>
+                    <td>文本</td>
+                    <td>空</td>
+                    <td>运行时读取匹配元素的文本；留空则由智能体自行读取页面。</td>
+                  </tr>
+                  <tr>
+                    <td>提示词 *</td>
+                    <td>多行文本</td>
+                    <td>空</td>
+                    <td>给智能体的指令，支持 <code>{{variables}}</code>。</td>
+                  </tr>
+                  <tr>
+                    <td>允许智能体操作页面（点击、填写、导航）</td>
+                    <td>复选框</td>
+                    <td>关</td>
+                    <td>关闭为只读分析；开启后智能体可自主点击、输入和导航。</td>
+                  </tr>
+                  <tr>
+                    <td>最大工具轮次</td>
+                    <td>数字</td>
+                    <td><code>20</code></td>
+                    <td>单个节点内模型与工具往返的上限，1 到 50。</td>
+                  </tr>
+                  <tr>
+                    <td>输出变量名</td>
+                    <td>文本</td>
+                    <td><code>lastAIAgent</code></td>
+                    <td>接收智能体最终文本答案的变量。</td>
+                  </tr>
+                  <tr>
+                    <td>操作前先快照页面</td>
+                    <td>复选框</td>
+                    <td>开</td>
+                    <td>让智能体先列出按钮、链接和输入框，以便自行定位元素。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="输出-13">输出</h3>
+            <ul>
+              <li>
+                智能体的最终文本答案，写入<strong>输出变量名</strong>（默认
+                <code>{{lastAIAgent}}</code>）。
+              </li>
+              <li>一个主输出端口。该算子不写数据表。</li>
+            </ul>
+            <h3 id="browser-copilot-说明-13">Browser Copilot 说明</h3>
+            <ul>
+              <li>
+                没有目标元素时，智能体通过工具自行读取页面；填写了目标元素时，会先读取该元素的文本并纳入任务。
+              </li>
+              <li>
+                只读模式下智能体可以检查页面并回答，但不能点击、输入或导航。全自动模式下每一步操作都会写入运行日志，不会逐步请求确认。
+              </li>
+              <li><strong>最大工具轮次</strong>独立于全局设置，限制这个节点，避免单步无限循环。</li>
+              <li>
+                模型提供方来自设置。模型调用失败会让步骤失败，并按节点的<strong>出错时</strong>策略处理。
+              </li>
+              <li>提示词会在智能体启动前完成插值，因此前序步骤可以提供指令或其中的一部分。</li>
+            </ul>
+          </section>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">本页目录</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#operator-trigger"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >触发器</a
+            ><a
+              href="#operator-execute-workflow"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >执行工作流</a
+            ><a
+              href="#operator-delay"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >延时</a
+            ><a
+              href="#operator-export-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >导出数据</a
+            ><a
+              href="#operator-blocks-group"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >分组</a
+            ><a
+              href="#operator-clipboard"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >剪贴板</a
+            ><a
+              href="#operator-wait-connections"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >等待连接</a
+            ><a
+              href="#operator-notification"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >通知</a
+            ><a
+              href="#operator-note"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >便签</a
+            ><a
+              href="#operator-workflow-state"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >工作流状态</a
+            ><a
+              href="#operator-parameter-prompt"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >参数输入</a
+            ><a
+              href="#operator-webhook"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Webhook</a
+            ><a
+              href="#operator-ai-agent"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >AI 智能体</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/operators-general.zh-CN.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >在 GitHub 上编辑此页</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>由 docs/workflow 生成</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="operators-browser-zh.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← 上一页</span
+            ><span class="text-sm text-ink">浏览器</span></a
+          ><a
+            href="operators-data-zh.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">下一页 →</span
+            ><span class="text-sm text-ink">数据</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">本页目录</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#operator-trigger"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >触发器</a
+            ><a
+              href="#operator-execute-workflow"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >执行工作流</a
+            ><a
+              href="#operator-delay"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >延时</a
+            ><a
+              href="#operator-export-data"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >导出数据</a
+            ><a
+              href="#operator-blocks-group"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >分组</a
+            ><a
+              href="#operator-clipboard"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >剪贴板</a
+            ><a
+              href="#operator-wait-connections"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >等待连接</a
+            ><a
+              href="#operator-notification"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >通知</a
+            ><a
+              href="#operator-note"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >便签</a
+            ><a
+              href="#operator-workflow-state"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >工作流状态</a
+            ><a
+              href="#operator-parameter-prompt"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >参数输入</a
+            ><a
+              href="#operator-webhook"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Webhook</a
+            ><a
+              href="#operator-ai-agent"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >AI 智能体</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index-zh.html" class="transition-colors hover:text-ink">文档</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm 非商业许可 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

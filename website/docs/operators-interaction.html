@@ -1,0 +1,2172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web interaction operators — Browser Copilot Docs</title>
+    <meta
+      name="description"
+      content="Click, read, fill, scroll, upload, and inject JavaScript on the page with 14 interaction operators."
+    />
+    <link
+      rel="canonical"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-interaction.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-interaction.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-interaction-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/docs/operators-interaction.html"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Web interaction operators — Browser Copilot Docs" />
+    <meta
+      property="og:description"
+      content="Click, read, fill, scroll, upload, and inject JavaScript on the page with 14 interaction operators."
+    />
+    <meta
+      property="og:url"
+      content="https://dcc123456.github.io/browser-copilot/docs/operators-interaction.html"
+    />
+    <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Web interaction operators — Browser Copilot Docs" />
+    <meta
+      name="twitter:description"
+      content="Click, read, fill, scroll, upload, and inject JavaScript on the page with 14 interaction operators."
+    />
+    <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="../icons/icon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="../icons/icon-16.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0f1115',
+              panel: '#161a21',
+              'panel-2': '#1e232c',
+              border: '#2a303c',
+              ink: '#e9ecf2',
+              muted: '#9aa4b5',
+              faint: '#687183',
+              accent: '#6ea3ff',
+              'accent-strong': '#8bb6ff',
+              ok: '#43c9a3',
+              err: '#ff6f6f',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                "'Segoe UI'",
+                'Roboto',
+                "'PingFang SC'",
+                "'Hiragino Sans GB'",
+                "'Microsoft YaHei'",
+                'sans-serif',
+              ],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      html {
+        scroll-behavior: smooth;
+      }
+      .docs-prose {
+        overflow-wrap: anywhere;
+        line-height: 1.75;
+      }
+      .docs-prose h1 {
+        margin: 0 0 1rem;
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .docs-prose h2 {
+        margin: 2.5rem 0 1rem;
+        border-top: 1px solid #2a303c;
+        padding-top: 1.5rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+      .docs-prose h2[id^='operator-'] {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .docs-prose h3 {
+        margin: 1.75rem 0 0.75rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .docs-prose p,
+      .docs-prose li {
+        color: #9aa4b5;
+      }
+      .docs-prose p {
+        margin: 1rem 0;
+      }
+      .docs-prose strong {
+        color: #e9ecf2;
+      }
+      .docs-prose a {
+        color: #6ea3ff;
+        text-decoration: none;
+      }
+      .docs-prose a:hover {
+        text-decoration: underline;
+      }
+      .docs-prose ul,
+      .docs-prose ol {
+        margin: 1rem 0;
+        padding-left: 1.5rem;
+      }
+      .docs-prose ul {
+        list-style: disc;
+      }
+      .docs-prose ol {
+        list-style: decimal;
+      }
+      .docs-prose li {
+        margin: 0.35rem 0;
+      }
+      .docs-prose code {
+        border-radius: 0.35rem;
+        background: #1e232c;
+        padding: 0.15rem 0.4rem;
+        color: #8bb6ff;
+        font-size: 0.85em;
+      }
+      .docs-prose pre {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+        border: 1px solid #2a303c;
+        border-radius: 0.75rem;
+        background: #161a21;
+        padding: 1rem;
+      }
+      .docs-prose pre code {
+        background: transparent;
+        padding: 0;
+        color: #e9ecf2;
+      }
+      .docs-prose blockquote {
+        margin: 1.25rem 0;
+        border-left: 3px solid #2a303c;
+        padding-left: 1rem;
+        color: #9aa4b5;
+      }
+      .docs-prose hr {
+        margin: 2rem 0;
+        border-color: #2a303c;
+      }
+      .docs-prose .table-wrap {
+        margin: 1.25rem 0;
+        overflow-x: auto;
+      }
+      .docs-prose .table-settings th:nth-child(2),
+      .docs-prose .table-settings td:nth-child(2),
+      .docs-prose .table-settings th:nth-child(3),
+      .docs-prose .table-settings td:nth-child(3) {
+        white-space: nowrap;
+      }
+      .docs-prose table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+      }
+      .docs-prose th,
+      .docs-prose td {
+        border: 1px solid #2a303c;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        vertical-align: top;
+      }
+      .docs-prose th {
+        background: #1e232c;
+        color: #e9ecf2;
+        font-weight: 600;
+      }
+      .docs-prose td {
+        color: #9aa4b5;
+      }
+      .docs-prose .docs-group-row td {
+        background: #161a21;
+        color: #e9ecf2;
+      }
+      .docs-prose h1,
+      .docs-prose h2,
+      .docs-prose h3,
+      .docs-prose [id] {
+        scroll-margin-top: 6rem;
+      }
+      .docs-prose section[data-operator]:first-of-type h2 {
+        margin-top: 2rem;
+      }
+    </style>
+  </head>
+  <body class="bg-bg text-ink font-sans antialiased">
+    <nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+      <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <a href="../index.html" class="flex shrink-0 items-center gap-3">
+          <img src="../icons/icon-32.png" alt="" class="h-8 w-8 shrink-0" />
+          <span class="whitespace-nowrap text-base font-semibold text-ink sm:text-lg"
+            >Browser Copilot</span
+          >
+        </a>
+        <div class="flex items-center gap-3 sm:gap-5 md:gap-6">
+          <a href="index.html" class="text-sm text-ink">Docs</a>
+          <a
+            href="../index.html#features"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >Features</a
+          >
+          <a
+            href="../index.html#how-it-works"
+            class="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+            >How it works</a
+          >
+          <a
+            href="operators-interaction-zh.html"
+            class="text-sm text-muted transition-colors hover:text-ink"
+            >中文</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hidden rounded-lg border border-border px-4 py-2 text-sm text-muted transition-colors hover:border-accent hover:text-ink sm:inline-flex"
+            >GitHub</a
+          >
+        </div>
+      </div>
+    </nav>
+    <div
+      class="mx-auto grid max-w-7xl gap-10 px-6 pb-16 pt-24 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]"
+    >
+      <aside class="hidden lg:block">
+        <div class="sticky top-24 space-y-6">
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">Start</p>
+            <nav class="space-y-1">
+              <a
+                href="index.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Overview</a
+              ><a
+                href="getting-started.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Getting started</a
+              ><a
+                href="concepts.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Workflow concepts</a
+              >
+            </nav>
+          </div>
+          <div>
+            <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+              Operators
+            </p>
+            <nav class="space-y-1">
+              <a
+                href="operators-interaction.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                aria-current="page"
+                >Web interaction</a
+              ><a
+                href="operators-browser.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Browser</a
+              ><a
+                href="operators-general.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >General</a
+              ><a
+                href="operators-data.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Data</a
+              ><a
+                href="operators-conditions.html"
+                class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                >Control flow</a
+              >
+            </nav>
+          </div>
+        </div>
+      </aside>
+      <main class="min-w-0">
+        <details class="mb-6 rounded-xl border border-border bg-panel p-4 lg:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">Documentation menu</summary>
+          <div class="mt-4 space-y-4">
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Start
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="index.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Overview</a
+                ><a
+                  href="getting-started.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Getting started</a
+                ><a
+                  href="concepts.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Workflow concepts</a
+                >
+              </nav>
+            </div>
+            <div>
+              <p class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-faint">
+                Operators
+              </p>
+              <nav class="space-y-1">
+                <a
+                  href="operators-interaction.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors bg-panel text-ink"
+                  aria-current="page"
+                  >Web interaction</a
+                ><a
+                  href="operators-browser.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Browser</a
+                ><a
+                  href="operators-general.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >General</a
+                ><a
+                  href="operators-data.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Data</a
+                ><a
+                  href="operators-conditions.html"
+                  class="block rounded-lg px-3 py-2 text-sm transition-colors text-muted hover:bg-panel hover:text-ink"
+                  >Control flow</a
+                >
+              </nav>
+            </div>
+          </div>
+        </details>
+        <div class="mb-6 flex items-center gap-2 text-xs text-faint">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a><span>/</span
+          ><span class="text-muted">Web interaction</span>
+        </div>
+        <article class="docs-prose">
+          <h1>Interaction operators</h1>
+          <p>
+            This page covers the operators that act on the page itself: clicking, reading, typing,
+            scrolling, and dispatching events. Each section lists the operator&#39;s settings, its
+            outputs, and the behavior that is specific to Browser Copilot.
+          </p>
+          <p>
+            Locators accept a CSS selector, an XPath expression, or visible text, and every data
+            field accepts <code>{{variables}}</code>. Steps run on the tab the workflow is driving,
+            not necessarily the tab that is visible. A reference that cannot be resolved is left in
+            place and named in the run log. The common <strong>Description</strong>,
+            <strong>Disable block</strong>, <strong>Timeout</strong>, and
+            <strong>On error</strong> settings are not repeated in every table; they apply to the
+            whole node.
+          </p>
+          <section data-operator="event-click">
+            <h2 id="operator-event-click">Click element</h2>
+            <p>
+              Clicks the first element matched by the locator.
+              <a href="https://www.goautoma.com/extension/docs/blocks/event-click.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td>
+                      <code>cssSelector</code>, <code>xpath</code>, or <code>text</code>. With
+                      <code>text</code>, the Selector field holds the exact visible text of a leaf
+                      element.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Locator for the target. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Select multiple elements</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Shared locator option; clicking still acts on the first match.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Poll for the element before clicking.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Poll window used when <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Mark the element on execution</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Highlights the target during the run as an editor aid.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The click is refused when the target is disabled or covered by another element; the
+                run log names the blocker instead of clicking through it.
+              </li>
+              <li>
+                The step returns after the click is dispatched. If the click navigates, follow it
+                with a read or a wait before depending on the new page.
+              </li>
+              <li>
+                Use <strong>Link</strong> for anchors when you want the destination handled, and
+                this operator for buttons and other controls.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="get-text">
+            <h2 id="operator-get-text">Get text</h2>
+            <p>
+              Reads rendered text from one or more elements and publishes it to a variable and,
+              optionally, the data table.
+              <a href="https://www.goautoma.com/extension/docs/blocks/get-text.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-2">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>, <code>xpath</code>, or <code>text</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Locator for the element to read. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Select multiple elements</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Read every match as an array instead of the first match only.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Poll for the element before reading.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Poll window used when <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Mark the element on execution</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Highlights the target during the run.</td>
+                  </tr>
+                  <tr>
+                    <td>Regex</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Expression flags</td>
+                    <td>Multi-select</td>
+                    <td>None</td>
+                    <td>
+                      <code>g</code>, <code>i</code>, and <code>m</code>; stored with the regex.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Text prefix</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Keeps the text that follows this marker.</td>
+                  </tr>
+                  <tr>
+                    <td>Text suffix</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Keeps the text that precedes this marker.</td>
+                  </tr>
+                  <tr>
+                    <td>Include HTML tags</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Return the element&#39;s <code>innerHTML</code> instead of its text.</td>
+                  </tr>
+                  <tr>
+                    <td>Use textContent</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Read <code>textContent</code>, including hidden nodes, instead of rendered
+                      <code>innerText</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Insert to table</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Write the read value into the data table.</td>
+                  </tr>
+                  <tr>
+                    <td>Select column</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Column that receives the value. Required for a table write.</td>
+                  </tr>
+                  <tr>
+                    <td>Add extra row</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Value of the extra row</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Only shown when <strong>Add extra row</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Extra row column</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Only shown when <strong>Add extra row</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Publish the value under a custom variable name.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Custom output name. Ignored when <strong>Assign to variable</strong> is off.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-2">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastText}}</code> when <strong>Variable name</strong> is empty, otherwise
+                <code>{{&lt;name&gt;}}</code>. <code>lastText</code> is updated in both cases.
+              </li>
+              <li>
+                With <strong>Select multiple elements</strong>, the value is an array of strings.
+              </li>
+              <li>
+                With <strong>Insert to table</strong>, one value is written per run, or one per loop
+                iteration. Writing the same column again replaces the cell.
+              </li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-2">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                A read that matches nothing, or returns only blank text, fails the step instead of
+                publishing an empty value. Use <strong>Element exists</strong> when a read is
+                optional.
+              </li>
+              <li>
+                <strong>Regex</strong> and <strong>Expression flags</strong> are persisted for
+                imported workflows but are not applied by this build.
+                <strong>RegEx variable</strong> or <strong>JavaScript code</strong> can filter the
+                value instead.
+              </li>
+              <li>
+                <strong>Add extra row</strong> and its two fields are also persisted without being
+                written.
+              </li>
+              <li>
+                <strong>Text prefix</strong> and <strong>Text suffix</strong> keep the substring
+                after the prefix and before the suffix when those markers are present.
+              </li>
+              <li>
+                With <strong>Insert to table</strong> on but no column name, the operator records an
+                informational message and skips the table write.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="element-scroll">
+            <h2 id="operator-element-scroll">Scroll element</h2>
+            <p>
+              Scrolls the page or an element to an offset, or brings an element into view.
+              <a href="https://www.goautoma.com/extension/docs/blocks/element-scroll.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-3">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>, <code>xpath</code>, or <code>text</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td><code>html</code></td>
+                    <td>
+                      <code>html</code> or <code>window</code> scrolls the page; any other locator
+                      scrolls that element.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Select multiple elements</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Shared locator option; only the first match is scrolled.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Poll for the element before scrolling.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Poll window used when <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Mark the element on execution</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Highlights the target during the run.</td>
+                  </tr>
+                  <tr>
+                    <td>Scroll horizontal</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Horizontal target in pixels.</td>
+                  </tr>
+                  <tr>
+                    <td>Scroll vertical</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Vertical target in pixels.</td>
+                  </tr>
+                  <tr>
+                    <td>Scroll into view</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Ignore the offsets and bring the element into view.</td>
+                  </tr>
+                  <tr>
+                    <td>Smooth scroll</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Animate the scroll instead of jumping.</td>
+                  </tr>
+                  <tr>
+                    <td>Increment horizontal scroll</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Treat <strong>Scroll horizontal</strong> as a delta from the current position.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Increment vertical scroll</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Treat <strong>Scroll vertical</strong> as a delta from the current position.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-3">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-3">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                With the default <code>html</code> selector the operator scrolls the document; with
+                <code>window</code> it also scrolls the page. Use a concrete element selector only
+                when a scroll container should move.
+              </li>
+              <li>
+                Without the increment checkboxes, the numbers are targets passed to
+                <code>scrollTo</code>, so a value smaller than the current offset scrolls back up.
+              </li>
+              <li>
+                <strong>Scroll into view</strong> takes priority over the offsets and ignores the
+                increment options.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="link">
+            <h2 id="operator-link">Link</h2>
+            <p>
+              Follows a link element and can open its destination in a new tab.
+              <a href="https://www.goautoma.com/extension/docs/blocks/link.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-4">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>, <code>xpath</code>, or <code>text</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Locator for the anchor. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Poll for the anchor before clicking.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Poll window used when <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Mark the element on execution</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Highlights the target during the run.</td>
+                  </tr>
+                  <tr>
+                    <td>Open in new tab</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>
+                      Open the destination in a new tab instead of following the link in place.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-4">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-4">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The destination is read from the anchor before it is followed. A
+                <code>_self</code> link with <strong>Open in new tab</strong> on is opened through a
+                new tab instead of replacing the current page.
+              </li>
+              <li>
+                The step waits for the destination tab to finish loading before it returns, with a
+                roughly 15 second cap.
+              </li>
+              <li>
+                Only the first matching anchor is followed; the multi-element option is hidden for
+                this operator.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="attribute-value">
+            <h2 id="operator-attribute-value">Attribute value</h2>
+            <p>
+              Reads an attribute into a variable, or writes a value to an attribute.
+              <a href="https://www.goautoma.com/extension/docs/blocks/attribute-value.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-5">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>, <code>xpath</code>, or <code>text</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Locator for the element. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Select multiple elements</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Shared locator option; only the first match is read or written.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Poll for the element before acting.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Poll window used when <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Mark the element on execution</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Highlights the target during the run.</td>
+                  </tr>
+                  <tr>
+                    <td>Action</td>
+                    <td>Select</td>
+                    <td><code>get</code></td>
+                    <td><code>get</code> reads the attribute; <code>set</code> writes it.</td>
+                  </tr>
+                  <tr>
+                    <td>Attribute name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Attribute to read or write, for example <code>href</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Attribute value</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Value written by <code>set</code>. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Publish a read under a custom variable name.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Custom output name for <code>get</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Insert to table</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Shown for <code>get</code>; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Select column</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Column shown when <strong>Insert to table</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Add extra row</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Shown for <code>get</code>; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Value of the extra row</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Only shown when <strong>Add extra row</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Extra row column</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Only shown when <strong>Add extra row</strong> is on.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-5">Outputs</h3>
+            <ul>
+              <li>
+                For <code>get</code>: <code>{{lastAttribute}}</code> when
+                <strong>Variable name</strong> is empty, otherwise <code>{{&lt;name&gt;}}</code>.
+              </li>
+              <li>For <code>set</code>: no output.</li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-5">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                A read fails when the element does not match or the attribute is absent, instead of
+                publishing an empty string.
+              </li>
+              <li>
+                The <strong>Insert to table</strong> and <strong>Add extra row</strong> controls are
+                present for <code>get</code> but are not written by this build; only the variable is
+                set.
+              </li>
+              <li>
+                Values read from boolean or numeric attributes are still strings, because they come
+                from the DOM.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="forms">
+            <h2 id="operator-forms">Forms</h2>
+            <p>
+              Fills a text field, selects an option, toggles a checkbox or radio, or reads a
+              control&#39;s current value.
+              <a href="https://www.goautoma.com/extension/docs/blocks/forms.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-6">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>, <code>xpath</code>, or <code>text</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Locator for the form control. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Select multiple elements</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Shared locator option; only the first match is used.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Poll for the control before acting.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Poll window used when <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Mark the element on execution</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Highlights the target during the run.</td>
+                  </tr>
+                  <tr>
+                    <td>Get form value</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Read the control instead of writing to it.</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Publish a read under a custom variable name.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Required when <strong>Get form value</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Form type</td>
+                    <td>Select</td>
+                    <td><code>text-field</code></td>
+                    <td>
+                      <code>text-field</code>, <code>select</code>, <code>checkbox</code>, or
+                      <code>radio</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Selected</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Check or uncheck a checkbox or radio.</td>
+                  </tr>
+                  <tr>
+                    <td>Value</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Text to type, or the option value for a select. Accepts
+                      <code>{{variables}}</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Clear form value</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Clear the field before typing.</td>
+                  </tr>
+                  <tr>
+                    <td>Select an option by</td>
+                    <td>Select</td>
+                    <td><code>value</code></td>
+                    <td>
+                      <code>value</code>, <code>first-option</code>, <code>last-option</code>, or
+                      <code>custom-position</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Option position</td>
+                    <td>Number</td>
+                    <td><code>1</code></td>
+                    <td>One-based position used by <code>custom-position</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Typing delay (millisecond)(0 to disable)</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-6">Outputs</h3>
+            <ul>
+              <li>
+                With <strong>Get form value</strong>: <code>{{&lt;name&gt;}}</code> receives the
+                control&#39;s native value. The variable name is required.
+              </li>
+              <li>Otherwise: no output.</li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-6">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                A text fill whose value becomes empty because a reference resolved to nothing is
+                refused, so the operator does not wipe a field by accident.
+              </li>
+              <li>
+                <strong>Typing delay</strong> is stored but not applied; the text is inserted in one
+                action.
+              </li>
+              <li>
+                The read value keeps its native type: a string for text fields, a boolean for
+                checkboxes and radios, and an array for a multi-select.
+              </li>
+              <li>
+                <code>custom-position</code> counts options from 1; selecting an option by position
+                does not require a value.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="javascript-code">
+            <h2 id="operator-javascript-code">JavaScript code</h2>
+            <p>
+              Runs a JavaScript function body in the page and stores its return value.
+              <a href="https://www.goautoma.com/extension/docs/blocks/javascript-code.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-7">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Timeout (milliseconds)</td>
+                    <td>Number</td>
+                    <td><code>20000</code></td>
+                    <td>Maximum run time for the script.</td>
+                  </tr>
+                  <tr>
+                    <td>Execution context</td>
+                    <td>Select</td>
+                    <td><code>website</code></td>
+                    <td>
+                      <code>website</code> runs in the page; <code>background</code> is stored but
+                      not implemented.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>JavaScript code</td>
+                    <td>Textarea</td>
+                    <td>
+                      <code>console.log(&quot;Script started&quot;);\nautomaNextBlock()</code>
+                    </td>
+                    <td>Function body. Use <code>return</code> to send a value.</td>
+                  </tr>
+                  <tr>
+                    <td>Execute in every new tab</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Run before page loaded</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Preload scripts</td>
+                    <td>List</td>
+                    <td>Empty</td>
+                    <td>URL and type (<code>script</code> or <code>style</code>) per entry.</td>
+                  </tr>
+                  <tr>
+                    <td>Remove after execution</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Per preload entry.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-7">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastResult}}</code> always receives the value returned by the script, or the
+                value passed to <code>automaNextBlock()</code>.
+              </li>
+              <li>
+                Variables written with <code>automaSetVariable()</code> or assignments on
+                <code>variables</code> are merged into the run.
+              </li>
+              <li>Console output captured by the page harness is written to the run log.</li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-7">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The page harness provides <code>automaNextBlock()</code>,
+                <code>automaSetVariable()</code>, <code>automaRefData()</code>, and
+                <code>automaResetTimeout()</code>.
+              </li>
+              <li>
+                The script runs as a function body with <code>return</code>, not as a free-standing
+                program. <code>automaNextBlock()</code> ends the script early and overrides the
+                return value.
+              </li>
+              <li>
+                <strong>Execution context</strong>, <strong>Execute in every new tab</strong>,
+                <strong>Run before page loaded</strong>, and <strong>Preload scripts</strong> are
+                stored for compatibility but are not applied by this build; the script runs in the
+                current page.
+              </li>
+              <li>
+                An empty script is an error, and so is a script that throws. Retry or fallback
+                behavior comes from the node&#39;s <strong>On error</strong> policy.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="trigger-event">
+            <h2 id="operator-trigger-event">Trigger event</h2>
+            <p>
+              Dispatches a DOM event on the selected element.
+              <a href="https://www.goautoma.com/extension/docs/blocks/trigger-event.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-8">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>, <code>xpath</code>, or <code>text</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td><code>html</code></td>
+                    <td>Element that receives the event. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Select multiple elements</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Shared locator option; only the first match receives the event.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Poll for the element before dispatching.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Poll window used when <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Mark the element on execution</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Highlights the target during the run.</td>
+                  </tr>
+                  <tr>
+                    <td>Event</td>
+                    <td>Select</td>
+                    <td>—</td>
+                    <td>
+                      One of 21 DOM events, such as <code>click</code>, <code>change</code>,
+                      <code>keydown</code>, <code>input</code>, or <code>wheel</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Bubbles</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Cancelable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-8">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-8">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The dispatch is a <code>CustomEvent</code> carrying the event name and a
+                <code>detail</code> value. Events whose names contain <code>mouse</code> or
+                <code>click</code> are dispatched without bubbling; other events bubble by default.
+              </li>
+              <li>
+                The <strong>Options</strong> fold-out (modifier keys, mouse button, coordinates,
+                wheel deltas, keyboard fields, and input data) is stored but not forwarded by this
+                build. <strong>Bubbles</strong> and <strong>Cancelable</strong> therefore follow the
+                dispatch rules above, not the checkboxes.
+              </li>
+              <li>
+                Use <strong>JavaScript code</strong> when a page needs a precisely configured native
+                event or a different target event object.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="switch-to">
+            <h2 id="operator-switch-to">
+              Switch frame<span
+                class="ml-3 inline-flex translate-y-[-2px] items-center rounded-full border px-2 py-0.5 text-xs font-medium border-border bg-panel-2 text-muted"
+                >Placeholder</span
+              >
+            </h2>
+            <p>
+              Names the main window or an iframe as the context for later steps.
+              <a href="https://www.goautoma.com/extension/docs/blocks/switch-to.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-9">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Window type</td>
+                    <td>Select</td>
+                    <td><code>main-window</code></td>
+                    <td><code>main-window</code> or <code>iframe</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Element selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      CSS selector or XPath for the iframe; shown when
+                      <strong>Window type</strong> is <code>iframe</code>.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-9">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-9">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                This operator is a placeholder for context only. The executor records the selected
+                frame in the run log but does not change the driver&#39;s frame context, and later
+                steps still resolve elements through the page kernel.
+              </li>
+              <li>
+                Do not rely on this operator to enter an iframe at run time; it neither focuses the
+                frame nor restricts later locators to it.
+              </li>
+              <li>
+                The <strong>Find by</strong> value from imported workflows is ignored because the
+                form exposes a single selector field.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="upload-file">
+            <h2 id="operator-upload-file">Upload file</h2>
+            <p>
+              Attaches files to an upload control from a picker, a workflow variable, the newest
+              download, or a specific path.
+              <a href="https://www.goautoma.com/extension/docs/blocks/upload-file.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-10">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Upload source</td>
+                    <td>Select</td>
+                    <td><code>user-select</code></td>
+                    <td>
+                      <code>user-select</code>, <code>workflow-file</code>,
+                      <code>latest-download</code>, or <code>file-path</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Accepted file types</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>MIME types or extensions, for example <code>image/*,.pdf</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable holding the file</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Variable name for <code>workflow-file</code>; accepts a data URL, an artifact,
+                      or an array of artifacts.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>File path in the download folder</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Relative path for <code>file-path</code>. Accepts <code>{{variables}}</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>File name pattern</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Glob used to pick the newest match for <code>latest-download</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Ask me to pick a file when nothing matches</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Fall back to the picker when no download matches.</td>
+                  </tr>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code> or <code>xpath</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Locator for the upload control. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Allow multiple files</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Hidden for <code>latest-download</code> and <code>file-path</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector before uploading</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Poll for the control before attaching.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>10000</code></td>
+                    <td>
+                      Poll window used when <strong>Wait for selector before uploading</strong> is
+                      on.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Verify files reached the upload control</td>
+                    <td>Checkbox</td>
+                    <td>On</td>
+                    <td>
+                      Inspect the control after attaching and fail when the files are missing.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-10">Outputs</h3>
+            <ul>
+              <li>
+                <code>{{lastUploadResult}}</code> always receives
+                <code>{ nodeId, selector, sourceMode, count, files? }</code>, describing the control
+                and the attached files.
+              </li>
+              <li>There is no custom output-variable field for this operator.</li>
+              <li>
+                One main output port; errors follow the block&#39;s
+                <strong>On error</strong> policy.
+              </li>
+            </ul>
+            <h3 id="browser-copilot-notes-10">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                <code>user-select</code> shows Browser Copilot&#39;s own file card during the run;
+                <code>workflow-file</code> reads a file already produced by an earlier step;
+                <code>latest-download</code> scans the configured download folders and their
+                subfolders for the newest match; <code>file-path</code> names one file relative to
+                those folders.
+              </li>
+              <li>
+                <strong>Verify files reached the upload control</strong> is on by default. The step
+                fails when the control reports fewer files than expected or a different MIME type.
+              </li>
+              <li>
+                The target must be a file input, or a control the page kernel can associate with
+                one; otherwise the step fails instead of silently doing nothing.
+              </li>
+              <li>
+                The result object is always published under <code>lastUploadResult</code>; later
+                steps reference it directly.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="hover-element">
+            <h2 id="operator-hover-element">Hover element</h2>
+            <p>
+              Moves the pointer over the first element matched by the locator.
+              <a href="https://www.goautoma.com/extension/docs/blocks/hover-element.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-11">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>, <code>xpath</code>, or <code>text</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Locator for the target. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Select multiple elements</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Shared locator option; only the first match is hovered.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Poll for the element before hovering.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Poll window used when <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Mark the element on execution</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Highlights the target during the run.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-11">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-11">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The operator dispatches <code>pointerover</code>, <code>mouseover</code>, and
+                <code>mousemove</code> inside the page. JavaScript hover handlers run, but
+                browser-native tooltips and CSS <code>:hover</code> styling are not guaranteed to
+                appear.
+              </li>
+              <li>
+                A menu that opens only on native pointer movement may need a click or a
+                <strong>JavaScript code</strong> step instead.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="save-assets">
+            <h2 id="operator-save-assets">
+              Save assets<span
+                class="ml-3 inline-flex translate-y-[-2px] items-center rounded-full border px-2 py-0.5 text-xs font-medium border-err/40 bg-err/10 text-err"
+                >Not implemented</span
+              >
+            </h2>
+            <p>
+              Would download a media element or a direct URL, but the operator is not implemented.
+              <a href="https://www.goautoma.com/extension/docs/blocks/save-assets.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-12">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Type</td>
+                    <td>Select</td>
+                    <td><code>element</code></td>
+                    <td>
+                      <code>element</code> uses the locator; <code>url</code> uses the URL field.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td>
+                      <code>cssSelector</code>, <code>xpath</code>, or <code>text</code>, for
+                      <code>element</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Locator for the media element.</td>
+                  </tr>
+                  <tr>
+                    <td>URL</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Direct asset URL for <code>url</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Filename (optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Suggested file name.</td>
+                  </tr>
+                  <tr>
+                    <td>On conflict</td>
+                    <td>Select</td>
+                    <td><code>uniquify</code></td>
+                    <td><code>uniquify</code>, <code>overwrite</code>, or <code>prompt</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Save items&#39; download IDs</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Would publish download IDs; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>Assign to variable</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Shown when download IDs are on.</td>
+                  </tr>
+                  <tr>
+                    <td>Variable name</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>Shown when download IDs are on.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-12">Outputs</h3>
+            <p>
+              No output. The executor returns without writing a variable, a data column, or a file.
+            </p>
+            <h3 id="browser-copilot-notes-12">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                <strong>Not implemented.</strong> The executor emits an informational notice and
+                continues; nothing is downloaded, and the filename, conflict policy, and download-ID
+                options have no effect.
+              </li>
+              <li>
+                Use <strong>Save to local</strong> to write text or bytes to a file,
+                <strong>Export data</strong> to write a table, or a download flow plus
+                <strong>Handle download</strong> when the page itself produces the file.
+              </li>
+              <li>
+                Do not generate or rely on this operator for downloads until it is implemented.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="press-key">
+            <h2 id="operator-press-key">Press key</h2>
+            <p>
+              Sends a key or a key combination to the focused control or to a chosen element.
+              <a href="https://www.goautoma.com/extension/docs/blocks/press-key.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-13">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Target element (Optional)</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>CSS selector or XPath for the element to focus first.</td>
+                  </tr>
+                  <tr>
+                    <td>Action</td>
+                    <td>Select</td>
+                    <td><code>press-key</code></td>
+                    <td>
+                      <code>press-key</code> types one key or combination;
+                      <code>multiple-keys</code> shows the free-text field.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Key</td>
+                    <td>Text</td>
+                    <td>—</td>
+                    <td>
+                      Key or combination, for example <code>Enter</code>, <code>a</code>, or
+                      <code>Control+A</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Keys</td>
+                    <td>Textarea</td>
+                    <td>—</td>
+                    <td>
+                      Free-text keys for <code>multiple-keys</code>; both fields feed the same key
+                      string.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Press time (milliseconds)</td>
+                    <td>Number</td>
+                    <td><code>0</code></td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-13">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-13">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Without a target, the key goes to whatever the page has focused. With a target, the
+                operator focuses that element first.
+              </li>
+              <li>
+                The page kernel dispatches <code>keydown</code>, <code>keypress</code>, and
+                <code>keyup</code>. Pressing <code>Enter</code> on a control inside a form also
+                submits the form.
+              </li>
+              <li>
+                <strong>Press time</strong> is stored but ignored; the key events are dispatched
+                immediately.
+              </li>
+              <li>
+                Modifier combinations use <code>+</code>, for example
+                <code>Control+Shift+Enter</code>.
+              </li>
+            </ul>
+          </section>
+          <section data-operator="create-element">
+            <h2 id="operator-create-element">Create element</h2>
+            <p>
+              Injects HTML, CSS, and optional JavaScript into the page.
+              <a href="https://www.goautoma.com/extension/docs/blocks/create-element.html"
+                >Automa reference</a
+              >
+            </p>
+            <h3 id="settings-14">Settings</h3>
+            <div class="table-wrap table-settings">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Type</th>
+                    <th>Default</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Find by</td>
+                    <td>Select</td>
+                    <td><code>cssSelector</code></td>
+                    <td><code>cssSelector</code>, <code>xpath</code>, or <code>text</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector</td>
+                    <td>Text</td>
+                    <td><code>body</code></td>
+                    <td>Target element. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Wait for selector</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Poll for the target before injecting.</td>
+                  </tr>
+                  <tr>
+                    <td>Selector timeout (ms)</td>
+                    <td>Number</td>
+                    <td><code>5000</code></td>
+                    <td>Poll window used when <strong>Wait for selector</strong> is on.</td>
+                  </tr>
+                  <tr>
+                    <td>Insert element</td>
+                    <td>Select</td>
+                    <td><code>after</code></td>
+                    <td>
+                      <code>before</code>, <code>after</code>, <code>prev-sibling</code>,
+                      <code>next-sibling</code>, or <code>replace</code>.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Run before page loaded</td>
+                    <td>Checkbox</td>
+                    <td>Off</td>
+                    <td>Stored with the operator; see the notes.</td>
+                  </tr>
+                  <tr>
+                    <td>HTML</td>
+                    <td>Textarea</td>
+                    <td>—</td>
+                    <td>Markup to create. Accepts <code>{{variables}}</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>CSS</td>
+                    <td>Textarea</td>
+                    <td>—</td>
+                    <td>Styles injected into the page.</td>
+                  </tr>
+                  <tr>
+                    <td>JavaScript</td>
+                    <td>Textarea</td>
+                    <td>—</td>
+                    <td>Script run for each created element.</td>
+                  </tr>
+                  <tr>
+                    <td>Preload scripts</td>
+                    <td>List</td>
+                    <td>Empty</td>
+                    <td>URL and type (<code>script</code> or <code>style</code>) per entry.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3 id="outputs-14">Outputs</h3>
+            <p>
+              No output. One main output port; errors follow the block&#39;s
+              <strong>On error</strong> policy.
+            </p>
+            <h3 id="browser-copilot-notes-14">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                The executor forwards the HTML, CSS, and JavaScript, but not the target selector or
+                <strong>Insert element</strong>. Created markup is appended to
+                <code>document.body</code>; CSS is added as a style element.
+              </li>
+              <li>
+                <strong>Run before page loaded</strong> and <strong>Preload scripts</strong> are
+                stored but not applied by this build.
+              </li>
+              <li>
+                The JavaScript runs once per created element with that element as <code>this</code>,
+                and can read variables through <code>automaRefData()</code>.
+              </li>
+              <li>
+                Because the target selector is ignored, this operator is best for adding a banner,
+                overlay, or helper element to the end of the page, not for inserting beside a
+                specific node.
+              </li>
+            </ul>
+          </section>
+        </article>
+        <details class="mt-4 rounded-xl border border-border bg-panel p-4 xl:hidden">
+          <summary class="cursor-pointer text-sm font-medium text-ink">On this page</summary>
+          <nav class="mt-3 space-y-1">
+            <a
+              href="#operator-event-click"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Click element</a
+            ><a
+              href="#operator-get-text"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Get text</a
+            ><a
+              href="#operator-element-scroll"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Scroll element</a
+            ><a
+              href="#operator-link"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Link</a
+            ><a
+              href="#operator-attribute-value"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Attribute value</a
+            ><a
+              href="#operator-forms"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Forms</a
+            ><a
+              href="#operator-javascript-code"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >JavaScript code</a
+            ><a
+              href="#operator-trigger-event"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Trigger event</a
+            ><a
+              href="#operator-switch-to"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Switch frame</a
+            ><a
+              href="#operator-upload-file"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Upload file</a
+            ><a
+              href="#operator-hover-element"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Hover element</a
+            ><a
+              href="#operator-save-assets"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Save assets</a
+            ><a
+              href="#operator-press-key"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Press key</a
+            ><a
+              href="#operator-create-element"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Create element</a
+            >
+          </nav>
+        </details>
+        <div class="mt-12 border-t border-border pt-6 text-sm text-muted">
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/docs/workflow/operators-interaction.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-accent hover:underline"
+            >Edit this page on GitHub</a
+          >
+          <span class="mx-2 text-faint">·</span>
+          <span>Generated from docs/workflow</span>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-2">
+          <a
+            href="concepts.html"
+            class="group flex flex-col gap-1 rounded-xl border border-border bg-panel p-4 transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">← Previous</span
+            ><span class="text-sm text-ink">Workflow concepts</span></a
+          ><a
+            href="operators-browser.html"
+            class="group flex flex-col items-end gap-1 rounded-xl border border-border bg-panel p-4 text-right transition-colors hover:border-accent"
+            ><span class="text-xs text-faint">Next →</span
+            ><span class="text-sm text-ink">Browser</span></a
+          >
+        </div>
+      </main>
+      <aside class="hidden xl:block">
+        <div class="sticky top-24">
+          <p class="mb-3 text-xs font-semibold uppercase tracking-wider text-faint">On this page</p>
+          <nav class="max-h-[calc(100vh-8rem)] space-y-1 overflow-y-auto pr-2">
+            <a
+              href="#operator-event-click"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Click element</a
+            ><a
+              href="#operator-get-text"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Get text</a
+            ><a
+              href="#operator-element-scroll"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Scroll element</a
+            ><a
+              href="#operator-link"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Link</a
+            ><a
+              href="#operator-attribute-value"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Attribute value</a
+            ><a
+              href="#operator-forms"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Forms</a
+            ><a
+              href="#operator-javascript-code"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >JavaScript code</a
+            ><a
+              href="#operator-trigger-event"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Trigger event</a
+            ><a
+              href="#operator-switch-to"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Switch frame</a
+            ><a
+              href="#operator-upload-file"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Upload file</a
+            ><a
+              href="#operator-hover-element"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Hover element</a
+            ><a
+              href="#operator-save-assets"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Save assets</a
+            ><a
+              href="#operator-press-key"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Press key</a
+            ><a
+              href="#operator-create-element"
+              class="block py-1 text-sm text-muted transition-colors hover:text-ink"
+              >Create element</a
+            >
+          </nav>
+        </div>
+      </aside>
+    </div>
+    <footer class="border-t border-border py-10">
+      <div
+        class="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-6 md:flex-row"
+      >
+        <div class="flex items-center gap-3">
+          <img src="../icons/icon-16.png" alt="" class="h-5 w-5" />
+          <span class="text-sm text-muted">Browser Copilot</span>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-6 text-sm text-muted">
+          <a href="index.html" class="transition-colors hover:text-ink">Docs</a>
+          <a
+            href="https://github.com/dcc123456/browser-copilot"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >GitHub</a
+          >
+          <a
+            href="https://github.com/dcc123456/browser-copilot/blob/main/LICENSE"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-ink"
+            >License</a
+          >
+          <span class="text-faint">PolyForm Noncommercial 1.0.0</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
