@@ -29,6 +29,7 @@ import {
   MARKETPLACE_CATEGORIES,
   MARKETPLACE_REPO_FULL,
   MAX_PUBLISH_IMAGES,
+  MarketplaceError,
   type MarketplaceAuth,
   type MarketplaceCategory,
 } from '../lib/marketplace/types'
@@ -55,6 +56,18 @@ const FORM_ERROR_KEY: Record<PublishFormError, keyof Messages> = {
   'too-many-images': 'marketplaceFormTooManyImages',
   'image-too-large': 'marketplaceFormImageTooLarge',
   'image-type': 'marketplaceFormImageType',
+}
+
+/**
+ * Translated reason plus the client's own detail.
+ *
+ * "The token was rejected" alone hides whether GitHub answered 403 or the
+ * request never left the machine, which is exactly the difference a user
+ * needs to fix it.
+ */
+export function connectFailureText(t: Messages, error: unknown): string {
+  const label = marketplaceErrorMessage(t, error)
+  return error instanceof MarketplaceError && error.message ? `${label} (${error.message})` : label
 }
 
 interface SelectedImage {
@@ -178,8 +191,9 @@ export default function PublishWorkflowDialog({
       await setAuth({ token, login: me.login })
       setAuthState({ token, login: me.login })
       setTokenInput('')
-    } catch {
-      setConnectError(t.marketplaceConnectInvalid)
+    } catch (caught) {
+      console.warn('[marketplace] connect failed', caught)
+      setConnectError(connectFailureText(t, caught))
     } finally {
       setConnecting(false)
     }
