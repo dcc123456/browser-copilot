@@ -37,14 +37,28 @@ export const MAX_TITLE_CHARS = 120
 export const MAX_DESCRIPTION_CHARS = 2000
 export const MAX_TAGS = 8
 export const MAX_TAG_CHARS = 24
+export const MAX_CATEGORY_CHARS = 24
 
-/** Fixed category list, so labels can be translated instead of stored. */
+/**
+ * Built-in categories, kept as slugs so the panel translates them. A publisher
+ * may also type a category of their own; that label is stored verbatim in
+ * `meta.json` and shown untranslated, exactly like a title.
+ */
 export const MARKETPLACE_CATEGORIES = [
   'ecommerce',
+  'orders',
+  'marketing',
   'content',
+  'media',
   'data',
+  'reporting',
   'office',
+  'communication',
   'social',
+  'support',
+  'finance',
+  'research',
+  'devops',
   'other',
 ] as const
 
@@ -56,7 +70,8 @@ export interface MarketplaceMeta {
   slug: string
   title: string
   description: string
-  category: MarketplaceCategory
+  /** A built-in slug or a publisher-defined label. */
+  category: string
   tags: string[]
   /** GitHub login that opened the publishing PR. */
   author: string
@@ -121,7 +136,7 @@ export type MarketplacePublishInput = {
   workflow: Workflow
   title: string
   description: string
-  category: MarketplaceCategory
+  category: string
   tags: string[]
   /** Already-compressed image files, in display order. */
   images: Blob[]

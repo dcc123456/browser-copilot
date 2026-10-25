@@ -270,11 +270,24 @@ export interface Messages {
   marketplaceImagesRemove: string
   marketplaceImagesCompressing: string
   marketplaceCategoryEcommerce: string
+  marketplaceCategoryOrders: string
+  marketplaceCategoryMarketing: string
   marketplaceCategoryContent: string
+  marketplaceCategoryMedia: string
   marketplaceCategoryData: string
+  marketplaceCategoryReporting: string
   marketplaceCategoryOffice: string
+  marketplaceCategoryCommunication: string
   marketplaceCategorySocial: string
+  marketplaceCategorySupport: string
+  marketplaceCategoryFinance: string
+  marketplaceCategoryResearch: string
+  marketplaceCategoryDevops: string
   marketplaceCategoryOther: string
+  marketplaceCategoryCustom: string
+  marketplaceFieldCustomCategory: string
+  marketplaceFieldCustomCategoryPlaceholder: string
+  marketplaceFormCategoryRequired: string
   marketplacePublishSubmit: string
   marketplacePublishPublishing: string
   marketplacePublishAnyway: string
@@ -1876,11 +1889,24 @@ const en: Messages = {
   marketplaceImagesRemove: 'Remove image',
   marketplaceImagesCompressing: 'Preparing images…',
   marketplaceCategoryEcommerce: 'E-commerce',
-  marketplaceCategoryContent: 'Content',
-  marketplaceCategoryData: 'Data',
-  marketplaceCategoryOffice: 'Office',
+  marketplaceCategoryOrders: 'Orders & fulfillment',
+  marketplaceCategoryMarketing: 'Marketing',
+  marketplaceCategoryContent: 'Content creation',
+  marketplaceCategoryMedia: 'Media & assets',
+  marketplaceCategoryData: 'Data collection',
+  marketplaceCategoryReporting: 'Reports & dashboards',
+  marketplaceCategoryOffice: 'Office & docs',
+  marketplaceCategoryCommunication: 'Messaging & email',
   marketplaceCategorySocial: 'Social',
+  marketplaceCategorySupport: 'Customer support',
+  marketplaceCategoryFinance: 'Finance & billing',
+  marketplaceCategoryResearch: 'Research',
+  marketplaceCategoryDevops: 'Dev & ops',
   marketplaceCategoryOther: 'Other',
+  marketplaceCategoryCustom: 'Custom…',
+  marketplaceFieldCustomCategory: 'Custom category',
+  marketplaceFieldCustomCategoryPlaceholder: 'Name it, e.g. Industry research',
+  marketplaceFormCategoryRequired: 'Choose a category, or name your own.',
   marketplacePublishSubmit: 'Publish',
   marketplacePublishPublishing: 'Publishing…',
   marketplacePublishAnyway: 'Publish anyway',
@@ -3388,11 +3414,24 @@ const zhCN: Messages = {
   marketplaceImagesRemove: '移除图片',
   marketplaceImagesCompressing: '正在处理图片…',
   marketplaceCategoryEcommerce: '电商',
-  marketplaceCategoryContent: '内容',
-  marketplaceCategoryData: '数据',
-  marketplaceCategoryOffice: '办公',
-  marketplaceCategorySocial: '社交',
+  marketplaceCategoryOrders: '订单履约',
+  marketplaceCategoryMarketing: '营销推广',
+  marketplaceCategoryContent: '内容创作',
+  marketplaceCategoryMedia: '素材处理',
+  marketplaceCategoryData: '数据采集',
+  marketplaceCategoryReporting: '报表看板',
+  marketplaceCategoryOffice: '办公文档',
+  marketplaceCategoryCommunication: '通讯邮件',
+  marketplaceCategorySocial: '社交媒体',
+  marketplaceCategorySupport: '客服支持',
+  marketplaceCategoryFinance: '财务账单',
+  marketplaceCategoryResearch: '调研检索',
+  marketplaceCategoryDevops: '研发运维',
   marketplaceCategoryOther: '其他',
+  marketplaceCategoryCustom: '自定义…',
+  marketplaceFieldCustomCategory: '自定义分类',
+  marketplaceFieldCustomCategoryPlaceholder: '给它起个名字，例如「行业调研」',
+  marketplaceFormCategoryRequired: '请选择一个分类，或为自定义分类填写名称。',
   marketplacePublishSubmit: '发布',
   marketplacePublishPublishing: '正在发布…',
   marketplacePublishAnyway: '仍然发布',

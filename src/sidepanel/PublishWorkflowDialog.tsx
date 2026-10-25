@@ -16,6 +16,7 @@ import { useT } from './i18n'
 import type { Messages } from '../lib/i18n'
 import { GitHubClient } from '../lib/marketplace/github-client'
 import { compressImage } from '../lib/marketplace/image'
+import { categoryLabel, isBuiltinCategory } from '../lib/marketplace/categories'
 import { parseTagInput, validatePublishForm, type PublishFormError } from '../lib/marketplace/form'
 import {
   preparePublish,
@@ -28,10 +29,10 @@ import { isClassicToken, setAuth, clearAuth, getAuth } from '../lib/marketplace/
 import {
   MARKETPLACE_CATEGORIES,
   MARKETPLACE_REPO_FULL,
+  MAX_CATEGORY_CHARS,
   MAX_PUBLISH_IMAGES,
   MarketplaceError,
   type MarketplaceAuth,
-  type MarketplaceCategory,
 } from '../lib/marketplace/types'
 import { marketplaceErrorMessage } from './marketplace-errors'
 import type { Workflow } from '../lib/workflow/types'
@@ -39,18 +40,13 @@ import type { Workflow } from '../lib/workflow/types'
 const TOKEN_URL =
   'https://github.com/settings/tokens/new?scopes=public_repo&description=Browser%20Copilot'
 
-const CATEGORY_KEY: Record<MarketplaceCategory, keyof Messages> = {
-  ecommerce: 'marketplaceCategoryEcommerce',
-  content: 'marketplaceCategoryContent',
-  data: 'marketplaceCategoryData',
-  office: 'marketplaceCategoryOffice',
-  social: 'marketplaceCategorySocial',
-  other: 'marketplaceCategoryOther',
-}
+/** Select value that reveals the free-form category input. */
+const CUSTOM_CATEGORY = '__custom__'
 
 const FORM_ERROR_KEY: Record<PublishFormError, keyof Messages> = {
   'title-required': 'marketplaceFormTitleRequired',
   'title-too-long': 'marketplaceFormTitleTooLong',
+  'category-required': 'marketplaceFormCategoryRequired',
   'description-too-long': 'marketplaceFormDescriptionTooLong',
   'video-invalid': 'marketplaceFormVideoInvalid',
   'too-many-images': 'marketplaceFormTooManyImages',
@@ -115,7 +111,10 @@ export default function PublishWorkflowDialog({
 
   const [title, setTitle] = useState(workflow.name)
   const [description, setDescription] = useState(workflow.description ?? '')
-  const [category, setCategory] = useState<MarketplaceCategory>('other')
+  // Select value; `CUSTOM_CATEGORY` means the publisher is naming their own.
+  const [category, setCategory] = useState<string>('other')
+  const [customCategory, setCustomCategory] = useState('')
+  const effectiveCategory = category === CUSTOM_CATEGORY ? customCategory : category
   const [tagInput, setTagInput] = useState('')
   const [videoUrl, setVideoUrl] = useState('')
   const [images, setImages] = useState<SelectedImage[]>([])
@@ -163,7 +162,8 @@ export default function PublishWorkflowDialog({
       if (!meta || cancelled || editedRef.current) return
       setTitle(meta.title)
       setDescription(meta.description)
-      setCategory(meta.category)
+      setCategory(isBuiltinCategory(meta.category) ? meta.category : CUSTOM_CATEGORY)
+      setCustomCategory(isBuiltinCategory(meta.category) ? '' : meta.category)
       setTagInput(meta.tags.join(', '))
       setVideoUrl(meta.videoUrl ?? '')
       const blobs = await Promise.all(
@@ -242,6 +242,7 @@ export default function PublishWorkflowDialog({
     if (!auth || busy) return
     const validation = validatePublishForm({
       title,
+      category: effectiveCategory,
       description,
       videoUrl,
       images: images.map((image) => image.blob),
@@ -261,7 +262,7 @@ export default function PublishWorkflowDialog({
             workflow,
             title,
             description,
-            category,
+            category: effectiveCategory,
             tags: parseTagInput(tagInput),
             images: images.map((image) => image.blob),
             ...(videoUrl.trim() ? { videoUrl: videoUrl.trim() } : {}),
@@ -432,18 +433,35 @@ export default function PublishWorkflowDialog({
                     <select
                       disabled={busy}
                       onChange={(event) => {
-                        setCategory(event.target.value as MarketplaceCategory)
+                        setCategory(event.target.value)
                         edit()
                       }}
                       value={category}
                     >
                       {MARKETPLACE_CATEGORIES.map((item) => (
                         <option key={item} value={item}>
-                          {t[CATEGORY_KEY[item]] as string}
+                          {categoryLabel(t, item)}
                         </option>
                       ))}
+                      <option value={CUSTOM_CATEGORY}>{t.marketplaceCategoryCustom}</option>
                     </select>
                   </Field>
+                  {/* A second labelable control inside one <label> breaks the
+                      implicit association, so the custom name gets its own. */}
+                  {category === CUSTOM_CATEGORY && (
+                    <Field label={t.marketplaceFieldCustomCategory}>
+                      <input
+                        disabled={busy}
+                        maxLength={MAX_CATEGORY_CHARS}
+                        onChange={(event) => {
+                          setCustomCategory(event.target.value)
+                          edit()
+                        }}
+                        placeholder={t.marketplaceFieldCustomCategoryPlaceholder}
+                        value={customCategory}
+                      />
+                    </Field>
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <Field hint={t.marketplaceFieldTagsHint} label={t.marketplaceFieldTags}>

@@ -5,6 +5,7 @@
  * @module lib/marketplace/form
  */
 
+import { normalizeCategory } from './categories'
 import { normalizeTags } from './meta'
 import {
   MAX_DESCRIPTION_CHARS,
@@ -16,6 +17,7 @@ import {
 export type PublishFormError =
   | 'title-required'
   | 'title-too-long'
+  | 'category-required'
   | 'description-too-long'
   | 'video-invalid'
   | 'too-many-images'
@@ -24,6 +26,8 @@ export type PublishFormError =
 
 export interface PublishFormValues {
   title: string
+  /** A built-in slug or the publisher's own category label. */
+  category: string
   description: string
   videoUrl: string
   images: readonly Pick<File, 'type' | 'size'>[]
@@ -34,6 +38,7 @@ export function validatePublishForm(values: PublishFormValues): PublishFormError
   const title = values.title.trim()
   if (!title) return 'title-required'
   if (title.length > MAX_TITLE_CHARS) return 'title-too-long'
+  if (!normalizeCategory(values.category)) return 'category-required'
   if (values.description.trim().length > MAX_DESCRIPTION_CHARS) return 'description-too-long'
   if (values.videoUrl.trim() && !/^https?:\/\//i.test(values.videoUrl.trim())) {
     return 'video-invalid'

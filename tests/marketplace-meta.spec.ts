@@ -55,9 +55,19 @@ describe('marketplace meta', () => {
     expect(parseMeta('meta')).toBeNull()
   })
 
-  it('maps an unknown category to other instead of dropping the card', () => {
-    const parsed = parseMeta({ ...makeMeta(), category: 'brand-new' })
-    expect(parsed?.category).toBe('other')
+  it('keeps a publisher-defined category instead of dropping it', () => {
+    const parsed = parseMeta({ ...makeMeta(), category: '  Industry   research ' })
+    expect(parsed?.category).toBe('Industry research')
+  })
+
+  it('normalises a custom category when building a record', () => {
+    const meta = buildMeta({ ...makeMetaInput(), category: '  Industry research ' })
+    expect(meta.category).toBe('Industry research')
+  })
+
+  it('falls back to other when the category is missing or unusable', () => {
+    expect(parseMeta({ ...makeMeta(), category: '   ' })?.category).toBe('other')
+    expect(parseMeta({ ...makeMeta(), category: 42 })?.category).toBe('other')
   })
 
   it('drops unsafe asset paths and non-http video links', () => {
@@ -73,6 +83,7 @@ describe('marketplace meta', () => {
   it('refuses to build a publishable record with bad input', () => {
     expect(() => buildMeta({ ...makeMetaInput(), slug: 'Bad Slug' })).toThrow()
     expect(() => buildMeta({ ...makeMetaInput(), title: '   ' })).toThrow()
+    expect(() => buildMeta({ ...makeMetaInput(), category: '   ' })).toThrow()
     expect(() => buildMeta({ ...makeMetaInput(), videoUrl: 'ftp://example.com/v' })).toThrow()
     expect(() => buildMeta({ ...makeMetaInput(), imageCount: 4 })).toThrow()
   })

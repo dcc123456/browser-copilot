@@ -11,11 +11,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import type { Messages } from '../lib/i18n'
 import { sendCommand } from '../lib/messages'
 import { onStoreChanged } from '../lib/store-events'
 import type { Workflow } from '../lib/workflow/types'
 import { findInstalled } from '../lib/marketplace/apply'
+import { categoryKey, categoryLabel, categoryOptions } from '../lib/marketplace/categories'
 import { chromeCatalogCache, loadCatalog, type LoadCatalogResult } from '../lib/marketplace/catalog'
 import {
   chromeReactionCache,
@@ -31,31 +31,20 @@ import { rawUrl } from '../lib/marketplace/raw'
 import { clearAuth, getAuth } from '../lib/marketplace/token'
 import {
   MARKETPLACE_BRANCH,
-  MARKETPLACE_CATEGORIES,
   MARKETPLACE_REPO_FULL,
   MarketplaceError,
   type MarketplaceAuth,
   type MarketplaceCard,
-  type MarketplaceCategory,
 } from '../lib/marketplace/types'
 import { confirmDialog } from '../ui/confirm'
 import { useT } from './i18n'
 import { installFromCard } from './marketplace-install'
 import { marketplaceErrorMessage } from './marketplace-errors'
 
-const CATEGORY_KEY: Record<MarketplaceCategory, keyof Messages> = {
-  ecommerce: 'marketplaceCategoryEcommerce',
-  content: 'marketplaceCategoryContent',
-  data: 'marketplaceCategoryData',
-  office: 'marketplaceCategoryOffice',
-  social: 'marketplaceCategorySocial',
-  other: 'marketplaceCategoryOther',
-}
-
 type SortMode = 'recent' | 'likes'
 
-/** `all` is a filter sentinel, not a published category. */
-type CategoryFilter = 'all' | MarketplaceCategory
+/** `all` plus a built-in slug or a publisher-defined label. */
+type CategoryFilter = string
 
 interface Props {
   /** The tab is mounted from startup; the catalog loads on first activation. */
@@ -299,7 +288,8 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   const cards = useMemo(() => {
     const list = (snapshot?.cards ?? []).filter(
       (card) =>
-        (category === 'all' || card.meta.category === category) && matchesQuery(card, query.trim()),
+        (category === 'all' || categoryKey(card.meta.category) === categoryKey(category)) &&
+        matchesQuery(card, query.trim()),
     )
     return list.sort((a, b) =>
       sort === 'likes'
@@ -307,6 +297,8 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
         : updatedAtOf(b) - updatedAtOf(a),
     )
   }, [snapshot, category, query, sort])
+
+  const filterCategories = useMemo(() => categoryOptions(snapshot?.cards ?? []), [snapshot])
 
   const apply = async (card: MarketplaceCard): Promise<void> => {
     const existing = findInstalled(installed, card.meta.slug)
@@ -420,9 +412,9 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
           value={category}
         >
           <option value="all">{t.marketplaceFilterAll}</option>
-          {MARKETPLACE_CATEGORIES.map((item) => (
+          {filterCategories.map((item) => (
             <option key={item} value={item}>
-              {t[CATEGORY_KEY[item]] as string}
+              {categoryLabel(t, item)}
             </option>
           ))}
         </select>
@@ -502,7 +494,7 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                   <span className="task-chip">
                     {t.marketplaceByAuthor({ author: meta.author })}
                   </span>
-                  <span className="task-chip">{t[CATEGORY_KEY[meta.category]] as string}</span>
+                  <span className="task-chip">{categoryLabel(t, meta.category)}</span>
                   {meta.tags.map((tag) => (
                     <span className="task-chip" key={tag}>
                       {tag}

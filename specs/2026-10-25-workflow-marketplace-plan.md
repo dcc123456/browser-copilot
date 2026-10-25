@@ -134,6 +134,22 @@
 
 **验收**：发布成功后本地出现 `marketplace` 引用；再次发布沿用同一 slug 且版本 +1；自己的卡片可提交删除 PR（合并后消失）；完整目录下缺失的 slug 显示“来源已删除”。
 
+### Step 11 — 细分分类与自定义分类（2026-10-26 追加）
+
+| 文件                                                                                                                   | 动作 | 内容                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------- |
+| `src/lib/marketplace/types.ts`                                                                                         | 修改 | 内置分类扩到 15 个；`MAX_CATEGORY_CHARS`；`category` 类型放宽为字符串      |
+| `src/lib/marketplace/categories.ts`                                                                                    | 新增 | 规范化、大小写不敏感比较、内置标签翻译、筛选选项（内置 + 目录自定义）      |
+| `src/lib/marketplace/meta.ts`                                                                                          | 修改 | `buildMeta` 接受自定义分类并规范化；`parseMeta` 保留未知标签，空值回退其他 |
+| `src/lib/marketplace/form.ts`                                                                                          | 修改 | 发布表单要求分类非空（`category-required`）                                |
+| `src/lib/i18n.ts`                                                                                                      | 修改 | 9 个新内置分类英文/中文标签 + 自定义分类输入与错误文案                     |
+| `src/sidepanel/PublishWorkflowDialog.tsx`                                                                              | 修改 | 分类下拉新增「自定义…」并展开文本框；预填已发布的自定义分类                |
+| `src/sidepanel/MarketplaceTab.tsx`                                                                                     | 修改 | 筛选项来自内置分类 + 目录中出现的自定义标签；按 `categoryKey` 匹配         |
+| `tests/marketplace-categories.spec.ts`                                                                                 | 新增 | 规范化/去重/排序/翻译                                                      |
+| `tests/marketplace-{meta,form}.spec.ts`、`tests/marketplace-publish-dialog.spec.tsx`、`tests/marketplace-tab.spec.tsx` | 修改 | 自定义分类保留与规范化、空分类拒绝、自定义输入与预填、新标签渲染           |
+
+**验收**：发布弹窗可选 15 个细分类之一或自填分类；自填分类随 `meta.json` 提交并在广场筛选里出现（不翻译）；空名称无法发布；重新编辑自定义分类的工作流时，下拉为「自定义…」且文本框带回原值；旧数据（未知分类）仍显示为「其他」。
+
 ## 2. 测试与门禁
 
 - 每步：`pnpm typecheck && pnpm test && pnpm lint && pnpm format:check`。

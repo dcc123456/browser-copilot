@@ -5,6 +5,7 @@ import { MAX_PUBLISH_IMAGE_BYTES } from '../src/lib/marketplace/types'
 function values(overrides: Partial<Parameters<typeof validatePublishForm>[0]> = {}) {
   return {
     title: 'Scrape orders',
+    category: 'ecommerce',
     description: '',
     videoUrl: '',
     images: [],
@@ -20,6 +21,11 @@ describe('publish form validation', () => {
   it('requires a title and caps its length', () => {
     expect(validatePublishForm(values({ title: '   ' }))).toBe('title-required')
     expect(validatePublishForm(values({ title: 'x'.repeat(121) }))).toBe('title-too-long')
+  })
+
+  it('accepts a publisher-defined category but not an empty one', () => {
+    expect(validatePublishForm(values({ category: 'Industry research' }))).toBeNull()
+    expect(validatePublishForm(values({ category: '  ' }))).toBe('category-required')
   })
 
   it('caps the description and validates the video link', () => {

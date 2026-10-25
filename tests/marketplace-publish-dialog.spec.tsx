@@ -62,6 +62,13 @@ describe('publish dialog', () => {
     expect(markup).toContain('E-commerce')
   })
 
+  it('offers finer categories plus a custom one', () => {
+    const markup = render({ token: `ghp_${'a'.repeat(30)}`, login: 'octocat' })
+    expect(markup).toContain('Orders &amp; fulfillment')
+    expect(markup).toContain('Reports &amp; dashboards')
+    expect(markup).toContain('Custom…')
+  })
+
   it('is translated on the Chinese panel', () => {
     const markup = render(null, 'zh-CN')
     expect(markup).toContain('GitHub 连接')
@@ -254,5 +261,100 @@ describe('prefilling a published workflow', () => {
     })
 
     expect((titleInput as HTMLInputElement).value).toBe('My own title')
+  })
+
+  it('restores a custom published category into the free-form input', async () => {
+    const workflow = makeWorkflow()
+    workflow.marketplace = {
+      repo: 'dcc123456/BC-workflow',
+      slug: 'scrape-orders-abcdef',
+      version: 1,
+      hash: 'a'.repeat(64),
+      author: 'octocat',
+      appliedAt: 1,
+    }
+    globalThis.fetch = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            schema: 1,
+            slug: 'scrape-orders-abcdef',
+            title: 'Scrape orders',
+            description: 'Previous copy',
+            category: '行业调研',
+            tags: [],
+            author: 'octocat',
+            version: 1,
+            hash: 'a'.repeat(64),
+            images: [],
+            createdAt: '2026-10-01T00:00:00.000Z',
+            updatedAt: '2026-10-02T00:00:00.000Z',
+          }),
+      }) as unknown as Response) as unknown as typeof fetch
+
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    await act(async () => {
+      root.render(
+        createElement(
+          I18nProvider,
+          { value: { locale: 'en', t: messagesFor('en') } },
+          createElement(PublishWorkflowDialog, {
+            workflow,
+            onClose: () => {},
+            initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
+          }),
+        ),
+      )
+    })
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+
+    expect(container.querySelector('select')?.value).toBe('__custom__')
+    const custom = [...container.querySelectorAll('input')].find(
+      (input) => (input as HTMLInputElement).value === '行业调研',
+    ) as HTMLInputElement
+    expect(custom).toBeDefined()
+  })
+
+  it('refuses to publish a custom category with no name', async () => {
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    await act(async () => {
+      root.render(
+        createElement(
+          I18nProvider,
+          { value: { locale: 'en', t: messagesFor('en') } },
+          createElement(PublishWorkflowDialog, {
+            workflow: makeWorkflow(),
+            onClose: () => {},
+            initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
+          }),
+        ),
+      )
+    })
+
+    const select = container.querySelector('select') as HTMLSelectElement
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+      setter?.call(select, '__custom__')
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(
+      [...container.querySelectorAll('input')].some(
+        (input) => (input as HTMLInputElement).placeholder === 'Name it, e.g. Industry research',
+      ),
+    ).toBe(true)
+
+    const publish = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Publish',
+    ) as HTMLButtonElement
+    await act(async () => publish.click())
+    expect(container.textContent).toContain('Choose a category, or name your own.')
   })
 })

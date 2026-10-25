@@ -27,6 +27,7 @@ describe('marketplace tab', () => {
     expect(markup).not.toContain('Could not load the marketplace.')
     expect(markup).toContain('placeholder="Search workflows"')
     expect(markup).toContain('All categories')
+    expect(markup).toContain('Orders &amp; fulfillment')
     expect(markup).toContain('Most liked')
   })
 

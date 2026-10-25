@@ -78,6 +78,7 @@ workflows/<slug>/
 ```
 
 - **版本**：整数，首发 `1`；同一 slug 的后续 PR 递增。`hash` 指向该版本 `workflow.json` 的 SHA-256。
+- **分类**：`category` 存内置 slug（`MARKETPLACE_CATEGORIES`，共 15 个细分类，面板按界面语言翻译）或发布者自填的标签（规范化后 ≤24 字符，按内容原样显示、不翻译）。广场筛选 = 全部内置分类 + 目录中已出现的自定义标签（按大小写不敏感去重）；卡片与筛选都用 `categoryKey` 比较，所以 `DevOps` 与 `devops` 落在同一项。新增分类无需升 schema：旧版面板读到未知值会显示为「其他」，卡片本身照常展示。
 - **PR 约定**：标题 `Add workflow: <title> [wf:<slug>]`；分支 `submit/<slug>-<yyyyMMddHHmm>`；一个 PR 只包含一个工作流目录。
 - **冲突**：slug 已存在且 `meta.author` 不是当前 GitHub 登录名 → 拒绝发布，提示改名；同一作者 → 视为更新，version +1。
 
@@ -91,6 +92,7 @@ workflows/<slug>/
 | `slug.ts`                                 | `slugify` / `buildSlug` / `isValidSlug`                                                          |
 | `sanitize.ts`                             | `toPublishableWorkflow`：剥离本地字段、运行时数据、data URL、日志；凭据疑似值的告警              |
 | `meta.ts`                                 | `buildMeta` / `parseMeta`（严格校验）/ `workflowHash` / `compareVersion`                         |
+| `categories.ts`                           | 内置分类与自定义标签：规范化、大小写不敏感比较、标签翻译、筛选选项                               |
 | `github-client.ts`                        | 带 token 的 REST 封装：401/403/404/422/限流映射为稳定错误码；只发本文档列出的端点                |
 | `publish.ts`                              | `publishWorkflow`：确保 fork → 建分支 → 逐个 PUT 文件 → 开 PR                                    |
 | `catalog.ts`                              | `loadCatalog`：tree + pulls + issues 三路合并；raw 拉 meta/图片；30 分钟节流与内存缓存           |

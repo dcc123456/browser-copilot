@@ -18,10 +18,9 @@ import {
   MAX_TAG_CHARS,
   MAX_TITLE_CHARS,
   MarketplaceError,
-  MARKETPLACE_CATEGORIES,
-  type MarketplaceCategory,
   type MarketplaceMeta,
 } from './types'
+import { normalizeCategory } from './categories'
 
 const HASH_RE = /^[0-9a-f]{64}$/
 const ASSET_RE = /^assets\/[a-z0-9][a-z0-9._-]*$/
@@ -79,7 +78,7 @@ export interface BuildMetaInput {
   slug: string
   title: string
   description: string
-  category: MarketplaceCategory
+  category: string
   tags?: readonly string[]
   author: string
   version: number
@@ -99,8 +98,9 @@ export function buildMeta(input: BuildMetaInput): MarketplaceMeta {
     throw new MarketplaceError('invalid', 'Workflow title is empty or too long')
   }
   const description = input.description.trim().slice(0, MAX_DESCRIPTION_CHARS)
-  if (!MARKETPLACE_CATEGORIES.includes(input.category)) {
-    throw new MarketplaceError('invalid', 'Unknown workflow category')
+  const category = normalizeCategory(input.category)
+  if (!category) {
+    throw new MarketplaceError('invalid', 'Workflow category is empty')
   }
   const author = input.author.trim()
   if (!author || author.length > AUTHOR_MAX) {
@@ -127,7 +127,7 @@ export function buildMeta(input: BuildMetaInput): MarketplaceMeta {
     slug: input.slug,
     title,
     description,
-    category: input.category,
+    category,
     tags: normalizeTags(input.tags ?? []),
     author,
     version: input.version,
@@ -160,11 +160,8 @@ export function parseMeta(value: unknown): MarketplaceMeta | null {
   if (typeof hash !== 'string' || !HASH_RE.test(hash)) return null
 
   const rawCategory = value['category']
-  const category: MarketplaceCategory = MARKETPLACE_CATEGORIES.includes(
-    rawCategory as MarketplaceCategory,
-  )
-    ? (rawCategory as MarketplaceCategory)
-    : 'other'
+  const category =
+    typeof rawCategory === 'string' ? normalizeCategory(rawCategory) || 'other' : 'other'
 
   const rawTags = value['tags']
   const tags = Array.isArray(rawTags)
