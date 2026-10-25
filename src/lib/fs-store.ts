@@ -110,6 +110,9 @@ export const CONFIG_KEYS: ReadonlySet<string> = new Set([
   'settings',
   'schemaVersion',
   'feishuConfig',
+  // The marketplace PAT is a credential: it must stay in chrome.storage.local
+  // and never be written into the user's data folder (which may be synced).
+  'marketplaceAuth',
   // Written directly by `background/panel-minimize.ts` (never via the area);
   // listed so a legacy copy is never migrated into the directory.
   'floatingButtonPositions',

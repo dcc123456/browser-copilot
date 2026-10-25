@@ -98,12 +98,15 @@ export class MarketplaceError extends Error {
   readonly code: MarketplaceErrorCode
   /** HTTP status when the failure came from GitHub. */
   readonly status?: number
+  /** Epoch ms when a rate limit resets, when GitHub told us. */
+  readonly resetAt?: number
 
-  constructor(code: MarketplaceErrorCode, message: string, status?: number) {
+  constructor(code: MarketplaceErrorCode, message: string, status?: number, resetAt?: number) {
     super(message)
     this.name = 'MarketplaceError'
     this.code = code
     this.status = status
+    this.resetAt = resetAt
   }
 }
 
