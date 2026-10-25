@@ -324,6 +324,15 @@ export interface Messages {
   marketplaceByAuthor: (params: { author: string }) => string
   marketplaceLikeCount: (params: { count: number }) => string
   marketplaceCommentCount: (params: { count: number }) => string
+  marketplaceLikeAction: string
+  marketplaceUnlikeAction: string
+  marketplaceCommentsTitle: string
+  marketplaceCommentsLoading: string
+  marketplaceCommentsEmpty: string
+  marketplaceCommentPlaceholder: string
+  marketplaceCommentSend: string
+  marketplaceCommentPosted: string
+  marketplaceEngageGithub: string
   marketplaceTrustTitle: string
   marketplaceTrustMessage: (params: { title: string; author: string }) => string
   marketplaceTrustConfirm: string
@@ -1916,6 +1925,15 @@ const en: Messages = {
   marketplaceByAuthor: ({ author }) => `by @${author}`,
   marketplaceLikeCount: ({ count }) => `${count} like${count === 1 ? '' : 's'}`,
   marketplaceCommentCount: ({ count }) => `${count} comment${count === 1 ? '' : 's'}`,
+  marketplaceLikeAction: 'Like',
+  marketplaceUnlikeAction: 'Unlike',
+  marketplaceCommentsTitle: 'Comments',
+  marketplaceCommentsLoading: 'Loading comments…',
+  marketplaceCommentsEmpty: 'No comments yet.',
+  marketplaceCommentPlaceholder: 'Write a comment…',
+  marketplaceCommentSend: 'Post comment',
+  marketplaceCommentPosted: 'Comment posted.',
+  marketplaceEngageGithub: 'Like or comment on GitHub',
   marketplaceTrustTitle: 'Apply this workflow?',
   marketplaceTrustMessage: ({ title, author }) =>
     `"${title}" by @${author} can perform actions on pages you open. It will not run automatically; start it yourself after reviewing its steps.`,
@@ -3408,6 +3426,15 @@ const zhCN: Messages = {
   marketplaceByAuthor: ({ author }) => `作者 @${author}`,
   marketplaceLikeCount: ({ count }) => `${count} 个赞`,
   marketplaceCommentCount: ({ count }) => `${count} 条评论`,
+  marketplaceLikeAction: '点赞',
+  marketplaceUnlikeAction: '取消点赞',
+  marketplaceCommentsTitle: '评论',
+  marketplaceCommentsLoading: '正在加载评论…',
+  marketplaceCommentsEmpty: '还没有评论。',
+  marketplaceCommentPlaceholder: '写下你的评论…',
+  marketplaceCommentSend: '发送评论',
+  marketplaceCommentPosted: '评论已发布。',
+  marketplaceEngageGithub: '去 GitHub 点赞或评论',
   marketplaceTrustTitle: '应用这个工作流？',
   marketplaceTrustMessage: ({ title, author }) =>
     `@${author} 的「${title}」会在你打开的页面上执行操作。它不会自动运行；查看步骤后请自行启动。`,

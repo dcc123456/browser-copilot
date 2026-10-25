@@ -117,6 +117,10 @@ export const CONFIG_KEYS: ReadonlySet<string> = new Set([
   // few GitHub reads, and a synced copy would only go stale in the folder.
   'marketplaceCatalog',
   'marketplaceLastCheck',
+  // Reaction ids this device created on the shared repo's discussion threads.
+  // Device-local bookkeeping: syncing them would make another machine offer to
+  // delete a reaction it does not own.
+  'marketplaceReactions',
   // Written directly by `background/panel-minimize.ts` (never via the area);
   // listed so a legacy copy is never migrated into the directory.
   'floatingButtonPositions',

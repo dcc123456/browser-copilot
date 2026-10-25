@@ -17,14 +17,23 @@ import { onStoreChanged } from '../lib/store-events'
 import type { Workflow } from '../lib/workflow/types'
 import { findInstalled, planApply } from '../lib/marketplace/apply'
 import { chromeCatalogCache, loadCatalog, type LoadCatalogResult } from '../lib/marketplace/catalog'
-import { GitHubClient } from '../lib/marketplace/github-client'
+import {
+  chromeReactionCache,
+  listAllComments,
+  postComment,
+  toggleLike,
+  type ReactionCache,
+} from '../lib/marketplace/engagement'
+import { GitHubClient, type GitHubComment } from '../lib/marketplace/github-client'
 import { assetRepoPath, needsUpdate, workflowDir } from '../lib/marketplace/meta'
 import { fetchPublishedWorkflow, rawUrl } from '../lib/marketplace/raw'
+import { clearAuth, getAuth } from '../lib/marketplace/token'
 import {
   MARKETPLACE_BRANCH,
   MARKETPLACE_CATEGORIES,
   MARKETPLACE_REPO_FULL,
   MarketplaceError,
+  type MarketplaceAuth,
   type MarketplaceCard,
   type MarketplaceCategory,
 } from '../lib/marketplace/types'
@@ -67,6 +76,18 @@ function updatedAtOf(card: MarketplaceCard): number {
   return Date.parse(card.meta.updatedAt) || 0
 }
 
+interface ThreadState {
+  status: 'loading' | 'ready' | 'error'
+  comments: GitHubComment[]
+  error?: string
+}
+
+/** `liked: null` = the local reaction id is still being read. */
+interface LikeState {
+  liked: boolean | null
+  likes: number
+}
+
 export default function MarketplaceTab({ active }: Props): React.ReactElement {
   const t = useT()
   const [snapshot, setSnapshot] = useState<LoadCatalogResult | null>(null)
@@ -82,6 +103,19 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   const [busySlug, setBusySlug] = useState<string | null>(null)
   /** Slugs whose published file failed validation; retried only on refresh. */
   const [unavailable, setUnavailable] = useState<Set<string>>(new Set())
+
+  const [auth, setAuth] = useState<MarketplaceAuth | null | undefined>(undefined)
+  /** Slug whose discussion panel is expanded; one at a time. */
+  const [openSlug, setOpenSlug] = useState<string | null>(null)
+  const [threads, setThreads] = useState<Record<number, ThreadState>>({})
+  const [likeStates, setLikeStates] = useState<Record<number, LikeState>>({})
+  const [draft, setDraft] = useState('')
+  const [engaging, setEngaging] = useState(false)
+  const reactionCacheRef = useRef<ReactionCache | null>(null)
+  const reactionCache = (): ReactionCache => {
+    reactionCacheRef.current ??= chromeReactionCache()
+    return reactionCacheRef.current
+  }
 
   const loadedRef = useRef(false)
 
@@ -127,6 +161,132 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   }, [loadInstalled])
 
   useEffect(() => onStoreChanged('workflows', () => void loadInstalled()), [loadInstalled])
+
+  useEffect(() => {
+    if (!active) return
+    void getAuth().then(setAuth)
+  }, [active])
+
+  /** GitHub's own page for the discussion: the read-only path without a token. */
+  const issueUrl = (issueNumber: number): string =>
+    `https://github.com/${MARKETPLACE_REPO_FULL}/pull/${issueNumber}`
+
+  const clientForWrites = (): GitHubClient => {
+    if (!auth) throw new MarketplaceError('auth-required', 'Connect GitHub first')
+    return new GitHubClient({ token: auth.token })
+  }
+
+  const forgetRejectedToken = async (): Promise<void> => {
+    await clearAuth()
+    setAuth(null)
+  }
+
+  const loadThread = useCallback(
+    async (issueNumber: number): Promise<void> => {
+      setThreads((prev) => ({ ...prev, [issueNumber]: { status: 'loading', comments: [] } }))
+      try {
+        const client = new GitHubClient(auth ? { token: auth.token } : {})
+        const comments = await listAllComments(client, issueNumber)
+        setThreads((prev) => ({ ...prev, [issueNumber]: { status: 'ready', comments } }))
+      } catch (caught) {
+        setThreads((prev) => ({
+          ...prev,
+          [issueNumber]: {
+            status: 'error',
+            comments: [],
+            error: marketplaceErrorMessage(t, caught),
+          },
+        }))
+      }
+    },
+    [auth, t],
+  )
+
+  const openDetail = (card: MarketplaceCard): void => {
+    const issueNumber = card.prNumber
+    if (issueNumber === null) return
+    if (openSlug === card.meta.slug) {
+      setOpenSlug(null)
+      return
+    }
+    setOpenSlug(card.meta.slug)
+    setDraft('')
+    setLikeStates((prev) =>
+      prev[issueNumber] ? prev : { ...prev, [issueNumber]: { liked: null, likes: card.likes } },
+    )
+    if (!likeStates[issueNumber]) {
+      void reactionCache()
+        .get(issueNumber)
+        .then((reactionId) =>
+          setLikeStates((prev) => ({
+            ...prev,
+            [issueNumber]: {
+              liked: reactionId !== null,
+              likes: prev[issueNumber]?.likes ?? card.likes,
+            },
+          })),
+        )
+    }
+    if (!threads[issueNumber]) void loadThread(issueNumber)
+  }
+
+  const like = async (card: MarketplaceCard, issueNumber: number): Promise<void> => {
+    if (!auth) return
+    setEngaging(true)
+    try {
+      const result = await toggleLike({
+        client: clientForWrites(),
+        cache: reactionCache(),
+        issueNumber,
+        onUnauthorized: forgetRejectedToken,
+      })
+      setLikeStates((prev) => {
+        const current = prev[issueNumber] ?? { liked: false, likes: card.likes }
+        return {
+          ...prev,
+          [issueNumber]: {
+            liked: result.liked,
+            likes: Math.max(0, current.likes + (result.liked ? 1 : -1)),
+          },
+        }
+      })
+    } catch (caught) {
+      setBanner({ kind: 'error', text: marketplaceErrorMessage(t, caught) })
+    } finally {
+      setEngaging(false)
+    }
+  }
+
+  const sendComment = async (issueNumber: number): Promise<void> => {
+    const body = draft.trim()
+    if (!auth || !body) return
+    setEngaging(true)
+    try {
+      const created = await postComment({
+        client: clientForWrites(),
+        cache: reactionCache(),
+        issueNumber,
+        body,
+        onUnauthorized: forgetRejectedToken,
+      })
+      setThreads((prev) => {
+        const current = prev[issueNumber]
+        return {
+          ...prev,
+          [issueNumber]: {
+            status: 'ready',
+            comments: [...(current?.comments ?? []), created],
+          },
+        }
+      })
+      setDraft('')
+      setBanner({ kind: 'ok', text: t.marketplaceCommentPosted })
+    } catch (caught) {
+      setBanner({ kind: 'error', text: marketplaceErrorMessage(t, caught) })
+    } finally {
+      setEngaging(false)
+    }
+  }
 
   const cards = useMemo(() => {
     const list = (snapshot?.cards ?? []).filter(
@@ -274,6 +434,10 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
             const isUnavailable = unavailable.has(meta.slug)
             const cover = meta.images[0]
             const sourceUrl = `https://github.com/${MARKETPLACE_REPO_FULL}/tree/${MARKETPLACE_BRANCH}/${workflowDir(meta.slug)}`
+            const issueNumber = card.prNumber
+            const likeState = issueNumber === null ? undefined : likeStates[issueNumber]
+            const thread = issueNumber === null ? undefined : threads[issueNumber]
+            const isOpen = openSlug === meta.slug
             return (
               <li className="task-item" key={meta.slug}>
                 {cover && (
@@ -313,7 +477,7 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                   </p>
                 )}
                 <div className="mt-1 flex items-center gap-3 text-[11.5px] text-muted">
-                  <span>{t.marketplaceLikeCount({ count: card.likes })}</span>
+                  <span>{t.marketplaceLikeCount({ count: likeState?.likes ?? card.likes })}</span>
                   <span>{t.marketplaceCommentCount({ count: card.comments })}</span>
                 </div>
                 <div className="actions task-actions">
@@ -331,10 +495,88 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                           ? t.marketplaceApplied
                           : t.marketplaceApply}
                   </button>
+                  {issueNumber !== null && (
+                    <button disabled={engaging} onClick={() => openDetail(card)} type="button">
+                      {isOpen
+                        ? t.marketplaceClose
+                        : `${t.marketplaceCommentsTitle} (${card.comments})`}
+                    </button>
+                  )}
                   <a className="text-accent" href={sourceUrl} rel="noreferrer" target="_blank">
                     {t.marketplaceViewOnGithub}
                   </a>
                 </div>
+                {isOpen && issueNumber !== null && (
+                  <section className="mt-2 border-t border-border pt-2">
+                    {auth ? (
+                      <button
+                        className="task-action-run"
+                        disabled={engaging || likeState?.liked === null}
+                        onClick={() => void like(card, issueNumber)}
+                        type="button"
+                      >
+                        {likeState?.liked ? t.marketplaceUnlikeAction : t.marketplaceLikeAction}
+                      </button>
+                    ) : (
+                      <a
+                        className="text-[11.5px] text-accent"
+                        href={issueUrl(issueNumber)}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {t.marketplaceEngageGithub}
+                      </a>
+                    )}
+
+                    <h4 className="mt-2 mb-1 text-[11.5px] font-semibold text-ink">
+                      {t.marketplaceCommentsTitle}
+                    </h4>
+                    {!thread || thread.status === 'loading' ? (
+                      <p className="m-0 text-[11.5px] text-muted">{t.marketplaceCommentsLoading}</p>
+                    ) : thread.status === 'error' ? (
+                      <p className="m-0 text-[11.5px] text-err">{thread.error}</p>
+                    ) : thread.comments.length === 0 ? (
+                      <p className="m-0 text-[11.5px] text-muted">{t.marketplaceCommentsEmpty}</p>
+                    ) : (
+                      <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                        {thread.comments.map((comment) => (
+                          <li
+                            className="rounded-md border border-border bg-panel p-2"
+                            key={comment.id}
+                          >
+                            <span className="text-[11.5px] font-medium text-ink">
+                              @{comment.user.login}
+                            </span>
+                            <p className="mt-0.5 mb-0 whitespace-pre-wrap text-[11.5px] leading-snug text-muted">
+                              {comment.body}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {auth && (
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        <textarea
+                          className="w-full"
+                          disabled={engaging}
+                          onChange={(event) => setDraft(event.target.value)}
+                          placeholder={t.marketplaceCommentPlaceholder}
+                          rows={2}
+                          value={draft}
+                        />
+                        <button
+                          className="task-action-run self-end"
+                          disabled={engaging || !draft.trim()}
+                          onClick={() => void sendComment(issueNumber)}
+                          type="button"
+                        >
+                          {t.marketplaceCommentSend}
+                        </button>
+                      </div>
+                    )}
+                  </section>
+                )}
               </li>
             )
           })}
