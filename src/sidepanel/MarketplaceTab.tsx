@@ -121,8 +121,8 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   const loadedRef = useRef(false)
 
   const refresh = useCallback(
-    async (force: boolean): Promise<void> => {
-      setLoading(true)
+    async (force: boolean, quiet = false): Promise<void> => {
+      if (!quiet) setLoading(true)
       setError(null)
       try {
         const result = await loadCatalog({
@@ -143,9 +143,13 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   )
 
   useEffect(() => {
-    if (!active || loadedRef.current) return
+    if (!active) return
+    // The panel stays mounted for its whole lifetime, so a one-shot load would
+    // freeze the catalog until a manual refresh. Re-checking on every
+    // activation lets the 30-minute window in `loadCatalog` actually expire;
+    // cached hits return without touching the spinner.
+    void refresh(false, loadedRef.current)
     loadedRef.current = true
-    void refresh(false)
   }, [active, refresh])
 
   const loadInstalled = useCallback(async (): Promise<void> => {

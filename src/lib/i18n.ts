@@ -1913,7 +1913,8 @@ const en: Messages = {
   marketplaceRefresh: 'Refresh',
   marketplaceLoading: 'Loading the marketplace…',
   marketplaceEmpty: 'No workflows have been published yet.',
-  marketplaceEmptyHint: 'Publish one from the Workflows tab to start the collection.',
+  marketplaceEmptyHint:
+    'Publish one from the Workflows tab to start the collection. Just merged a pull request? Use refresh above.',
   marketplaceEmptyFiltered: 'No workflows match these filters.',
   marketplaceStale: 'Showing the last loaded list; GitHub could not be reached.',
   marketplaceTruncated: 'Showing the newest 300 workflows.',
@@ -3415,7 +3416,7 @@ const zhCN: Messages = {
   marketplaceRefresh: '刷新',
   marketplaceLoading: '正在加载工作流广场…',
   marketplaceEmpty: '还没有发布任何工作流。',
-  marketplaceEmptyHint: '在「工作流」面板发布一个，成为第一个分享者。',
+  marketplaceEmptyHint: '在「工作流」面板发布一个，成为第一个分享者。刚合并了 PR？点右上角的刷新。',
   marketplaceEmptyFiltered: '没有符合筛选条件的工作流。',
   marketplaceStale: '正在显示上次加载的列表，暂时无法连接 GitHub。',
   marketplaceTruncated: '仅显示最新的 300 个工作流。',
