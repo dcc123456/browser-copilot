@@ -290,6 +290,19 @@ export interface WorkflowRevisionMetadata {
   repairSessionId?: string
 }
 
+/** Where a locally installed workflow came from in the shared marketplace. */
+export interface WorkflowMarketplaceRef {
+  /** `owner/repo` that hosts the workflow. */
+  repo: string
+  slug: string
+  /** Published version at the time it was applied. */
+  version: number
+  /** Hash of the published `workflow.json` for that version. */
+  hash: string
+  author: string
+  appliedAt: number
+}
+
 export interface Workflow {
   id: string
   name: string
@@ -316,6 +329,12 @@ export interface Workflow {
   settings: WorkflowSettings
   /** Backing data-store reference (e.g. a spreadsheet table id). */
   table?: unknown
+  /**
+   * Upstream marketplace provenance, set when this workflow was applied from
+   * the shared catalog. It is the identity used for "already added" and for
+   * detecting an upstream update; it is never sent back when republishing.
+   */
+  marketplace?: WorkflowMarketplaceRef
   /**
    * Monotonic revision number, starting at 1 for the first commit (spec §18).
    * Absent on records persisted before revisioning; read via

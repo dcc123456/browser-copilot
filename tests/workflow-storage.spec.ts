@@ -94,6 +94,24 @@ describe('workflow storage', () => {
     expect(await getWorkflow('missing')).toBeUndefined()
   })
 
+  it('persists marketplace provenance and drops a malformed ref', async () => {
+    const ref = {
+      repo: 'dcc123456/BC-workflow',
+      slug: 'scrape-orders-abcdef',
+      version: 2,
+      hash: 'a'.repeat(64),
+      author: 'octocat',
+      appliedAt: 1,
+    }
+    await saveWorkflow(makeWorkflow({ id: 'applied', marketplace: ref }))
+    expect((await getWorkflow('applied'))!.marketplace).toEqual(ref)
+
+    // A ref that cannot identify its upstream must not survive the whitelist —
+    // keeping half of it would make "already added" match the wrong workflow.
+    await saveWorkflow(makeWorkflow({ id: 'broken', marketplace: { ...ref, slug: 'Bad Slug' } }))
+    expect((await getWorkflow('broken'))!.marketplace).toBeUndefined()
+  })
+
   it('persists everything that makes a GENERATED workflow generated', async () => {
     // The bug this pins: `asWorkflow` rebuilt `settings` from a five-boolean
     // whitelist, so provenance / reliabilityMode / goalSpec / the origin URL /

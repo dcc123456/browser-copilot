@@ -15,6 +15,7 @@ import { newId } from '../storage'
 import { fileStorageArea } from '../fs-store'
 import { withKeyLock } from '../key-lock'
 import { shedBulkDataUrls } from '../persist-budget'
+import { isMarketplaceRef } from '../marketplace/meta'
 import { migrateWorkflow } from './migrate'
 import { normalizeGoalVerification } from './goal-verification-record'
 import { normalizeTrialRun } from './trial-run'
@@ -218,6 +219,10 @@ export function asWorkflow(value: unknown): Workflow | null {
           ),
         }
       : {}),
+    // Marketplace provenance is the only record of where an applied workflow
+    // came from. Like every other field, it must survive this whitelist or the
+    // next save silently forgets the workflow is a catalog install.
+    ...(isMarketplaceRef(v.marketplace) ? { marketplace: v.marketplace } : {}),
   }
 }
 
