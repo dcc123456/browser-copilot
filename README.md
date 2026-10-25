@@ -85,7 +85,6 @@ agent you connected over [MCP](#agent-integration-mcp).
 <img width="2497" height="2088" alt="image" src="https://github.com/user-attachments/assets/c116a923-0519-4621-a7bf-ebc5e1e3dcc4" />
 <img width="2497" height="2088" alt="image" src="https://github.com/user-attachments/assets/9de97b1d-aa3e-407b-9f27-c3f44ea3ae91" />
 
-
 ### Plugin Installation and Bulk Email Sending Workflow [Demo URL](https://www.bilibili.com/video/BV1gfHN69En9/?vd_source=cc5bd9029a9b181a2119b592e955672c)
 
 ## Quick start

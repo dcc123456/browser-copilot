@@ -40,7 +40,9 @@ describe('normalizeCategory', () => {
   })
 
   it('caps the label length without splitting a surrogate pair', () => {
-    expect(normalizeCategory('x'.repeat(MAX_CATEGORY_CHARS + 5))).toBe('x'.repeat(MAX_CATEGORY_CHARS))
+    expect(normalizeCategory('x'.repeat(MAX_CATEGORY_CHARS + 5))).toBe(
+      'x'.repeat(MAX_CATEGORY_CHARS),
+    )
     expect(Array.from(normalizeCategory('😀'.repeat(MAX_CATEGORY_CHARS + 1)))).toHaveLength(
       MAX_CATEGORY_CHARS,
     )
