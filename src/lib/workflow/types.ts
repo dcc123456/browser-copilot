@@ -285,7 +285,7 @@ export interface WorkflowSettings {
 export interface WorkflowRevisionMetadata {
   revision: number
   updatedAt: number
-  source: 'manual-edit' | 'ai-repair' | 'generation'
+  source: 'manual-edit' | 'ai-repair' | 'generation' | 'marketplace' | 'marketplace-update'
   parentRevision?: number
   repairSessionId?: string
 }

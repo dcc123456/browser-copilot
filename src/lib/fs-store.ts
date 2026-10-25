@@ -113,6 +113,10 @@ export const CONFIG_KEYS: ReadonlySet<string> = new Set([
   // The marketplace PAT is a credential: it must stay in chrome.storage.local
   // and never be written into the user's data folder (which may be synced).
   'marketplaceAuth',
+  // The marketplace catalog is a throwaway HTTP cache: rebuilding it costs a
+  // few GitHub reads, and a synced copy would only go stale in the folder.
+  'marketplaceCatalog',
+  'marketplaceLastCheck',
   // Written directly by `background/panel-minimize.ts` (never via the area);
   // listed so a legacy copy is never migrated into the directory.
   'floatingButtonPositions',
