@@ -291,10 +291,24 @@ export interface Messages {
   marketplacePublishSubmit: string
   marketplacePublishPublishing: string
   marketplacePublishAnyway: string
+  marketplacePublishBundleTitle: string
+  marketplacePublishBundleHint: (params: { count: number }) => string
+  marketplacePublishBundleMissing: (params: { names: string }) => string
+  marketplacePublishBundleTooMany: (params: { count: number }) => string
   marketplacePublishWarningsTitle: string
   marketplacePublishWarningsHint: string
   marketplacePublishWarningCredential: (params: { node: string; param: string }) => string
   marketplacePublishWarningEmbeddedData: (params: { node: string; param: string }) => string
+  marketplacePublishWarningBundledCredential: (params: {
+    workflow: string
+    node: string
+    param: string
+  }) => string
+  marketplacePublishWarningBundledEmbeddedData: (params: {
+    workflow: string
+    node: string
+    param: string
+  }) => string
   marketplacePublishSuccess: (params: { slug: string; version: number }) => string
   marketplacePublishOpenPr: string
   marketplaceFormTitleRequired: string
@@ -335,6 +349,8 @@ export interface Messages {
   marketplaceUnavailable: string
   marketplaceViewOnGithub: string
   marketplaceByAuthor: (params: { author: string }) => string
+  /** Chip on a card that bundles the workflows its steps call. */
+  marketplaceCardBundle: (params: { count: number }) => string
   marketplaceLikeCount: (params: { count: number }) => string
   marketplaceCommentCount: (params: { count: number }) => string
   marketplaceLikeAction: string
@@ -348,9 +364,13 @@ export interface Messages {
   marketplaceEngageGithub: string
   marketplaceTrustTitle: string
   marketplaceTrustMessage: (params: { title: string; author: string }) => string
+  /** Extra trust sentence naming the called workflows the listing installs. */
+  marketplaceTrustBundled: (params: { names: string }) => string
   marketplaceTrustConfirm: string
   marketplaceUpdateTitle: string
   marketplaceUpdateMessage: (params: { title: string }) => string
+  /** Extra update sentence naming the called workflows that get replaced. */
+  marketplaceUpdateBundled: (params: { names: string }) => string
   /** Action on your own published card: open the removal pull request. */
   marketplaceUnpublish: string
   marketplaceUnpublishTitle: string
@@ -1910,6 +1930,13 @@ const en: Messages = {
   marketplacePublishSubmit: 'Publish',
   marketplacePublishPublishing: 'Publishing…',
   marketplacePublishAnyway: 'Publish anyway',
+  marketplacePublishBundleTitle: 'Called workflows',
+  marketplacePublishBundleHint: ({ count }) =>
+    `This workflow calls ${count} other workflow${count === 1 ? '' : 's'}. Each copy is published in the same pull request, and applying this listing installs all of them.`,
+  marketplacePublishBundleMissing: ({ names }) =>
+    `These called workflows are missing locally, so they cannot be bundled: ${names}. Restore them or change the steps that call them.`,
+  marketplacePublishBundleTooMany: ({ count }) =>
+    `This workflow calls ${count} workflows; one publish can carry at most 20.`,
   marketplacePublishWarningsTitle: 'Review before publishing',
   marketplacePublishWarningsHint:
     'These values will be published as-is. Replacing them with {{variables}} removes the secret from the workflow.',
@@ -1917,6 +1944,10 @@ const en: Messages = {
     `Node "${node}" contains a literal credential in "${param}".`,
   marketplacePublishWarningEmbeddedData: ({ node, param }) =>
     `Node "${node}" contains embedded data in "${param}"; it was removed.`,
+  marketplacePublishWarningBundledCredential: ({ workflow, node, param }) =>
+    `In "${workflow}", node "${node}" contains a literal credential in "${param}".`,
+  marketplacePublishWarningBundledEmbeddedData: ({ workflow, node, param }) =>
+    `In "${workflow}", node "${node}" contains embedded data in "${param}"; it was removed.`,
   marketplacePublishSuccess: ({ slug, version }) =>
     `Pull request opened for ${slug} (version ${version}).`,
   marketplacePublishOpenPr: 'View pull request',
@@ -1959,6 +1990,8 @@ const en: Messages = {
   marketplaceUnavailable: 'Unavailable',
   marketplaceViewOnGithub: 'View on GitHub',
   marketplaceByAuthor: ({ author }) => `by @${author}`,
+  marketplaceCardBundle: ({ count }) =>
+    `Includes ${count} called workflow${count === 1 ? '' : 's'}`,
   marketplaceLikeCount: ({ count }) => `${count} like${count === 1 ? '' : 's'}`,
   marketplaceCommentCount: ({ count }) => `${count} comment${count === 1 ? '' : 's'}`,
   marketplaceLikeAction: 'Like',
@@ -1973,10 +2006,12 @@ const en: Messages = {
   marketplaceTrustTitle: 'Apply this workflow?',
   marketplaceTrustMessage: ({ title, author }) =>
     `"${title}" by @${author} can perform actions on pages you open. It will not run automatically; start it yourself after reviewing its steps.`,
+  marketplaceTrustBundled: ({ names }) => `It also installs the workflows it calls: ${names}.`,
   marketplaceTrustConfirm: 'Apply',
   marketplaceUpdateTitle: 'Update this workflow?',
   marketplaceUpdateMessage: ({ title }) =>
     `Applying the newer version of "${title}" replaces its steps, trigger and settings. Local modifications will be lost.`,
+  marketplaceUpdateBundled: ({ names }) => `The workflows it calls are replaced too: ${names}.`,
   marketplaceUnpublish: 'Unpublish',
   marketplaceUnpublishTitle: 'Unpublish this workflow?',
   marketplaceUnpublishMessage: ({ title }) =>
@@ -3435,6 +3470,13 @@ const zhCN: Messages = {
   marketplacePublishSubmit: '发布',
   marketplacePublishPublishing: '正在发布…',
   marketplacePublishAnyway: '仍然发布',
+  marketplacePublishBundleTitle: '调用的工作流',
+  marketplacePublishBundleHint: ({ count }) =>
+    `此工作流调用了 ${count} 个子工作流。它们会以副本形式放进同一个 PR，应用这份列表时会一并安装。`,
+  marketplacePublishBundleMissing: ({ names }) =>
+    `以下被调用的工作流在本地不存在，无法一并发布：${names}。请恢复它们，或修改调用它们的步骤。`,
+  marketplacePublishBundleTooMany: ({ count }) =>
+    `此工作流调用了 ${count} 个工作流，单次发布最多携带 20 个。`,
   marketplacePublishWarningsTitle: '发布前请确认',
   marketplacePublishWarningsHint:
     '以下内容会按原样发布。改写成 {{变量}} 后可以避免把密钥写进工作流。',
@@ -3442,6 +3484,10 @@ const zhCN: Messages = {
     `节点「${node}」的「${param}」填写的是明文凭据。`,
   marketplacePublishWarningEmbeddedData: ({ node, param }) =>
     `节点「${node}」的「${param}」含有内嵌数据，已移除。`,
+  marketplacePublishWarningBundledCredential: ({ workflow, node, param }) =>
+    `工作流「${workflow}」的节点「${node}」中，「${param}」填写的是明文凭据。`,
+  marketplacePublishWarningBundledEmbeddedData: ({ workflow, node, param }) =>
+    `工作流「${workflow}」的节点「${node}」中，「${param}」含有内嵌数据，已移除。`,
   marketplacePublishSuccess: ({ slug, version }) => `已为 ${slug}（版本 ${version}）创建 PR。`,
   marketplacePublishOpenPr: '查看 PR',
   marketplaceFormTitleRequired: '标题不能为空。',
@@ -3482,6 +3528,7 @@ const zhCN: Messages = {
   marketplaceUnavailable: '暂不可用',
   marketplaceViewOnGithub: '在 GitHub 查看',
   marketplaceByAuthor: ({ author }) => `作者 @${author}`,
+  marketplaceCardBundle: ({ count }) => `含 ${count} 个子工作流`,
   marketplaceLikeCount: ({ count }) => `${count} 个赞`,
   marketplaceCommentCount: ({ count }) => `${count} 条评论`,
   marketplaceLikeAction: '点赞',
@@ -3496,10 +3543,12 @@ const zhCN: Messages = {
   marketplaceTrustTitle: '应用这个工作流？',
   marketplaceTrustMessage: ({ title, author }) =>
     `@${author} 的「${title}」会在你打开的页面上执行操作。它不会自动运行；查看步骤后请自行启动。`,
+  marketplaceTrustBundled: ({ names }) => `同时会安装它调用的工作流：${names}。`,
   marketplaceTrustConfirm: '应用',
   marketplaceUpdateTitle: '更新这个工作流？',
   marketplaceUpdateMessage: ({ title }) =>
     `应用「${title}」的新版本会替换它的步骤、触发器和设置，本地修改将会丢失。`,
+  marketplaceUpdateBundled: ({ names }) => `它调用的工作流也会一并替换：${names}。`,
   marketplaceUnpublish: '取消发布',
   marketplaceUnpublishTitle: '取消发布这个工作流？',
   marketplaceUnpublishMessage: ({ title }) =>

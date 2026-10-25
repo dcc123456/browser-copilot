@@ -38,6 +38,13 @@ export const MAX_DESCRIPTION_CHARS = 2000
 export const MAX_TAGS = 8
 export const MAX_TAG_CHARS = 24
 export const MAX_CATEGORY_CHARS = 24
+/**
+ * Called workflows one publish may carry. Each becomes one extra file in the
+ * same pull request, and every extra file is one write against the publisher's
+ * API budget — twenty leaves room for assets without letting a runaway graph
+ * turn one publish into an unbounded commit.
+ */
+export const MAX_BUNDLE_WORKFLOWS = 20
 
 /**
  * Built-in categories, kept as slugs so the panel translates them. A publisher
@@ -64,6 +71,16 @@ export const MARKETPLACE_CATEGORIES = [
 
 export type MarketplaceCategory = (typeof MARKETPLACE_CATEGORIES)[number]
 
+/** One workflow published alongside the card's own workflow. */
+export interface MarketplaceDependency {
+  /** Workflow id the publisher's graph references (their local id). */
+  id: string
+  /** Display name, shown before the user applies the listing. */
+  name: string
+  /** Workflow-relative file, e.g. `deps/export-orders.json`. */
+  path: string
+}
+
 /** One published workflow, as stored in `workflows/<slug>/meta.json`. */
 export interface MarketplaceMeta {
   schema: typeof MARKETPLACE_SCHEMA_VERSION
@@ -81,6 +98,11 @@ export interface MarketplaceMeta {
   hash: string
   /** Repo-relative asset paths, e.g. `assets/1.webp`. */
   images: string[]
+  /**
+   * Workflows this one calls, committed under the same directory. Absent on
+   * listings published before bundles existed.
+   */
+  dependencies?: MarketplaceDependency[]
   /** External video link; videos are never committed to the repo. */
   videoUrl?: string
   createdAt: string

@@ -9,7 +9,7 @@
  * @module sidepanel/PublishWorkflowDialog
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ImagePlus, Trash2 } from 'lucide-react'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
 import { useT } from './i18n'
@@ -17,6 +17,7 @@ import type { Messages } from '../lib/i18n'
 import { GitHubClient } from '../lib/marketplace/github-client'
 import { compressImage } from '../lib/marketplace/image'
 import { categoryLabel, isBuiltinCategory } from '../lib/marketplace/categories'
+import { collectDependencies } from '../lib/marketplace/dependencies'
 import { parseTagInput, validatePublishForm, type PublishFormError } from '../lib/marketplace/form'
 import {
   preparePublish,
@@ -24,11 +25,13 @@ import {
   type PreparedPublish,
   type PublishResult,
 } from '../lib/marketplace/publish'
+import type { PublishWarning } from '../lib/marketplace/sanitize'
 import { fetchPublishedAsset, fetchPublishedMeta } from '../lib/marketplace/raw'
 import { isClassicToken, setAuth, clearAuth, getAuth } from '../lib/marketplace/token'
 import {
   MARKETPLACE_CATEGORIES,
   MARKETPLACE_REPO_FULL,
+  MAX_BUNDLE_WORKFLOWS,
   MAX_CATEGORY_CHARS,
   MAX_PUBLISH_IMAGES,
   MarketplaceError,
@@ -71,8 +74,36 @@ interface SelectedImage {
   url: string
 }
 
+/** One warning line; a bundled workflow names itself so the node is findable. */
+function warningText(t: Messages, warning: PublishWarning): string {
+  if (warning.kind === 'credential-literal') {
+    return warning.workflow
+      ? t.marketplacePublishWarningBundledCredential({
+          workflow: warning.workflow,
+          node: warning.nodeLabel,
+          param: warning.param,
+        })
+      : t.marketplacePublishWarningCredential({
+          node: warning.nodeLabel,
+          param: warning.param,
+        })
+  }
+  return warning.workflow
+    ? t.marketplacePublishWarningBundledEmbeddedData({
+        workflow: warning.workflow,
+        node: warning.nodeLabel,
+        param: warning.param,
+      })
+    : t.marketplacePublishWarningEmbeddedData({
+        node: warning.nodeLabel,
+        param: warning.param,
+      })
+}
+
 interface Props {
   workflow: Workflow
+  /** The whole local library, so called workflows can be bundled. */
+  library: readonly Workflow[]
   onClose: () => void
   onPublished?: (result: PublishResult) => void
   /** Test/preview seam: skip reading `chrome.storage.local`. */
@@ -99,11 +130,19 @@ function Field({
 
 export default function PublishWorkflowDialog({
   workflow,
+  library,
   onClose,
   onPublished,
   initialAuth,
 }: Props): React.ReactElement {
   const t = useT()
+  /**
+   * The same scan `preparePublish` will run, shown before anything is sent so
+   * the publisher knows which other workflows become public with this one.
+   */
+  const bundle = useMemo(() => collectDependencies(workflow, library), [workflow, library])
+  const missingRefs = bundle.missing.map((call) => call.workflowId || call.nodeLabel)
+  const tooMany = bundle.dependencies.length > MAX_BUNDLE_WORKFLOWS
   const [auth, setAuthState] = useState<MarketplaceAuth | null | undefined>(initialAuth)
   const [tokenInput, setTokenInput] = useState('')
   const [connecting, setConnecting] = useState(false)
@@ -270,6 +309,7 @@ export default function PublishWorkflowDialog({
           {
             author: auth.login,
             findExistingMeta: (slug) => fetchPublishedMeta(slug),
+            library,
           },
         )
         setPrepared(ready)
@@ -294,7 +334,7 @@ export default function PublishWorkflowDialog({
     : warningsPending
       ? t.marketplacePublishAnyway
       : t.marketplacePublishSubmit
-  const disabled = busy || imageBusy || connecting || !auth
+  const disabled = busy || imageBusy || connecting || !auth || missingRefs.length > 0 || tooMany
 
   return (
     <FormDialog
@@ -403,6 +443,37 @@ export default function PublishWorkflowDialog({
 
           {auth && (
             <>
+              {(bundle.dependencies.length > 0 || missingRefs.length > 0) && (
+                <section className="mb-4 rounded-lg border border-border bg-panel-2 p-3">
+                  <h3 className="m-0 text-[12.5px] font-semibold text-ink">
+                    {t.marketplacePublishBundleTitle}
+                  </h3>
+                  {bundle.dependencies.length > 0 && (
+                    <>
+                      <p className="mt-1 mb-1 text-[11.5px] leading-snug text-muted">
+                        {t.marketplacePublishBundleHint({ count: bundle.dependencies.length })}
+                      </p>
+                      <ul className="m-0 list-disc pl-4 text-[11.5px] leading-snug text-ink">
+                        {bundle.dependencies.map((dependency) => (
+                          <li key={dependency.path}>
+                            {dependency.workflow.name || dependency.workflow.id}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {tooMany && (
+                    <p className="mt-1 mb-0 text-[11.5px] leading-snug text-err" role="alert">
+                      {t.marketplacePublishBundleTooMany({ count: bundle.dependencies.length })}
+                    </p>
+                  )}
+                  {missingRefs.length > 0 && (
+                    <p className="mt-1 mb-0 text-[11.5px] leading-snug text-err" role="alert">
+                      {t.marketplacePublishBundleMissing({ names: missingRefs.join(', ') })}
+                    </p>
+                  )}
+                </section>
+              )}
               <Field label={t.marketplaceFieldTitle}>
                 <input
                   disabled={busy}
@@ -552,16 +623,10 @@ export default function PublishWorkflowDialog({
                   </h3>
                   <ul className="mt-1 mb-0 list-disc pl-4 text-[11.5px] leading-snug text-ink">
                     {prepared.warnings.map((warning, index) => (
-                      <li key={`${warning.nodeLabel}-${warning.param}-${index}`}>
-                        {warning.kind === 'credential-literal'
-                          ? t.marketplacePublishWarningCredential({
-                              node: warning.nodeLabel,
-                              param: warning.param,
-                            })
-                          : t.marketplacePublishWarningEmbeddedData({
-                              node: warning.nodeLabel,
-                              param: warning.param,
-                            })}
+                      <li
+                        key={`${warning.workflow ?? ''}-${warning.nodeLabel}-${warning.param}-${index}`}
+                      >
+                        {warningText(t, warning)}
                       </li>
                     ))}
                   </ul>

@@ -303,11 +303,19 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   const apply = async (card: MarketplaceCard): Promise<void> => {
     const existing = findInstalled(installed, card.meta.slug)
     const isUpdate = !!existing && needsUpdate(card.meta, existing.marketplace)
+    const bundled = (card.meta.dependencies ?? []).map((entry) => entry.name)
+    const message = isUpdate
+      ? [
+          t.marketplaceUpdateMessage({ title: card.meta.title }),
+          ...(bundled.length ? [t.marketplaceUpdateBundled({ names: bundled.join(', ') })] : []),
+        ].join('\n\n')
+      : [
+          t.marketplaceTrustMessage({ title: card.meta.title, author: card.meta.author }),
+          ...(bundled.length ? [t.marketplaceTrustBundled({ names: bundled.join(', ') })] : []),
+        ].join('\n\n')
     const confirmed = await confirmDialog({
       title: isUpdate ? t.marketplaceUpdateTitle : t.marketplaceTrustTitle,
-      message: isUpdate
-        ? t.marketplaceUpdateMessage({ title: card.meta.title })
-        : t.marketplaceTrustMessage({ title: card.meta.title, author: card.meta.author }),
+      message,
       confirmText: isUpdate ? t.marketplaceUpdate : t.marketplaceTrustConfirm,
       cancelText: t.cancel,
     })
@@ -315,7 +323,7 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
 
     setBusySlug(card.meta.slug)
     try {
-      const plan = await installFromCard(card, existing)
+      const plan = await installFromCard(card, existing, installed)
       setBanner({
         kind: 'ok',
         text:
@@ -468,6 +476,7 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
             const likeState = issueNumber === null ? undefined : likeStates[issueNumber]
             const thread = issueNumber === null ? undefined : threads[issueNumber]
             const isOpen = openSlug === meta.slug
+            const bundleCount = meta.dependencies?.length ?? 0
             return (
               <li className="task-item" key={meta.slug}>
                 {cover && (
@@ -495,6 +504,11 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                     {t.marketplaceByAuthor({ author: meta.author })}
                   </span>
                   <span className="task-chip">{categoryLabel(t, meta.category)}</span>
+                  {bundleCount > 0 && (
+                    <span className="task-chip">
+                      {t.marketplaceCardBundle({ count: bundleCount })}
+                    </span>
+                  )}
                   {meta.tags.map((tag) => (
                     <span className="task-chip" key={tag}>
                       {tag}

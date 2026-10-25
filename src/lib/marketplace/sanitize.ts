@@ -19,6 +19,11 @@ export interface PublishWarning {
   nodeLabel: string
   /** Dotted path inside the node's `data`, e.g. `secret.password`. */
   param: string
+  /**
+   * Display name of the bundled workflow the node belongs to. Unset for the
+   * workflow being published, which the dialog already names.
+   */
+  workflow?: string
 }
 
 /** The exact shape written to `workflow.json`. */

@@ -14,8 +14,14 @@ import { commitWorkflowRevision } from '../workflow/workflow-revision'
 import { migrateWorkflow } from '../workflow/migrate'
 import { asWorkflow } from '../workflow/storage'
 import type { Workflow, WorkflowMarketplaceRef } from '../workflow/types'
-import { needsUpdate } from './meta'
-import { MARKETPLACE_REPO_FULL, MarketplaceError, type MarketplaceCard } from './types'
+import { rewriteWorkflowCalls } from './dependencies'
+import { dependencyFile, needsUpdate } from './meta'
+import {
+  MARKETPLACE_REPO_FULL,
+  MarketplaceError,
+  type MarketplaceCard,
+  type MarketplaceDependency,
+} from './types'
 
 export type ApplyStatus = 'new' | 'update' | 'up-to-date'
 
@@ -23,6 +29,18 @@ export interface ApplyPlan {
   status: ApplyStatus
   /** The record to save; identical to `existing` for `up-to-date`. */
   workflow: Workflow
+}
+
+/** One called workflow as it was fetched from the bundle. */
+export interface PublishedDependency {
+  entry: MarketplaceDependency
+  /** Decoded dependency file. */
+  published: unknown
+}
+
+export interface BundlePlan extends ApplyPlan {
+  /** Dependency records to save BEFORE the parent; empty when up-to-date. */
+  dependencies: Workflow[]
 }
 
 /** Local workflow installed from `slug`, if any. */
@@ -144,4 +162,96 @@ export function planApply(
       revisionHistory: [{ revision: 1, updatedAt: now, source: 'marketplace' }],
     },
   }
+}
+
+/**
+ * Local id for a bundled dependency.
+ *
+ * Derived from the listing slug and the dep file so a re-apply rewrites the
+ * same copy instead of accumulating duplicates, and so two listings that call
+ * the same workflow keep independent copies.
+ */
+export function bundleDependencyId(parentSlug: string, path: string): string {
+  return `mkt-${parentSlug}-${dependencyFile(path) ?? 'workflow'}`
+}
+
+/**
+ * Builds the parent record and the dependency records a bundle needs.
+ *
+ * Calls are rewritten to the ids this install is about to use, which is what
+ * makes a published `execute-workflow` step work on someone else's machine.
+ * `library` is the installed library, used to find a dependency copy from a
+ * previous version so it is replaced rather than duplicated.
+ */
+export function planApplyBundle(
+  card: MarketplaceCard,
+  published: unknown,
+  dependencies: readonly PublishedDependency[],
+  library: readonly Workflow[],
+  existing: Workflow | undefined,
+  now = Date.now(),
+): BundlePlan {
+  const declared = card.meta.dependencies ?? []
+  if (declared.length !== dependencies.length) {
+    throw new MarketplaceError('invalid', 'The published bundle is incomplete')
+  }
+
+  const ids = new Map<string, string>()
+  for (const dependency of dependencies) {
+    const declaredEntry = declared.find(
+      (entry) => entry.id === dependency.entry.id && entry.path === dependency.entry.path,
+    )
+    if (!declaredEntry) {
+      throw new MarketplaceError('invalid', 'A bundled workflow is not listed in meta.json')
+    }
+    ids.set(dependency.entry.id, bundleDependencyId(card.meta.slug, dependency.entry.path))
+  }
+
+  const parent = asWorkflow(published)
+  if (!parent) throw new MarketplaceError('invalid', 'The published workflow is not readable')
+  const plan = planApply(card, rewriteWorkflowCalls(parent, ids), existing, now)
+  if (plan.status === 'up-to-date') return { ...plan, dependencies: [] }
+
+  const installedById = new Map(library.map((workflow) => [workflow.id, workflow]))
+  const records: Workflow[] = dependencies.map((dependency): Workflow => {
+    const raw = asWorkflow(dependency.published)
+    if (!raw) {
+      throw new MarketplaceError(
+        'invalid',
+        `The bundled workflow "${dependency.entry.name}" is not readable`,
+      )
+    }
+    const incoming = rewriteWorkflowCalls(migrateWorkflow(raw), ids)
+    const id = ids.get(dependency.entry.id)!
+    const current = installedById.get(id)
+    const trigger = incoming.trigger ? { ...incoming.trigger, enabled: false } : undefined
+    if (current) {
+      return {
+        ...current,
+        name: incoming.name,
+        ...(incoming.description !== undefined
+          ? { description: incoming.description }
+          : { description: undefined }),
+        drawflow: incoming.drawflow,
+        trigger,
+        settings: incoming.settings,
+        updatedAt: now,
+        ...commitWorkflowRevision(current, { source: 'marketplace-update', at: now }),
+      }
+    }
+    return {
+      id,
+      name: incoming.name,
+      ...(incoming.description !== undefined ? { description: incoming.description } : {}),
+      createdAt: now,
+      updatedAt: now,
+      drawflow: incoming.drawflow,
+      ...(trigger ? { trigger } : {}),
+      settings: incoming.settings,
+      revision: 1,
+      revisionHistory: [{ revision: 1, updatedAt: now, source: 'marketplace' }],
+    }
+  })
+
+  return { ...plan, dependencies: records }
 }

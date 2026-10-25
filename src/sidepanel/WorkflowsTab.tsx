@@ -561,16 +561,20 @@ export default function WorkflowsTab() {
 
   /** Replaces the executable parts of an installed workflow after confirmation. */
   const updateFromMarketplace = async (wf: Workflow, card: MarketplaceCard): Promise<void> => {
+    const bundled = (card.meta.dependencies ?? []).map((entry) => entry.name)
     const confirmed = await confirmDialog({
       title: t.marketplaceUpdateTitle,
-      message: t.marketplaceUpdateMessage({ title: card.meta.title }),
+      message: [
+        t.marketplaceUpdateMessage({ title: card.meta.title }),
+        ...(bundled.length ? [t.marketplaceUpdateBundled({ names: bundled.join(', ') })] : []),
+      ].join('\n\n'),
       confirmText: t.marketplaceUpdate,
       cancelText: t.cancel,
     })
     if (!confirmed) return
     setBusy(true)
     try {
-      const plan = await installFromCard(card, wf)
+      const plan = await installFromCard(card, wf, workflows)
       if (plan.status === 'update') {
         setBanner({
           kind: 'ok',
@@ -1666,6 +1670,7 @@ export default function WorkflowsTab() {
 
       {publishTarget && (
         <PublishWorkflowDialog
+          library={workflows}
           workflow={publishTarget}
           onClose={() => setPublishTarget(null)}
           onPublished={(result) => {

@@ -65,7 +65,18 @@ export async function fetchPublishedWorkflow(
   slug: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<unknown | null> {
-  const text = await fetchRawText(workflowPath(slug), fetchImpl)
+  return fetchWorkflowAt(workflowPath(slug), fetchImpl)
+}
+
+/**
+ * Decoded workflow at any repo-relative path. Bundles keep their called
+ * workflows under `workflows/<slug>/deps/*.json` and `meta.json` names them.
+ */
+export async function fetchWorkflowAt(
+  path: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<unknown | null> {
+  const text = await fetchRawText(path, fetchImpl)
   if (!text) return null
   try {
     return JSON.parse(text)

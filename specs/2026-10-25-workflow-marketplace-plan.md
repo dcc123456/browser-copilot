@@ -150,6 +150,28 @@
 
 **验收**：发布弹窗可选 15 个细分类之一或自填分类；自填分类随 `meta.json` 提交并在广场筛选里出现（不翻译）；空名称无法发布；重新编辑自定义分类的工作流时，下拉为「自定义…」且文本框带回原值；旧数据（未知分类）仍显示为「其他」。
 
+### Step 12 — 被调用的工作流随发布打包（2026-10-26 追加）
+
+| 文件                                                                                                                                | 动作 | 内容                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------- |
+| `src/lib/workflow/node-params.ts`                                                                                                   | 新增 | `nodeBlockId` / `nodeParams`；引擎与依赖扫描共用一份读取逻辑                                      |
+| `src/background/workflow-engine/engine.ts`                                                                                          | 修改 | 删除本地 `blockIdOf` / `paramsOf`，改为 import 共享实现                                           |
+| `src/lib/marketplace/types.ts`                                                                                                      | 修改 | `MAX_BUNDLE_WORKFLOWS = 20`；`MarketplaceDependency`；`MarketplaceMeta.dependencies?`             |
+| `src/lib/marketplace/meta.ts`                                                                                                       | 修改 | `dependencyPath` / `dependencyFile`、`buildMeta` 规范化与校验、`parseMeta` 严格解析               |
+| `src/lib/marketplace/dependencies.ts`                                                                                               | 新增 | `workflowCalls`、`collectDependencies`（后序、去重、环剪枝、缺件）、`rewriteWorkflowCalls`        |
+| `src/lib/marketplace/sanitize.ts`                                                                                                   | 修改 | `PublishWarning.workflow` 标注警告来自哪个被打包的工作流                                          |
+| `src/lib/marketplace/publish.ts`                                                                                                    | 修改 | `PreparePublishOptions.library`；阻断缺件/超量；dep 文件与 `meta.dependencies`；PR 正文 bundle 行 |
+| `src/lib/marketplace/apply.ts`                                                                                                      | 修改 | `publishedDependencies` 校验、确定性本地 id、调用重写、就地替换、`up-to-date` 不装东西            |
+| `src/lib/marketplace/raw.ts`                                                                                                        | 修改 | `fetchWorkflowAt(path)`；`fetchPublishedWorkflow` 复用之                                          |
+| `src/sidepanel/marketplace-install.ts`                                                                                              | 修改 | 先取父工作流与全部 dep 文件，再统一 `planApplyBundle`，依赖先保存、父工作流最后保存               |
+| `src/lib/i18n.ts`                                                                                                                   | 修改 | 9 个新 key（发布弹窗 bundle 段、缺件/超量、按工作流标注的警告、卡片角标、信任/更新确认）          |
+| `src/sidepanel/PublishWorkflowDialog.tsx`                                                                                           | 修改 | `library` 属性；调用列表、缺件/超量错误行；警告文案带工作流名                                     |
+| `src/sidepanel/WorkflowsTab.tsx` / `MarketplaceTab.tsx`                                                                             | 修改 | 传入 `library`；信任/更新确认列出被打包的工作流；卡片显示「含 N 个」角标                          |
+| `tests/marketplace-dependencies.spec.ts`                                                                                            | 新增 | 调用读取、传递顺序、共享、环、自调用、动态目标、同名文件、重写不改原对象                          |
+| `tests/marketplace-publish.spec.ts`、`marketplace-apply.spec.ts`、`marketplace-meta.spec.ts`、`marketplace-publish-dialog.spec.tsx` | 修改 | 打包提交与 meta、缺件阻断、警告归属、PR 正文、id 映射与就地替换、整包校验、弹窗列表与阻断         |
+
+**验收**：发布一个调用其它工作流的工作流时，弹窗列出将随行的工作流；合并后仓库中出现 `workflows/<slug>/deps/*.json` 且 `meta.json` 带 `dependencies`；另一个本地库应用该卡片后，父工作流的 `execute-workflow` 步骤指向 `mkt-<slug>-<file>`，被调用工作流以同一 id 落库且不自动运行；再次更新替换同一份副本；缺少被调用工作流时无法发布。
+
 ## 2. 测试与门禁
 
 - 每步：`pnpm typecheck && pnpm test && pnpm lint && pnpm format:check`。

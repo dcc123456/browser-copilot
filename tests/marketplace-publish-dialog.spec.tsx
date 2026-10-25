@@ -27,16 +27,28 @@ function makeWorkflow(): Workflow {
   }
 }
 
+function callNode(id: string, workflowId: string): Workflow['drawflow']['nodes'][number] {
+  return {
+    id,
+    label: 'Execute workflow',
+    position: { x: 0, y: 0 },
+    data: { blockId: 'execute-workflow', values: { workflowId } },
+  }
+}
+
 function render(
   initialAuth: { token: string; login: string } | null,
   locale: Locale = 'en',
+  options: { workflow?: Workflow; library?: Workflow[] } = {},
 ): string {
+  const workflow = options.workflow ?? makeWorkflow()
   return renderToStaticMarkup(
     createElement(
       I18nProvider,
       { value: { locale, t: messagesFor(locale) } },
       createElement(PublishWorkflowDialog, {
-        workflow: makeWorkflow(),
+        workflow,
+        library: options.library ?? [workflow],
         onClose: () => {},
         initialAuth,
       }),
@@ -73,6 +85,34 @@ describe('publish dialog', () => {
     const markup = render(null, 'zh-CN')
     expect(markup).toContain('GitHub 连接')
     expect(markup).toContain('去 GitHub 创建令牌')
+  })
+
+  it('names the workflows that will be published alongside this one', () => {
+    const workflow = makeWorkflow()
+    workflow.drawflow.nodes = [callNode('n1', 'local-2')]
+    const dependency = { ...makeWorkflow(), id: 'local-2', name: 'Export orders' }
+
+    const markup = render({ token: `ghp_${'a'.repeat(30)}`, login: 'octocat' }, 'en', {
+      workflow,
+      library: [workflow, dependency],
+    })
+
+    expect(markup).toContain('Called workflows')
+    expect(markup).toContain('Export orders')
+    expect(markup).toContain('This workflow calls 1 other workflow')
+  })
+
+  it('blocks publishing when a called workflow no longer exists locally', () => {
+    const workflow = makeWorkflow()
+    workflow.drawflow.nodes = [callNode('n1', 'deleted-1')]
+
+    const markup = render({ token: `ghp_${'a'.repeat(30)}`, login: 'octocat' }, 'en', {
+      workflow,
+      library: [workflow],
+    })
+
+    expect(markup).toContain('cannot be bundled')
+    expect(markup).toContain('deleted-1')
   })
 })
 
@@ -170,6 +210,7 @@ describe('prefilling a published workflow', () => {
           { value: { locale: 'en', t: messagesFor('en') } },
           createElement(PublishWorkflowDialog, {
             workflow,
+            library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
           }),
@@ -239,6 +280,7 @@ describe('prefilling a published workflow', () => {
           { value: { locale: 'en', t: messagesFor('en') } },
           createElement(PublishWorkflowDialog, {
             workflow,
+            library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
           }),
@@ -304,6 +346,7 @@ describe('prefilling a published workflow', () => {
           { value: { locale: 'en', t: messagesFor('en') } },
           createElement(PublishWorkflowDialog, {
             workflow,
+            library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
           }),
@@ -332,6 +375,7 @@ describe('prefilling a published workflow', () => {
           { value: { locale: 'en', t: messagesFor('en') } },
           createElement(PublishWorkflowDialog, {
             workflow: makeWorkflow(),
+            library: [makeWorkflow()],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
           }),

@@ -101,6 +101,56 @@ function makeMetaInput() {
   }
 }
 
+describe('marketplace meta — bundled dependencies', () => {
+  const dependency = {
+    id: 'child-1',
+    name: 'Collect numbers',
+    path: 'deps/collect-numbers.json',
+  }
+
+  it('round-trips the called workflows', () => {
+    const meta = buildMeta({ ...makeMetaInput(), dependencies: [dependency] })
+    expect(meta.dependencies).toEqual([dependency])
+    expect(parseMeta(JSON.parse(JSON.stringify(meta)))).toEqual(meta)
+  })
+
+  it('omits the field for a listing that calls nothing', () => {
+    expect(makeMeta().dependencies).toBeUndefined()
+    expect(parseMeta({ ...makeMeta(), dependencies: [] })?.dependencies).toBeUndefined()
+  })
+
+  it('falls back to the id when a dependency name is unusable', () => {
+    const parsed = parseMeta({
+      ...makeMeta(),
+      dependencies: [{ ...dependency, name: 7 }],
+    })
+    expect(parsed?.dependencies).toEqual([{ ...dependency, name: 'child-1' }])
+  })
+
+  it('rejects a bundle list apply could not resolve', () => {
+    expect(parseMeta({ ...makeMeta(), dependencies: 'nope' })).toBeNull()
+    expect(parseMeta({ ...makeMeta(), dependencies: [{ ...dependency, id: '  ' }] })).toBeNull()
+    expect(
+      parseMeta({ ...makeMeta(), dependencies: [{ ...dependency, path: 'deps/../x.json' }] }),
+    ).toBeNull()
+    expect(
+      parseMeta({
+        ...makeMeta(),
+        dependencies: [dependency, { ...dependency, path: 'deps/other.json' }],
+      }),
+    ).toBeNull()
+  })
+
+  it('refuses to build a record with a path apply cannot read', () => {
+    expect(() =>
+      buildMeta({ ...makeMetaInput(), dependencies: [{ ...dependency, path: 'collect.json' }] }),
+    ).toThrow()
+    expect(() =>
+      buildMeta({ ...makeMetaInput(), dependencies: [{ ...dependency, name: ' ' }] }),
+    ).toThrow()
+  })
+})
+
 describe('marketplace ref', () => {
   const ref: WorkflowMarketplaceRef = {
     repo: 'dcc123456/BC-workflow',

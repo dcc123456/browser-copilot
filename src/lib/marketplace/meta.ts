@@ -13,18 +13,22 @@ import type { WorkflowMarketplaceRef } from '../workflow/types'
 import { isValidSlug } from './slug'
 import {
   MARKETPLACE_SCHEMA_VERSION,
+  MAX_BUNDLE_WORKFLOWS,
   MAX_DESCRIPTION_CHARS,
   MAX_TAGS,
   MAX_TAG_CHARS,
   MAX_TITLE_CHARS,
   MarketplaceError,
+  type MarketplaceDependency,
   type MarketplaceMeta,
 } from './types'
 import { normalizeCategory } from './categories'
 
 const HASH_RE = /^[0-9a-f]{64}$/
 const ASSET_RE = /^assets\/[a-z0-9][a-z0-9._-]*$/
+const DEPENDENCY_PATH_RE = /^deps\/([a-z0-9][a-z0-9-]*)\.json$/
 const AUTHOR_MAX = 64
+const DEPENDENCY_ID_MAX = 200
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -58,6 +62,17 @@ export function assetRepoPath(slug: string, asset: string): string {
   return `${workflowDir(slug)}/${asset}`
 }
 
+/** Workflow-relative file for one bundled dependency. */
+export function dependencyPath(file: string): string {
+  return `deps/${file}.json`
+}
+
+/** The file stem encoded in a bundled dependency path, or null when invalid. */
+export function dependencyFile(path: string): string | null {
+  const match = DEPENDENCY_PATH_RE.exec(path)
+  return match?.[1] ?? null
+}
+
 /** Lowercases, trims, de-duplicates and caps tags. */
 export function normalizeTags(tags: readonly string[]): string[] {
   const seen = new Set<string>()
@@ -80,12 +95,45 @@ export interface BuildMetaInput {
   description: string
   category: string
   tags?: readonly string[]
+  dependencies?: readonly MarketplaceDependency[]
   author: string
   version: number
   hash: string
   imageCount?: number
   videoUrl?: string
   now?: Date
+}
+
+/** Validates the bundle list, which apply resolves calls against. */
+function normalizeDependencies(items: readonly MarketplaceDependency[]): MarketplaceDependency[] {
+  if (items.length > MAX_BUNDLE_WORKFLOWS) {
+    throw new MarketplaceError(
+      'invalid',
+      `A listing can carry at most ${MAX_BUNDLE_WORKFLOWS} called workflows`,
+    )
+  }
+  const ids = new Set<string>()
+  const paths = new Set<string>()
+  return items.map((item) => {
+    const id = item.id.trim()
+    if (!id || id.length > DEPENDENCY_ID_MAX) {
+      throw new MarketplaceError('invalid', 'Called workflow id is empty or too long')
+    }
+    const path = item.path
+    if (!dependencyFile(path)) {
+      throw new MarketplaceError('invalid', `Invalid called workflow path: ${path}`)
+    }
+    const name = item.name.trim()
+    if (!name || name.length > MAX_TITLE_CHARS) {
+      throw new MarketplaceError('invalid', 'Called workflow name is empty or too long')
+    }
+    if (ids.has(id) || paths.has(path)) {
+      throw new MarketplaceError('invalid', 'A called workflow is listed twice')
+    }
+    ids.add(id)
+    paths.add(path)
+    return { id, name, path }
+  })
 }
 
 /** Builds a validated `meta.json`; throws {@link MarketplaceError} on bad input. */
@@ -117,6 +165,7 @@ export function buildMeta(input: BuildMetaInput): MarketplaceMeta {
     throw new MarketplaceError('invalid', 'A workflow can publish between 0 and 3 images')
   }
   const images = Array.from({ length: imageCount }, (_, index) => assetPath(index))
+  const dependencies = normalizeDependencies(input.dependencies ?? [])
   const videoUrl = input.videoUrl?.trim() || undefined
   if (videoUrl && !/^https?:\/\//i.test(videoUrl)) {
     throw new MarketplaceError('invalid', 'Video link must start with http:// or https://')
@@ -133,10 +182,40 @@ export function buildMeta(input: BuildMetaInput): MarketplaceMeta {
     version: input.version,
     hash: input.hash,
     images,
+    ...(dependencies.length ? { dependencies } : {}),
     ...(videoUrl ? { videoUrl } : {}),
     createdAt: stamp,
     updatedAt: stamp,
   }
+}
+
+/**
+ * Reads the bundle list. Unlike a mistyped category, a broken entry cannot be
+ * tolerated: apply would install the parent with calls that resolve to nothing.
+ * A missing `name` is only presentation, so it falls back to the id.
+ */
+function parseDependencies(raw: unknown): MarketplaceDependency[] | null {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw) || raw.length > MAX_BUNDLE_WORKFLOWS) return null
+  const ids = new Set<string>()
+  const paths = new Set<string>()
+  const dependencies: MarketplaceDependency[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) return null
+    const rawId = item['id']
+    if (typeof rawId !== 'string' || !rawId.trim() || rawId.length > DEPENDENCY_ID_MAX) return null
+    const id = rawId.trim()
+    const path = item['path']
+    if (typeof path !== 'string' || !dependencyFile(path)) return null
+    const rawName = item['name']
+    const name =
+      typeof rawName === 'string' && rawName.trim() ? rawName.trim().slice(0, MAX_TITLE_CHARS) : id
+    if (ids.has(id) || paths.has(path)) return null
+    ids.add(id)
+    paths.add(path)
+    dependencies.push({ id, name, path })
+  }
+  return dependencies
 }
 
 /**
@@ -181,6 +260,8 @@ export function parseMeta(value: unknown): MarketplaceMeta | null {
 
   const createdAt = isoOrEmpty(value['createdAt'])
   const updatedAt = isoOrEmpty(value['updatedAt']) || createdAt
+  const dependencies = parseDependencies(value['dependencies'])
+  if (dependencies === null) return null
 
   return {
     schema: MARKETPLACE_SCHEMA_VERSION,
@@ -193,6 +274,7 @@ export function parseMeta(value: unknown): MarketplaceMeta | null {
     version,
     hash,
     images,
+    ...(dependencies.length ? { dependencies } : {}),
     ...(videoUrl ? { videoUrl } : {}),
     createdAt,
     updatedAt,

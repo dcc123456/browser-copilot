@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { findInstalled, planApply } from '../src/lib/marketplace/apply'
+import {
+  bundleDependencyId,
+  findInstalled,
+  planApply,
+  planApplyBundle,
+} from '../src/lib/marketplace/apply'
 import { buildMeta } from '../src/lib/marketplace/meta'
-import type { MarketplaceCard } from '../src/lib/marketplace/types'
+import type { MarketplaceCard, MarketplaceDependency } from '../src/lib/marketplace/types'
 import type { Workflow } from '../src/lib/workflow/types'
 
 const NOW = Date.parse('2026-10-25T09:00:00.000Z')
@@ -135,5 +140,189 @@ describe('planApply', () => {
     const local = existing(1)
     expect(findInstalled([local], 'scrape-orders-abcdef')).toBe(local)
     expect(findInstalled([local], 'other')).toBeUndefined()
+  })
+})
+
+function dependency(id: string, name: string): MarketplaceDependency {
+  return { id, name, path: `deps/${name.toLowerCase().replace(/\s+/g, '-')}.json` }
+}
+
+function bundleCard(
+  version = 2,
+  dependencies: MarketplaceDependency[] = [dependency('child-1', 'Collect numbers')],
+): MarketplaceCard {
+  return {
+    meta: buildMeta({
+      slug: 'scrape-orders-abcdef',
+      title: 'Scrape orders',
+      description: 'Open the orders page.',
+      category: 'ecommerce',
+      tags: ['orders'],
+      dependencies,
+      author: 'octocat',
+      version,
+      hash: 'b'.repeat(64),
+      now: new Date(NOW),
+    }),
+    prNumber: 10,
+    likes: 3,
+    comments: 2,
+  }
+}
+
+/** A published body whose only steps call other workflows by the given ids. */
+function callGraph(name: string, targets: string[]): unknown {
+  return {
+    id: 'published-id',
+    name,
+    settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
+    drawflow: {
+      nodes: targets.map((target, index) => ({
+        id: `call-${index}`,
+        label: 'Execute workflow',
+        position: { x: 0, y: 0 },
+        data: { blockId: 'execute-workflow', values: { workflowId: target } },
+      })),
+      edges: [],
+    },
+  }
+}
+
+describe('planApplyBundle', () => {
+  it('installs dependencies under deterministic ids and rewrites the calls', () => {
+    const plan = planApplyBundle(
+      bundleCard(),
+      callGraph('Scrape orders', ['child-1']),
+      [
+        {
+          entry: dependency('child-1', 'Collect numbers'),
+          published: callGraph('Collect numbers', []),
+        },
+      ],
+      [],
+      undefined,
+      NOW,
+    )
+
+    expect(plan.status).toBe('new')
+    expect(plan.dependencies).toHaveLength(1)
+    const record = plan.dependencies[0]!
+    expect(record.id).toBe('mkt-scrape-orders-abcdef-collect-numbers')
+    expect(record.id).toBe(bundleDependencyId('scrape-orders-abcdef', 'deps/collect-numbers.json'))
+    expect(record.name).toBe('Collect numbers')
+    expect(record.createdAt).toBe(NOW)
+    expect(record.marketplace).toBeUndefined()
+    expect(plan.workflow.drawflow.nodes[0]!.data).toMatchObject({ workflowId: record.id })
+  })
+
+  it('rewrites calls inside a bundled workflow too', () => {
+    const plan = planApplyBundle(
+      bundleCard(2, [dependency('mid-1', 'Export orders'), dependency('leaf-1', 'Read rows')]),
+      callGraph('Scrape orders', ['mid-1']),
+      [
+        {
+          entry: dependency('mid-1', 'Export orders'),
+          published: callGraph('Export orders', ['leaf-1']),
+        },
+        { entry: dependency('leaf-1', 'Read rows'), published: callGraph('Read rows', []) },
+      ],
+      [],
+      undefined,
+      NOW,
+    )
+
+    expect(plan.workflow.drawflow.nodes[0]!.data).toMatchObject({
+      workflowId: 'mkt-scrape-orders-abcdef-export-orders',
+    })
+    expect(plan.dependencies[0]!.drawflow.nodes[0]!.data).toMatchObject({
+      workflowId: 'mkt-scrape-orders-abcdef-read-rows',
+    })
+  })
+
+  it('replaces a previously installed dependency in place', () => {
+    const previous: Workflow = {
+      id: 'mkt-scrape-orders-abcdef-collect-numbers',
+      name: 'Old copy',
+      createdAt: 111,
+      updatedAt: 222,
+      revision: 3,
+      revisionHistory: [{ revision: 3, updatedAt: 222, source: 'marketplace' }],
+      trigger: { type: 'interval', schedule: '15', enabled: true },
+      settings: { saveLog: true, debugMode: true, notification: true, reuseLastState: true },
+      drawflow: { nodes: [], edges: [] },
+    }
+
+    const plan = planApplyBundle(
+      bundleCard(),
+      callGraph('Scrape orders', ['child-1']),
+      [
+        {
+          entry: dependency('child-1', 'Collect numbers'),
+          published: callGraph('Collect numbers', []),
+        },
+      ],
+      [previous],
+      undefined,
+      NOW,
+    )
+
+    const record = plan.dependencies[0]!
+    expect(record.id).toBe(previous.id)
+    expect(record.createdAt).toBe(111)
+    expect(record.name).toBe('Collect numbers')
+    expect(record.revision).toBe(4)
+    expect(record.revisionHistory?.at(-1)).toMatchObject({
+      revision: 4,
+      source: 'marketplace-update',
+    })
+    // The local copy's schedule must not survive an update.
+    expect(record.trigger).toBeUndefined()
+  })
+
+  it('installs nothing extra when the parent is already up to date', () => {
+    const local = existing(2)
+    const plan = planApplyBundle(
+      bundleCard(2),
+      callGraph('Scrape orders', ['child-1']),
+      [
+        {
+          entry: dependency('child-1', 'Collect numbers'),
+          published: callGraph('Collect numbers', []),
+        },
+      ],
+      [local],
+      local,
+      NOW,
+    )
+
+    expect(plan.status).toBe('up-to-date')
+    expect(plan.dependencies).toEqual([])
+  })
+
+  it('rejects a bundle that does not match meta.json', () => {
+    const parent = callGraph('Scrape orders', ['child-1'])
+    expect(() => planApplyBundle(bundleCard(), parent, [], [], undefined, NOW)).toThrow(
+      'The published bundle is incomplete',
+    )
+    expect(() =>
+      planApplyBundle(
+        bundleCard(),
+        parent,
+        [{ entry: dependency('other-1', 'Other'), published: callGraph('Other', []) }],
+        [],
+        undefined,
+        NOW,
+      ),
+    ).toThrow('A bundled workflow is not listed in meta.json')
+    expect(() =>
+      planApplyBundle(
+        bundleCard(),
+        parent,
+        [{ entry: dependency('child-1', 'Collect numbers'), published: { id: 'no-name' } }],
+        [],
+        undefined,
+        NOW,
+      ),
+    ).toThrow(/Collect numbers" is not readable/)
   })
 })

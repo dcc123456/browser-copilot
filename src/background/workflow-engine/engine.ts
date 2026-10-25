@@ -10,6 +10,7 @@
  */
 
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
+import { nodeBlockId as blockIdOf, nodeParams as paramsOf } from '../../lib/workflow/node-params'
 import { getWorkflow } from '../../lib/workflow/storage'
 import { getByPath, interpolateParams, UNRESOLVED_INTERP_KEY } from '../../lib/workflow/interpolate'
 import {
@@ -483,33 +484,6 @@ async function awaitWhileAbortable<T>(value: T | Promise<T>, signal: AbortSignal
       },
     )
   })
-}
-
-/**
- * Resolve the canonical block id for a node. Newer workflows store it under
- * `data.blockId`; legacy nodes only have `label` (which was once the English
- * block id and later became the localized display name). Fall back in that
- * order so old saved graphs still dispatch, and so a Chinese display label
- * never reaches the executor registry.
- */
-function blockIdOf(node: WorkflowNode): string {
-  const fromData = node.data?.['blockId']
-  if (typeof fromData === 'string' && fromData) return fromData
-  return node.label
-}
-
-/**
- * Resolve the parameter bag for a block. The editor persists user-entered
- * values under `data.values`; some legacy / programmatically-built graphs
- * store params directly on `data`. We prefer `values` when present so
- * executors can keep reading `data['url']` etc. without knowing the layout.
- */
-function paramsOf(node: WorkflowNode): Record<string, unknown> {
-  const values = node.data?.['values']
-  if (values && typeof values === 'object' && !Array.isArray(values)) {
-    return values as Record<string, unknown>
-  }
-  return node.data ?? {}
 }
 
 /**

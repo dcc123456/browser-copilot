@@ -16,11 +16,14 @@
  * @module lib/marketplace/publish
  */
 
+import type { Workflow } from '../workflow/types'
+import { collectDependencies } from './dependencies'
 import type { GitHubPull, GitHubRef, GitHubRepo, GitHubTree } from './github-client'
 import {
   assetPath,
   assetRepoPath,
   buildMeta,
+  dependencyFile,
   metaPath,
   workflowDir,
   workflowHash,
@@ -33,6 +36,7 @@ import {
   MARKETPLACE_OWNER,
   MARKETPLACE_PR_BRANCH_PREFIX,
   MARKETPLACE_REPO,
+  MAX_BUNDLE_WORKFLOWS,
   MAX_PUBLISH_IMAGE_BYTES,
   MAX_PUBLISH_IMAGES,
   MarketplaceError,
@@ -65,6 +69,16 @@ export interface PreparedFile {
   contentBase64: string
 }
 
+/** One called workflow committed next to the listing it belongs to. */
+export interface PreparedDependency {
+  /** Id the publishing graph references it by. */
+  id: string
+  name: string
+  /** Workflow-relative file, e.g. `deps/export-orders.json`. */
+  path: string
+  json: string
+}
+
 export interface PreparedPublish {
   publishable: PublishableWorkflow
   json: string
@@ -73,6 +87,8 @@ export interface PreparedPublish {
   version: number
   meta: MarketplaceMeta
   warnings: PublishWarning[]
+  /** Called workflows, in the order they are listed in `meta.json`. */
+  dependencies: PreparedDependency[]
   files: PreparedFile[]
 }
 
@@ -82,6 +98,11 @@ export interface PreparePublishOptions {
   now?: Date
   /** Looks up an already published workflow by slug, for version bumps. */
   findExistingMeta?: (slug: string) => Promise<MarketplaceMeta | null>
+  /**
+   * The publisher's whole library, used to resolve `execute-workflow` calls.
+   * Omitted means no other workflow is known and every call is unsatisfied.
+   */
+  library?: readonly Workflow[]
 }
 
 export interface PushPublishDeps {
@@ -177,10 +198,40 @@ export async function preparePublish(
   }
 
   const now = options.now ?? new Date()
+  const bundle = collectDependencies(input.workflow, options.library ?? [])
+  if (bundle.missing.length > 0) {
+    const refs = bundle.missing.map((call) => call.workflowId || call.nodeLabel).join(', ')
+    throw new MarketplaceError('invalid', `Called workflows are missing: ${refs}`)
+  }
+  if (bundle.dependencies.length > MAX_BUNDLE_WORKFLOWS) {
+    throw new MarketplaceError(
+      'invalid',
+      `A listing can carry at most ${MAX_BUNDLE_WORKFLOWS} called workflows`,
+    )
+  }
+
   const localRef = input.workflow.marketplace
   const provisionalSlug =
     localRef && localRef.author === author ? localRef.slug : buildSlug(input.workflow.name, '')
-  const { workflow: publishable, warnings } = toPublishableWorkflow(input.workflow, provisionalSlug)
+  const sanitized = toPublishableWorkflow(input.workflow, provisionalSlug)
+  const publishable = sanitized.workflow
+  const warnings: PublishWarning[] = [...sanitized.warnings]
+  const dependencies: PreparedDependency[] = bundle.dependencies.map((dependency) => {
+    const file = dependencyFile(dependency.path)
+    if (!file) {
+      throw new MarketplaceError('invalid', `Invalid called workflow path: ${dependency.path}`)
+    }
+    const prepared = toPublishableWorkflow(dependency.workflow, file)
+    for (const warning of prepared.warnings) {
+      warnings.push({ ...warning, workflow: dependency.workflow.name })
+    }
+    return {
+      id: dependency.workflow.id,
+      name: prepared.workflow.name,
+      path: dependency.path,
+      json: JSON.stringify(prepared.workflow, null, 2),
+    }
+  })
   const json = JSON.stringify(publishable, null, 2)
   const hash = await workflowHash(json)
 
@@ -214,6 +265,7 @@ export async function preparePublish(
     description: input.description,
     category: input.category,
     tags: input.tags,
+    dependencies: dependencies.map(({ id, name, path }) => ({ id, name, path })),
     author,
     version,
     hash: finalHash,
@@ -229,6 +281,12 @@ export async function preparePublish(
       contentBase64: textToBase64(`${JSON.stringify(meta, null, 2)}\n`),
     },
   ]
+  for (const dependency of dependencies) {
+    files.push({
+      path: assetRepoPath(slug, dependency.path),
+      contentBase64: textToBase64(dependency.json),
+    })
+  }
   for (let index = 0; index < input.images.length; index += 1) {
     files.push({
       path: assetRepoPath(slug, assetPath(index)),
@@ -244,6 +302,7 @@ export async function preparePublish(
     version,
     meta,
     warnings,
+    dependencies,
     files,
   }
 }
@@ -263,6 +322,9 @@ function pullBody(meta: MarketplaceMeta): string {
     `- tags: ${meta.tags.length ? meta.tags.map((tag) => `\`${tag}\``).join(', ') : '—'}`,
     `- version: ${meta.version}`,
   ]
+  if (meta.dependencies?.length) {
+    lines.push(`- bundle: ${meta.dependencies.map((dep) => `\`${dep.name}\``).join(', ')}`)
+  }
   if (meta.videoUrl) lines.push(`- video: ${meta.videoUrl}`)
   lines.push('', '<sub>Merging makes this workflow available to every Browser Copilot user.</sub>')
   return lines.join('\n')
@@ -359,12 +421,14 @@ export async function publishWorkflow(
   deps: PushPublishDeps & {
     author: string
     findExistingMeta?: (slug: string) => Promise<MarketplaceMeta | null>
+    library?: readonly Workflow[]
   },
 ): Promise<PublishResult> {
   const prepared = await preparePublish(input, {
     author: deps.author,
     now: deps.now,
     findExistingMeta: deps.findExistingMeta,
+    library: deps.library,
   })
   return pushPublish(prepared, deps)
 }

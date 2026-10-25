@@ -83,7 +83,14 @@ interface ClientCalls {
   putFile: Array<{ owner: string; repo: string; path: string; branch: string }>
   deleteFile: Array<{ owner: string; repo: string; path: string; sha: string; branch: string }>
   listTree: Array<{ owner: string; repo: string; branch: string }>
-  createPull: Array<{ owner: string; repo: string; title: string; head: string; base: string }>
+  createPull: Array<{
+    owner: string
+    repo: string
+    title: string
+    head: string
+    base: string
+    body: string
+  }>
 }
 
 function makeClient(options: ClientOptions = {}): {
@@ -151,7 +158,14 @@ function makeClient(options: ClientOptions = {}): {
       return { tree: options.tree ?? [], truncated: false }
     },
     async createPull(owner, repo, input): Promise<GitHubPull> {
-      calls.createPull.push({ owner, repo, title: input.title, head: input.head, base: input.base })
+      calls.createPull.push({
+        owner,
+        repo,
+        title: input.title,
+        head: input.head,
+        base: input.base,
+        body: input.body,
+      })
       return {
         number: 42,
         title: input.title,
@@ -167,6 +181,21 @@ function makeClient(options: ClientOptions = {}): {
 
 function decodeText(base64: string): string {
   return Buffer.from(base64, 'base64').toString('utf8')
+}
+
+/** A graph whose only steps call other workflows. */
+function callParent(...targets: string[]): Workflow {
+  return makeWorkflow({
+    drawflow: {
+      nodes: targets.map((target, index) => ({
+        id: `call-${index}`,
+        label: 'Execute workflow',
+        position: { x: 0, y: 0 },
+        data: { blockId: 'execute-workflow', values: { workflowId: target } },
+      })),
+      edges: [],
+    },
+  })
 }
 
 async function prepare(input: MarketplacePublishInput = makeInput()): Promise<PreparedPublish> {
@@ -280,6 +309,131 @@ describe('preparePublish', () => {
       prepare(makeInput({ images: [new Blob(['hi'], { type: 'text/plain' })] })),
     ).rejects.toMatchObject({ code: 'invalid' })
   })
+
+  it('commits called workflows next to the listing and records them in meta', async () => {
+    const child = makeWorkflow({ id: 'child-1', name: 'Collect numbers' })
+    const parent = callParent('child-1')
+
+    const prepared = await preparePublish(makeInput({ workflow: parent }), {
+      author: 'octocat',
+      now: NOW,
+      library: [parent, child],
+    })
+
+    expect(prepared.meta.dependencies).toEqual([
+      { id: 'child-1', name: 'Collect numbers', path: 'deps/collect-numbers.json' },
+    ])
+    expect(prepared.files.map((file) => file.path)).toEqual([
+      `workflows/${prepared.slug}/workflow.json`,
+      `workflows/${prepared.slug}/meta.json`,
+      `workflows/${prepared.slug}/deps/collect-numbers.json`,
+    ])
+
+    const parentJson = JSON.parse(decodeText(prepared.files[0]!.contentBase64)) as Workflow
+    expect(parentJson.drawflow.nodes[0]!.data).toEqual({
+      blockId: 'execute-workflow',
+      values: { workflowId: 'child-1' },
+    })
+
+    const dependencyJson = JSON.parse(decodeText(prepared.files[2]!.contentBase64)) as Workflow
+    expect(dependencyJson.id).toBe('collect-numbers')
+    expect(dependencyJson).not.toHaveProperty('plan')
+    expect(dependencyJson).not.toHaveProperty('folderId')
+    expect(dependencyJson.trigger?.enabled).toBe(false)
+  })
+
+  it('bundles transitive dependencies leaf first', async () => {
+    const leaf = makeWorkflow({ id: 'leaf-1', name: 'Read rows' })
+    const middle = makeWorkflow({
+      id: 'middle-1',
+      name: 'Export orders',
+      drawflow: {
+        nodes: [
+          {
+            id: 'call-0',
+            label: 'Execute workflow',
+            position: { x: 0, y: 0 },
+            data: { blockId: 'execute-workflow', values: { workflowId: 'leaf-1' } },
+          },
+        ],
+        edges: [],
+      },
+    })
+    const parent = callParent('middle-1')
+
+    const prepared = await preparePublish(makeInput({ workflow: parent }), {
+      author: 'octocat',
+      now: NOW,
+      library: [parent, middle, leaf],
+    })
+
+    expect(prepared.meta.dependencies?.map((dep) => dep.name)).toEqual([
+      'Read rows',
+      'Export orders',
+    ])
+  })
+
+  it('refuses to publish while a called workflow is missing', async () => {
+    await expect(prepare(makeInput({ workflow: callParent('ghost-1') }))).rejects.toThrow(
+      'Called workflows are missing: ghost-1',
+    )
+    await expect(
+      preparePublish(makeInput({ workflow: callParent('ghost-1') }), {
+        author: 'octocat',
+        now: NOW,
+        library: [callParent('ghost-1')],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid' })
+  })
+
+  it('caps how many workflows one listing can carry', async () => {
+    const children = Array.from({ length: 21 }, (_, index) =>
+      makeWorkflow({ id: `child-${index}`, name: `Child ${index}` }),
+    )
+    const parent = callParent(...children.map((child) => child.id))
+
+    await expect(
+      preparePublish(makeInput({ workflow: parent }), {
+        author: 'octocat',
+        now: NOW,
+        library: [parent, ...children],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid' })
+  })
+
+  it('attributes a bundled workflow warning to that workflow', async () => {
+    const child = makeWorkflow({
+      id: 'child-1',
+      name: 'Collect numbers',
+      drawflow: {
+        nodes: [
+          {
+            id: 'n1',
+            label: 'Sign in',
+            position: { x: 0, y: 0 },
+            data: { password: 'hunter2' },
+          },
+        ],
+        edges: [],
+      },
+    })
+    const parent = callParent('child-1')
+
+    const prepared = await preparePublish(makeInput({ workflow: parent }), {
+      author: 'octocat',
+      now: NOW,
+      library: [parent, child],
+    })
+
+    expect(prepared.warnings).toEqual([
+      {
+        kind: 'credential-literal',
+        nodeLabel: 'Sign in',
+        param: 'password',
+        workflow: 'Collect numbers',
+      },
+    ])
+  })
 })
 
 describe('pushPublish', () => {
@@ -308,7 +462,7 @@ describe('pushPublish', () => {
       `workflows/${prepared.slug}/meta.json`,
     ])
     expect(calls.putFile.every((call) => call.branch === branch)).toBe(true)
-    expect(calls.createPull).toEqual([
+    expect(calls.createPull).toMatchObject([
       {
         owner: MARKETPLACE_OWNER,
         repo: MARKETPLACE_REPO,
@@ -324,6 +478,24 @@ describe('pushPublish', () => {
       slug: prepared.slug,
       version: 1,
     })
+  })
+
+  it('lists the bundled workflows in the pull request body', async () => {
+    const child = makeWorkflow({ id: 'child-1', name: 'Collect numbers' })
+    const parent = callParent('child-1')
+    const prepared = await preparePublish(makeInput({ workflow: parent }), {
+      author: 'octocat',
+      now: NOW,
+      library: [parent, child],
+    })
+    const { client, calls } = makeClient()
+
+    await pushPublish(prepared, { client, auth: AUTH, now: NOW, sleep: async () => {} })
+
+    expect(calls.putFile.map((call) => call.path)).toContain(
+      `workflows/${prepared.slug}/deps/collect-numbers.json`,
+    )
+    expect(calls.createPull[0]!.body).toContain('- bundle: `Collect numbers`')
   })
 
   it('forks the repo and polls until GitHub exposes it', async () => {
@@ -417,7 +589,7 @@ describe('unpublishWorkflow', () => {
       '3'.repeat(40),
     ])
     expect(calls.deleteFile.every((call) => call.branch === branch)).toBe(true)
-    expect(calls.createPull).toEqual([
+    expect(calls.createPull).toMatchObject([
       {
         owner: MARKETPLACE_OWNER,
         repo: MARKETPLACE_REPO,
