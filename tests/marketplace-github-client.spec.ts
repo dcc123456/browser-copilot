@@ -34,6 +34,22 @@ describe('github client', () => {
     expect(headers['X-GitHub-Api-Version']).toBe('2022-11-28')
   })
 
+  it('calls the global fetch without binding the client as its receiver', async () => {
+    const original = globalThis.fetch
+    const receivers: unknown[] = []
+    globalThis.fetch = function (this: unknown) {
+      receivers.push(this)
+      return Promise.resolve(jsonResponse({ login: 'octocat' }))
+    } as typeof fetch
+    try {
+      await expect(new GitHubClient().getUser()).resolves.toEqual({ login: 'octocat' })
+      expect(receivers).toHaveLength(1)
+      expect(receivers[0]).not.toBeInstanceOf(GitHubClient)
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
   it('stays anonymous when no token is configured', async () => {
     const calls: Call[] = []
     const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

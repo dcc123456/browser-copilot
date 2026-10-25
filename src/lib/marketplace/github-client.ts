@@ -92,7 +92,9 @@ export class GitHubClient {
 
   constructor(options: GitHubClientOptions = {}) {
     this.token = options.token
-    this.fetchImpl = options.fetchImpl ?? fetch
+    // Storing a bare `fetch` and calling it as `this.fetchImpl(...)` would pass
+    // the client as its receiver; Chrome rejects that with "Illegal invocation".
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init))
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')
   }
 
