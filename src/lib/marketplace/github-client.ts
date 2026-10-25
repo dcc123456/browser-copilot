@@ -135,6 +135,14 @@ export class GitHubClient {
     return this.request<GitHubRepo>(`/repos/${owner}/${repo}`)
   }
 
+  /** Forks the marketplace repo into the authenticated user's account. */
+  createFork(owner: string, repo: string): Promise<unknown> {
+    return this.request(`/repos/${owner}/${repo}/forks`, {
+      method: 'POST',
+      body: { default_branch_only: true },
+    })
+  }
+
   getRef(owner: string, repo: string, branch: string): Promise<GitHubRef> {
     return this.request<GitHubRef>(
       `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`,

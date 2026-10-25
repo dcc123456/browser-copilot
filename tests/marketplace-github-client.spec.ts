@@ -106,6 +106,14 @@ describe('github client', () => {
     })
   })
 
+  it('forks with the default branch only', async () => {
+    const { client, calls } = makeClient(() => jsonResponse({ full_name: 'octocat/BC-workflow' }, 202))
+    await client.createFork('dcc123456', 'BC-workflow')
+    expect(calls[0]!.url).toBe('https://api.github.com/repos/dcc123456/BC-workflow/forks')
+    expect(calls[0]!.init!.method).toBe('POST')
+    expect(JSON.parse(String(calls[0]!.init!.body))).toEqual({ default_branch_only: true })
+  })
+
   it('opens a PR and treats a 204 delete as success', async () => {
     const { client, calls } = makeClient((url) =>
       url.includes('/pulls')
