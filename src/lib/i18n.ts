@@ -235,6 +235,71 @@ export interface Messages {
   workflowsImport: string
   workflowsImportInvalid: string
   workflowsImported: (params: { count: number }) => string
+  /** Per-workflow action: publish it to the shared marketplace as a pull request. */
+  workflowsPublish: string
+
+  // --- Workflow marketplace: publishing ----------------------------------
+  marketplacePublishTitle: string
+  marketplacePublishRepoHint: (params: { repo: string }) => string
+  /** Success banner after the pull request is opened. */
+  marketplacePublishBanner: (params: { number: number }) => string
+  marketplaceClose: string
+  marketplaceConnectTitle: string
+  marketplaceConnectLoading: string
+  marketplaceConnectHint: string
+  marketplaceConnectCreateToken: string
+  marketplaceConnectTokenPlaceholder: string
+  marketplaceConnectScopeHint: string
+  marketplaceConnectButton: string
+  marketplaceConnectConnected: (params: { login: string }) => string
+  marketplaceConnectDisconnect: string
+  marketplaceConnectInvalid: string
+  marketplaceFieldTitle: string
+  marketplaceFieldTitlePlaceholder: string
+  marketplaceFieldDescription: string
+  marketplaceFieldDescriptionPlaceholder: string
+  marketplaceFieldCategory: string
+  marketplaceFieldTags: string
+  marketplaceFieldTagsPlaceholder: string
+  marketplaceFieldTagsHint: string
+  marketplaceFieldVideo: string
+  marketplaceFieldVideoHint: string
+  marketplaceFieldImages: string
+  marketplaceFieldImagesHint: string
+  marketplaceImagesAdd: string
+  marketplaceImagesRemove: string
+  marketplaceImagesCompressing: string
+  marketplaceCategoryEcommerce: string
+  marketplaceCategoryContent: string
+  marketplaceCategoryData: string
+  marketplaceCategoryOffice: string
+  marketplaceCategorySocial: string
+  marketplaceCategoryOther: string
+  marketplacePublishSubmit: string
+  marketplacePublishPublishing: string
+  marketplacePublishAnyway: string
+  marketplacePublishWarningsTitle: string
+  marketplacePublishWarningsHint: string
+  marketplacePublishWarningCredential: (params: { node: string; param: string }) => string
+  marketplacePublishWarningEmbeddedData: (params: { node: string; param: string }) => string
+  marketplacePublishSuccess: (params: { slug: string; version: number }) => string
+  marketplacePublishOpenPr: string
+  marketplaceFormTitleRequired: string
+  marketplaceFormTitleTooLong: string
+  marketplaceFormDescriptionTooLong: string
+  marketplaceFormVideoInvalid: string
+  marketplaceFormTooManyImages: string
+  marketplaceFormImageTooLarge: string
+  marketplaceFormImageType: string
+  marketplaceErrorAuthRequired: string
+  marketplaceErrorUnauthorized: string
+  marketplaceErrorForbidden: string
+  marketplaceErrorRateLimited: string
+  marketplaceErrorNotFound: string
+  marketplaceErrorConflict: string
+  marketplaceErrorInvalid: string
+  marketplaceErrorForkPending: string
+  marketplaceErrorNetwork: string
   /** Select-all checkbox in the Workflows tab toolbar (batch management). */
   workflowsSelectAll: string
   /** Icon-only batch-delete button in the Workflows tab toolbar (needs a selection). */
@@ -1727,6 +1792,76 @@ const en: Messages = {
   workflowsImport: 'Import',
   workflowsImportInvalid: 'Invalid workflow file(s): at least one export could not be read.',
   workflowsImported: ({ count }) => `Imported ${count} workflow(s).`,
+  workflowsPublish: 'Publish',
+  marketplacePublishTitle: 'Publish workflow',
+  marketplacePublishRepoHint: ({ repo }) =>
+    `Opens a pull request against ${repo}. The maintainer merges it before it appears in the marketplace.`,
+  marketplacePublishBanner: ({ number }) => `Pull request #${number} opened.`,
+  marketplaceClose: 'Close',
+  marketplaceConnectTitle: 'GitHub connection',
+  marketplaceConnectLoading: 'Checking GitHub connection…',
+  marketplaceConnectHint:
+    'Publishing and posting comments need a GitHub personal access token. It is stored in this browser only and never leaves your device except in requests to GitHub.',
+  marketplaceConnectCreateToken: 'Create a token on GitHub',
+  marketplaceConnectTokenPlaceholder: 'ghp_…',
+  marketplaceConnectScopeHint:
+    'Use a classic token with the "public_repo" scope. You can revoke it at any time from GitHub settings.',
+  marketplaceConnectButton: 'Connect',
+  marketplaceConnectConnected: ({ login }) => `Connected as @${login}`,
+  marketplaceConnectDisconnect: 'Disconnect',
+  marketplaceConnectInvalid:
+    'GitHub rejected this token. Create a classic token with the "public_repo" scope and paste it again.',
+  marketplaceFieldTitle: 'Title',
+  marketplaceFieldTitlePlaceholder: 'What this workflow does',
+  marketplaceFieldDescription: 'Description',
+  marketplaceFieldDescriptionPlaceholder: 'What it automates and what it needs to run',
+  marketplaceFieldCategory: 'Category',
+  marketplaceFieldTags: 'Tags',
+  marketplaceFieldTagsPlaceholder: 'shop, orders, export',
+  marketplaceFieldTagsHint: 'Comma separated, up to 8 tags.',
+  marketplaceFieldVideo: 'Video link',
+  marketplaceFieldVideoHint: 'Optional. Videos are linked, not uploaded.',
+  marketplaceFieldImages: 'Screenshots',
+  marketplaceFieldImagesHint:
+    'Up to 3 images. They are converted to WebP (long edge 1600px, under 1 MB each) before publishing.',
+  marketplaceImagesAdd: 'Add images',
+  marketplaceImagesRemove: 'Remove image',
+  marketplaceImagesCompressing: 'Preparing images…',
+  marketplaceCategoryEcommerce: 'E-commerce',
+  marketplaceCategoryContent: 'Content',
+  marketplaceCategoryData: 'Data',
+  marketplaceCategoryOffice: 'Office',
+  marketplaceCategorySocial: 'Social',
+  marketplaceCategoryOther: 'Other',
+  marketplacePublishSubmit: 'Publish',
+  marketplacePublishPublishing: 'Publishing…',
+  marketplacePublishAnyway: 'Publish anyway',
+  marketplacePublishWarningsTitle: 'Review before publishing',
+  marketplacePublishWarningsHint:
+    'These values will be published as-is. Replacing them with {{variables}} removes the secret from the workflow.',
+  marketplacePublishWarningCredential: ({ node, param }) =>
+    `Node "${node}" contains a literal credential in "${param}".`,
+  marketplacePublishWarningEmbeddedData: ({ node, param }) =>
+    `Node "${node}" contains embedded data in "${param}"; it was removed.`,
+  marketplacePublishSuccess: ({ slug, version }) =>
+    `Pull request opened for ${slug} (version ${version}).`,
+  marketplacePublishOpenPr: 'View pull request',
+  marketplaceFormTitleRequired: 'A title is required.',
+  marketplaceFormTitleTooLong: 'The title is too long.',
+  marketplaceFormDescriptionTooLong: 'The description is too long.',
+  marketplaceFormVideoInvalid: 'The video link must start with http:// or https://.',
+  marketplaceFormTooManyImages: 'You can attach at most 3 images.',
+  marketplaceFormImageTooLarge: 'Each image must be 1 MB or smaller.',
+  marketplaceFormImageType: 'Only image files can be attached.',
+  marketplaceErrorAuthRequired: 'Connect GitHub first.',
+  marketplaceErrorUnauthorized: 'GitHub rejected the saved token. Reconnect GitHub.',
+  marketplaceErrorForbidden: 'GitHub refused the request. Check the token scopes (public_repo).',
+  marketplaceErrorRateLimited: 'GitHub rate limit reached. Try again later.',
+  marketplaceErrorNotFound: 'The marketplace repository could not be found.',
+  marketplaceErrorConflict: 'A conflicting change exists. Try again in a moment.',
+  marketplaceErrorInvalid: 'Some of the submitted data is invalid.',
+  marketplaceErrorForkPending: 'GitHub is still creating your fork. Try again shortly.',
+  marketplaceErrorNetwork: 'Could not reach GitHub. Check your connection and try again.',
   workflowsSelectAll: 'Select all',
   workflowsBatchDelete: 'Delete selected workflows',
   workflowsBatchDeleteConfirm: ({ count }) =>
@@ -3119,6 +3254,74 @@ const zhCN: Messages = {
   workflowsImport: '导入',
   workflowsImportInvalid: '无效的工作流文件：至少一个导出无法读取。',
   workflowsImported: ({ count }) => `已导入 ${count} 个工作流。`,
+  workflowsPublish: '发布',
+  marketplacePublishTitle: '发布工作流',
+  marketplacePublishRepoHint: ({ repo }) =>
+    `将向 ${repo} 提交一个 PR，由维护者合并后才会出现在工作流广场中。`,
+  marketplacePublishBanner: ({ number }) => `已创建 PR #${number}。`,
+  marketplaceClose: '关闭',
+  marketplaceConnectTitle: 'GitHub 连接',
+  marketplaceConnectLoading: '正在检查 GitHub 连接…',
+  marketplaceConnectHint:
+    '发布工作流和发表评论需要 GitHub 个人访问令牌。令牌只保存在本浏览器，除请求 GitHub 外不会离开你的设备。',
+  marketplaceConnectCreateToken: '去 GitHub 创建令牌',
+  marketplaceConnectTokenPlaceholder: 'ghp_…',
+  marketplaceConnectScopeHint:
+    '请使用带 "public_repo" 权限的 classic 令牌；你可以随时在 GitHub 设置中撤销它。',
+  marketplaceConnectButton: '连接',
+  marketplaceConnectConnected: ({ login }) => `已连接 @${login}`,
+  marketplaceConnectDisconnect: '断开连接',
+  marketplaceConnectInvalid:
+    'GitHub 拒绝了这个令牌。请创建带 "public_repo" 权限的 classic 令牌后重新粘贴。',
+  marketplaceFieldTitle: '标题',
+  marketplaceFieldTitlePlaceholder: '这个工作流做什么',
+  marketplaceFieldDescription: '描述',
+  marketplaceFieldDescriptionPlaceholder: '它自动化了什么，运行需要什么准备',
+  marketplaceFieldCategory: '分类',
+  marketplaceFieldTags: '标签',
+  marketplaceFieldTagsPlaceholder: '店铺, 订单, 导出',
+  marketplaceFieldTagsHint: '用逗号分隔，最多 8 个。',
+  marketplaceFieldVideo: '视频链接',
+  marketplaceFieldVideoHint: '可选。视频只保留链接，不上传文件。',
+  marketplaceFieldImages: '截图',
+  marketplaceFieldImagesHint: '最多 3 张。发布前会转换为 WebP（长边 1600px，单张不超过 1 MB）。',
+  marketplaceImagesAdd: '添加图片',
+  marketplaceImagesRemove: '移除图片',
+  marketplaceImagesCompressing: '正在处理图片…',
+  marketplaceCategoryEcommerce: '电商',
+  marketplaceCategoryContent: '内容',
+  marketplaceCategoryData: '数据',
+  marketplaceCategoryOffice: '办公',
+  marketplaceCategorySocial: '社交',
+  marketplaceCategoryOther: '其他',
+  marketplacePublishSubmit: '发布',
+  marketplacePublishPublishing: '正在发布…',
+  marketplacePublishAnyway: '仍然发布',
+  marketplacePublishWarningsTitle: '发布前请确认',
+  marketplacePublishWarningsHint:
+    '以下内容会按原样发布。改写成 {{变量}} 后可以避免把密钥写进工作流。',
+  marketplacePublishWarningCredential: ({ node, param }) =>
+    `节点「${node}」的「${param}」填写的是明文凭据。`,
+  marketplacePublishWarningEmbeddedData: ({ node, param }) =>
+    `节点「${node}」的「${param}」含有内嵌数据，已移除。`,
+  marketplacePublishSuccess: ({ slug, version }) => `已为 ${slug}（版本 ${version}）创建 PR。`,
+  marketplacePublishOpenPr: '查看 PR',
+  marketplaceFormTitleRequired: '标题不能为空。',
+  marketplaceFormTitleTooLong: '标题过长。',
+  marketplaceFormDescriptionTooLong: '描述过长。',
+  marketplaceFormVideoInvalid: '视频链接必须以 http:// 或 https:// 开头。',
+  marketplaceFormTooManyImages: '最多只能附加 3 张图片。',
+  marketplaceFormImageTooLarge: '单张图片不能超过 1 MB。',
+  marketplaceFormImageType: '只能附加图片文件。',
+  marketplaceErrorAuthRequired: '请先连接 GitHub。',
+  marketplaceErrorUnauthorized: 'GitHub 拒绝了已保存的令牌，请重新连接。',
+  marketplaceErrorForbidden: 'GitHub 拒绝了请求，请检查令牌权限（public_repo）。',
+  marketplaceErrorRateLimited: 'GitHub 接口限流，请稍后再试。',
+  marketplaceErrorNotFound: '找不到工作流仓库。',
+  marketplaceErrorConflict: '存在冲突的改动，请稍后重试。',
+  marketplaceErrorInvalid: '提交的内容不合法。',
+  marketplaceErrorForkPending: 'GitHub 还在创建你的 fork，请稍后再试。',
+  marketplaceErrorNetwork: '无法连接 GitHub，请检查网络后重试。',
   workflowsSelectAll: '全选',
   workflowsBatchDelete: '删除选中的工作流',
   workflowsBatchDeleteConfirm: ({ count }) => `确定删除选中的 ${count} 个工作流？此操作不可恢复。`,

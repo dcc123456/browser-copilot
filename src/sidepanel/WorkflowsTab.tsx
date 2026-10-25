@@ -46,6 +46,7 @@ import { useRowHighlight } from './hooks/useRowHighlight'
 import { confirmDialog } from '../ui/confirm'
 import { FailureCenterDialog } from './FailureCenter'
 import { WorkflowHealthView } from './WorkflowHealthView'
+import PublishWorkflowDialog from './PublishWorkflowDialog'
 import { summarizeWorkflowHealth } from '../lib/workflow/workflow-health'
 
 /**
@@ -502,6 +503,9 @@ export default function WorkflowsTab() {
     runId: string
     revision?: number
   } | null>(null)
+
+  /** Workflow whose publish dialog is open; null when closed. */
+  const [publishTarget, setPublishTarget] = useState<Workflow | null>(null)
 
   /**
    * Pending chip actions: apply the AI's proposed fixes (or the audit's
@@ -1465,6 +1469,13 @@ export default function WorkflowsTab() {
                           </button>
                           <button
                             disabled={busy}
+                            onClick={() => setPublishTarget(wf)}
+                            type="button"
+                          >
+                            {t.workflowsPublish}
+                          </button>
+                          <button
+                            disabled={busy}
                             onClick={() => void duplicateWorkflow(wf.id)}
                             type="button"
                           >
@@ -1548,6 +1559,19 @@ export default function WorkflowsTab() {
           onClose={() => {
             setFailureCenter(null)
             void load()
+          }}
+        />
+      )}
+
+      {publishTarget && (
+        <PublishWorkflowDialog
+          workflow={publishTarget}
+          onClose={() => setPublishTarget(null)}
+          onPublished={(result) => {
+            setBanner({
+              kind: 'ok',
+              text: t.marketplacePublishBanner({ number: result.prNumber }),
+            })
           }}
         />
       )}
