@@ -196,7 +196,9 @@ export class GitHubClient {
   }
 
   listIssues(owner: string, repo: string, page = 1): Promise<GitHubIssue[]> {
-    return this.request<GitHubIssue[]>(`/repos/${owner}/${repo}/issues?state=all&per_page=100&page=${page}`)
+    return this.request<GitHubIssue[]>(
+      `/repos/${owner}/${repo}/issues?state=all&per_page=100&page=${page}`,
+    )
   }
 
   addReaction(owner: string, repo: string, issueNumber: number): Promise<GitHubReaction> {

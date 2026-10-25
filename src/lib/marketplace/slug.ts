@@ -33,7 +33,11 @@ export function slugify(name: string): string {
  */
 export function buildSlug(name: string, hash: string): string {
   const stem = slugify(name) || 'wf'
-  const suffix = hash.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 6) || '000000'
+  const suffix =
+    hash
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .slice(0, 6) || '000000'
   return `${stem}-${suffix}`
 }
 

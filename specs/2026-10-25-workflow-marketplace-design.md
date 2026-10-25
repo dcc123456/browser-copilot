@@ -27,15 +27,15 @@
 
 ### 2.1 候选方案与否决理由
 
-| 方案 | 结论 | 理由 |
-| --- | --- | --- |
-| 自建后端（DB + 对象存储 + WebPush） | 否决 | 违反“不新建服务器”；点赞/评论/媒体都可以用 GitHub 原生能力替代 |
-| GitHub Actions 生成 index.json + 每工作流一个 issue | 否决 | 能工作，但多一层自动化要维护；读取可以用 3 次 API 调用完成，不需要 Action |
-| Gist 作为存储 | 否决 | 无中心审核，无法做到“维护者手动合并”；发现与排序弱 |
-| 去中心化 topic 发现 | 否决 | 无审核会导致任意工作流被执行；搜索 API 匿名限额低 |
-| OAuth Device Flow | 暂不采用 | 需要维护者注册一次 OAuth App；当前版本用用户自备 PAT 即可，Device Flow 作为后续增量 |
-| Issues 表单发布（用户零 token） | 否决 | 需要贴 JSON（issue 正文上限 64 KB），媒体不可靠，发布体验差 |
-| **PR + 文件 + raw 读取 + PR 作为讨论区** | **采用** | 唯一需要的基础设施是仓库本身；审核与讨论都复用 GitHub |
+| 方案                                                | 结论     | 理由                                                                                |
+| --------------------------------------------------- | -------- | ----------------------------------------------------------------------------------- |
+| 自建后端（DB + 对象存储 + WebPush）                 | 否决     | 违反“不新建服务器”；点赞/评论/媒体都可以用 GitHub 原生能力替代                      |
+| GitHub Actions 生成 index.json + 每工作流一个 issue | 否决     | 能工作，但多一层自动化要维护；读取可以用 3 次 API 调用完成，不需要 Action           |
+| Gist 作为存储                                       | 否决     | 无中心审核，无法做到“维护者手动合并”；发现与排序弱                                  |
+| 去中心化 topic 发现                                 | 否决     | 无审核会导致任意工作流被执行；搜索 API 匿名限额低                                   |
+| OAuth Device Flow                                   | 暂不采用 | 需要维护者注册一次 OAuth App；当前版本用用户自备 PAT 即可，Device Flow 作为后续增量 |
+| Issues 表单发布（用户零 token）                     | 否决     | 需要贴 JSON（issue 正文上限 64 KB），媒体不可靠，发布体验差                         |
+| **PR + 文件 + raw 读取 + PR 作为讨论区**            | **采用** | 唯一需要的基础设施是仓库本身；审核与讨论都复用 GitHub                               |
 
 ### 2.2 实测结论（2026-10-25）
 
@@ -85,19 +85,19 @@ workflows/<slug>/
 
 全部纯逻辑放 `src/lib/marketplace/**`（chrome-free，可单测）；网络调用注入 `fetch`；只有 token 存取与 UI 触达 `chrome.*`。
 
-| 文件 | 职责 |
-| --- | --- |
-| `types.ts` | `MarketplaceMeta`、`MarketplaceCard`、`WorkflowMarketplaceRef`、`MarketplaceErrorCode`、仓库常量 |
-| `slug.ts` | `slugify` / `buildSlug` / `isValidSlug` |
-| `sanitize.ts` | `toPublishableWorkflow`：剥离本地字段、运行时数据、data URL、日志；凭据疑似值的告警 |
-| `meta.ts` | `buildMeta` / `parseMeta`（严格校验）/ `workflowHash` / `compareVersion` |
-| `github-client.ts` | 带 token 的 REST 封装：401/403/404/422/限流映射为稳定错误码；只发本文档列出的端点 |
-| `publish.ts` | `publishWorkflow`：确保 fork → 建分支 → 逐个 PUT 文件 → 开 PR |
-| `catalog.ts` | `loadCatalog`：tree + pulls + issues 三路合并；raw 拉 meta/图片；30 分钟节流与内存缓存 |
-| `engagement.ts` | 点赞（reaction 增删）与评论（列/发） |
-| `token.ts` | `getToken` / `setToken` / `clearToken`，存 `chrome.storage.local` 的 `marketplaceAuth` |
-| `src/sidepanel/MarketplaceTab.tsx` | 广场页：卡片流、筛选、应用/更新、点赞、评论 |
-| `src/sidepanel/PublishWorkflowDialog.tsx` | 发布弹窗（`FormDialog` 外壳） |
+| 文件                                      | 职责                                                                                             |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `types.ts`                                | `MarketplaceMeta`、`MarketplaceCard`、`WorkflowMarketplaceRef`、`MarketplaceErrorCode`、仓库常量 |
+| `slug.ts`                                 | `slugify` / `buildSlug` / `isValidSlug`                                                          |
+| `sanitize.ts`                             | `toPublishableWorkflow`：剥离本地字段、运行时数据、data URL、日志；凭据疑似值的告警              |
+| `meta.ts`                                 | `buildMeta` / `parseMeta`（严格校验）/ `workflowHash` / `compareVersion`                         |
+| `github-client.ts`                        | 带 token 的 REST 封装：401/403/404/422/限流映射为稳定错误码；只发本文档列出的端点                |
+| `publish.ts`                              | `publishWorkflow`：确保 fork → 建分支 → 逐个 PUT 文件 → 开 PR                                    |
+| `catalog.ts`                              | `loadCatalog`：tree + pulls + issues 三路合并；raw 拉 meta/图片；30 分钟节流与内存缓存           |
+| `engagement.ts`                           | 点赞（reaction 增删）与评论（列/发）                                                             |
+| `token.ts`                                | `getToken` / `setToken` / `clearToken`，存 `chrome.storage.local` 的 `marketplaceAuth`           |
+| `src/sidepanel/MarketplaceTab.tsx`        | 广场页：卡片流、筛选、应用/更新、点赞、评论                                                      |
+| `src/sidepanel/PublishWorkflowDialog.tsx` | 发布弹窗（`FormDialog` 外壳）                                                                    |
 
 ## 5. 发布流程
 
@@ -188,17 +188,17 @@ workflows/<slug>/
 
 ## 9. 错误与边界
 
-| 场景 | 行为 |
-| --- | --- |
-| 401 / token 失效 | 清空 token，提示重新粘贴 |
-| 403 且 `x-ratelimit-remaining: 0` | 显示重置时间；保留缓存内容 |
-| fork 未就绪 | 轮询最多 30 s，超时提示稍后重试（发布内容不丢，可再次点击） |
-| 422（分支/PR 已存在） | 换时间戳重试一次，仍失败则提示同名 PR 已在等待合并 |
-| slug 冲突且作者不同 | 阻断并建议改名，不发 PR |
-| `meta.json` 解析失败 | 该卡片标记为“不可用”，不阻断其它卡片 |
-| 工作流在远端被删除 | 本地保留，标记“来源已删除”，不再提示更新 |
-| 图片超限 | 前端压缩后仍 >1 MB → 阻断并要求换图 |
-| 离线 | 展示上次缓存的卡片，发布按钮禁用 |
+| 场景                              | 行为                                                        |
+| --------------------------------- | ----------------------------------------------------------- |
+| 401 / token 失效                  | 清空 token，提示重新粘贴                                    |
+| 403 且 `x-ratelimit-remaining: 0` | 显示重置时间；保留缓存内容                                  |
+| fork 未就绪                       | 轮询最多 30 s，超时提示稍后重试（发布内容不丢，可再次点击） |
+| 422（分支/PR 已存在）             | 换时间戳重试一次，仍失败则提示同名 PR 已在等待合并          |
+| slug 冲突且作者不同               | 阻断并建议改名，不发 PR                                     |
+| `meta.json` 解析失败              | 该卡片标记为“不可用”，不阻断其它卡片                        |
+| 工作流在远端被删除                | 本地保留，标记“来源已删除”，不再提示更新                    |
+| 图片超限                          | 前端压缩后仍 >1 MB → 阻断并要求换图                         |
+| 离线                              | 展示上次缓存的卡片，发布按钮禁用                            |
 
 ## 10. 安全
 

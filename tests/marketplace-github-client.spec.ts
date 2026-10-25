@@ -107,7 +107,9 @@ describe('github client', () => {
   })
 
   it('forks with the default branch only', async () => {
-    const { client, calls } = makeClient(() => jsonResponse({ full_name: 'octocat/BC-workflow' }, 202))
+    const { client, calls } = makeClient(() =>
+      jsonResponse({ full_name: 'octocat/BC-workflow' }, 202),
+    )
     await client.createFork('dcc123456', 'BC-workflow')
     expect(calls[0]!.url).toBe('https://api.github.com/repos/dcc123456/BC-workflow/forks')
     expect(calls[0]!.init!.method).toBe('POST')

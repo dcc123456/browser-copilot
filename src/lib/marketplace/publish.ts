@@ -13,14 +13,7 @@
  */
 
 import type { GitHubPull, GitHubRef, GitHubRepo } from './github-client'
-import {
-  assetPath,
-  assetRepoPath,
-  buildMeta,
-  metaPath,
-  workflowHash,
-  workflowPath,
-} from './meta'
+import { assetPath, assetRepoPath, buildMeta, metaPath, workflowHash, workflowPath } from './meta'
 import { toPublishableWorkflow, type PublishWarning, type PublishableWorkflow } from './sanitize'
 import { buildSlug } from './slug'
 import {
@@ -269,10 +262,12 @@ export async function pushPublish(
   prepared: PreparedPublish,
   deps: PushPublishDeps,
 ): Promise<PublishResult> {
-  if (!deps.auth.token) throw new MarketplaceError('auth-required', 'Connect GitHub before publishing')
+  if (!deps.auth.token)
+    throw new MarketplaceError('auth-required', 'Connect GitHub before publishing')
   const login = deps.auth.login
   const now = deps.now ?? new Date()
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const sleep =
+    deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
 
   const upstream = await deps.client.getRepo(MARKETPLACE_OWNER, MARKETPLACE_REPO)
   const base = upstream.default_branch || MARKETPLACE_BRANCH
@@ -323,7 +318,10 @@ export async function pushPublish(
 /** Convenience wrapper used by tests and callers that do not preview warnings. */
 export async function publishWorkflow(
   input: MarketplacePublishInput,
-  deps: PushPublishDeps & { author: string; findExistingMeta?: (slug: string) => Promise<MarketplaceMeta | null> },
+  deps: PushPublishDeps & {
+    author: string
+    findExistingMeta?: (slug: string) => Promise<MarketplaceMeta | null>
+  },
 ): Promise<PublishResult> {
   const prepared = await preparePublish(input, {
     author: deps.author,
