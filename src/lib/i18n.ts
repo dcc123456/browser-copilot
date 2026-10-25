@@ -300,6 +300,37 @@ export interface Messages {
   marketplaceErrorInvalid: string
   marketplaceErrorForkPending: string
   marketplaceErrorNetwork: string
+
+  // --- Workflow marketplace: browsing ------------------------------------
+  tabMarketplace: string
+  marketplaceIntro: string
+  marketplaceSearchPlaceholder: string
+  marketplaceFilterAll: string
+  marketplaceSortRecent: string
+  marketplaceSortLikes: string
+  marketplaceRefresh: string
+  marketplaceLoading: string
+  marketplaceEmpty: string
+  marketplaceEmptyHint: string
+  marketplaceEmptyFiltered: string
+  marketplaceStale: string
+  marketplaceTruncated: string
+  marketplaceLoadFailed: string
+  marketplaceApply: string
+  marketplaceApplied: string
+  marketplaceUpdate: string
+  marketplaceUnavailable: string
+  marketplaceViewOnGithub: string
+  marketplaceByAuthor: (params: { author: string }) => string
+  marketplaceLikeCount: (params: { count: number }) => string
+  marketplaceCommentCount: (params: { count: number }) => string
+  marketplaceTrustTitle: string
+  marketplaceTrustMessage: (params: { title: string; author: string }) => string
+  marketplaceTrustConfirm: string
+  marketplaceUpdateTitle: string
+  marketplaceUpdateMessage: (params: { title: string }) => string
+  marketplaceApplyDone: (params: { name: string }) => string
+  marketplaceUpdateDone: (params: { name: string }) => string
   /** Select-all checkbox in the Workflows tab toolbar (batch management). */
   workflowsSelectAll: string
   /** Icon-only batch-delete button in the Workflows tab toolbar (needs a selection). */
@@ -1862,6 +1893,38 @@ const en: Messages = {
   marketplaceErrorInvalid: 'Some of the submitted data is invalid.',
   marketplaceErrorForkPending: 'GitHub is still creating your fork. Try again shortly.',
   marketplaceErrorNetwork: 'Could not reach GitHub. Check your connection and try again.',
+  tabMarketplace: 'Marketplace',
+  marketplaceIntro:
+    'Workflows shared by the community. Applying one saves a local copy; nothing runs until you start it.',
+  marketplaceSearchPlaceholder: 'Search workflows',
+  marketplaceFilterAll: 'All categories',
+  marketplaceSortRecent: 'Recently updated',
+  marketplaceSortLikes: 'Most liked',
+  marketplaceRefresh: 'Refresh',
+  marketplaceLoading: 'Loading the marketplace…',
+  marketplaceEmpty: 'No workflows have been published yet.',
+  marketplaceEmptyHint: 'Publish one from the Workflows tab to start the collection.',
+  marketplaceEmptyFiltered: 'No workflows match these filters.',
+  marketplaceStale: 'Showing the last loaded list; GitHub could not be reached.',
+  marketplaceTruncated: 'Showing the newest 300 workflows.',
+  marketplaceLoadFailed: 'Could not load the marketplace.',
+  marketplaceApply: 'Apply',
+  marketplaceApplied: 'Added',
+  marketplaceUpdate: 'Update',
+  marketplaceUnavailable: 'Unavailable',
+  marketplaceViewOnGithub: 'View on GitHub',
+  marketplaceByAuthor: ({ author }) => `by @${author}`,
+  marketplaceLikeCount: ({ count }) => `${count} like${count === 1 ? '' : 's'}`,
+  marketplaceCommentCount: ({ count }) => `${count} comment${count === 1 ? '' : 's'}`,
+  marketplaceTrustTitle: 'Apply this workflow?',
+  marketplaceTrustMessage: ({ title, author }) =>
+    `"${title}" by @${author} can perform actions on pages you open. It will not run automatically; start it yourself after reviewing its steps.`,
+  marketplaceTrustConfirm: 'Apply',
+  marketplaceUpdateTitle: 'Update this workflow?',
+  marketplaceUpdateMessage: ({ title }) =>
+    `Applying the newer version of "${title}" replaces its steps, trigger and settings. Local modifications will be lost.`,
+  marketplaceApplyDone: ({ name }) => `Added "${name}".`,
+  marketplaceUpdateDone: ({ name }) => `Updated "${name}".`,
   workflowsSelectAll: 'Select all',
   workflowsBatchDelete: 'Delete selected workflows',
   workflowsBatchDeleteConfirm: ({ count }) =>
@@ -3322,6 +3385,38 @@ const zhCN: Messages = {
   marketplaceErrorInvalid: '提交的内容不合法。',
   marketplaceErrorForkPending: 'GitHub 还在创建你的 fork，请稍后再试。',
   marketplaceErrorNetwork: '无法连接 GitHub，请检查网络后重试。',
+  tabMarketplace: '工作流广场',
+  marketplaceIntro:
+    '社区共享的工作流。应用会在本地保存一份副本；在你主动运行之前，它不会做任何事。',
+  marketplaceSearchPlaceholder: '搜索工作流',
+  marketplaceFilterAll: '全部分类',
+  marketplaceSortRecent: '最近更新',
+  marketplaceSortLikes: '最多点赞',
+  marketplaceRefresh: '刷新',
+  marketplaceLoading: '正在加载工作流广场…',
+  marketplaceEmpty: '还没有发布任何工作流。',
+  marketplaceEmptyHint: '在「工作流」面板发布一个，成为第一个分享者。',
+  marketplaceEmptyFiltered: '没有符合筛选条件的工作流。',
+  marketplaceStale: '正在显示上次加载的列表，暂时无法连接 GitHub。',
+  marketplaceTruncated: '仅显示最新的 300 个工作流。',
+  marketplaceLoadFailed: '无法加载工作流广场。',
+  marketplaceApply: '应用',
+  marketplaceApplied: '已添加',
+  marketplaceUpdate: '可更新',
+  marketplaceUnavailable: '暂不可用',
+  marketplaceViewOnGithub: '在 GitHub 查看',
+  marketplaceByAuthor: ({ author }) => `作者 @${author}`,
+  marketplaceLikeCount: ({ count }) => `${count} 个赞`,
+  marketplaceCommentCount: ({ count }) => `${count} 条评论`,
+  marketplaceTrustTitle: '应用这个工作流？',
+  marketplaceTrustMessage: ({ title, author }) =>
+    `@${author} 的「${title}」会在你打开的页面上执行操作。它不会自动运行；查看步骤后请自行启动。`,
+  marketplaceTrustConfirm: '应用',
+  marketplaceUpdateTitle: '更新这个工作流？',
+  marketplaceUpdateMessage: ({ title }) =>
+    `应用「${title}」的新版本会替换它的步骤、触发器和设置，本地修改将会丢失。`,
+  marketplaceApplyDone: ({ name }) => `已添加「${name}」。`,
+  marketplaceUpdateDone: ({ name }) => `已更新「${name}」。`,
   workflowsSelectAll: '全选',
   workflowsBatchDelete: '删除选中的工作流',
   workflowsBatchDeleteConfirm: ({ count }) => `确定删除选中的 ${count} 个工作流？此操作不可恢复。`,

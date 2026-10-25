@@ -29,11 +29,10 @@ import {
   MARKETPLACE_CATEGORIES,
   MARKETPLACE_REPO_FULL,
   MAX_PUBLISH_IMAGES,
-  MarketplaceError,
   type MarketplaceAuth,
   type MarketplaceCategory,
-  type MarketplaceErrorCode,
 } from '../lib/marketplace/types'
+import { marketplaceErrorMessage } from './marketplace-errors'
 import type { Workflow } from '../lib/workflow/types'
 
 const TOKEN_URL =
@@ -56,18 +55,6 @@ const FORM_ERROR_KEY: Record<PublishFormError, keyof Messages> = {
   'too-many-images': 'marketplaceFormTooManyImages',
   'image-too-large': 'marketplaceFormImageTooLarge',
   'image-type': 'marketplaceFormImageType',
-}
-
-const MARKETPLACE_ERROR_KEY: Record<MarketplaceErrorCode, keyof Messages> = {
-  'auth-required': 'marketplaceErrorAuthRequired',
-  unauthorized: 'marketplaceErrorUnauthorized',
-  forbidden: 'marketplaceErrorForbidden',
-  'rate-limited': 'marketplaceErrorRateLimited',
-  'not-found': 'marketplaceErrorNotFound',
-  conflict: 'marketplaceErrorConflict',
-  invalid: 'marketplaceErrorInvalid',
-  'fork-pending': 'marketplaceErrorForkPending',
-  network: 'marketplaceErrorNetwork',
 }
 
 interface SelectedImage {
@@ -204,13 +191,6 @@ export default function PublishWorkflowDialog({
     setPrepared(null)
   }
 
-  const errorMessage = (error: unknown): string => {
-    if (error instanceof MarketplaceError) {
-      return t[MARKETPLACE_ERROR_KEY[error.code]] as string
-    }
-    return error instanceof Error ? error.message : String(error)
-  }
-
   const publish = async (acknowledged: boolean): Promise<void> => {
     if (!auth || busy) return
     const validation = validatePublishForm({
@@ -254,7 +234,7 @@ export default function PublishWorkflowDialog({
       setResult(pushed)
       onPublished?.(pushed)
     } catch (error) {
-      setPublishError(errorMessage(error))
+      setPublishError(marketplaceErrorMessage(t, error))
     } finally {
       setBusy(false)
     }

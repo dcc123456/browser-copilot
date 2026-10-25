@@ -12,7 +12,7 @@ import type { WorkflowMarketplaceRef } from '../src/lib/workflow/types'
 const NOW = new Date('2026-10-25T09:00:00.000Z')
 const HASH = 'a'.repeat(64)
 
-function makeMeta(overrides: Partial<MarketplaceMeta> = {}): MarketplaceMeta {
+function makeMeta(): MarketplaceMeta {
   return buildMeta({
     slug: 'scrape-orders-abcdef',
     title: 'Scrape orders',

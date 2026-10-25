@@ -36,7 +36,7 @@ function makeWorkflow(overrides: Partial<Workflow> = {}): Workflow {
       reuseLastState: true,
       defaultWaitMs: 5000,
       pageContext: { origin: 'https://shop.example' },
-      goalVerification: { ok: true },
+      goalVerification: { level: 'L3', certified: true, reason: 'ok', unmet: [] },
       trialRun: false,
     },
     drawflow: {
@@ -100,10 +100,7 @@ describe('publish sanitizer', () => {
   })
 
   it('strips runtime keys and embedded screenshots from node data', () => {
-    const { workflow, warnings } = toPublishableWorkflow(
-      makeWorkflow(),
-      'scrape-orders-abcdef',
-    )
+    const { workflow, warnings } = toPublishableWorkflow(makeWorkflow(), 'scrape-orders-abcdef')
     const data = workflow.drawflow.nodes[0]!.data
     expect(data).not.toHaveProperty('runLog')
     expect(data).not.toHaveProperty('logs')

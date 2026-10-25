@@ -10,6 +10,7 @@ import ChatTab from './ChatTab'
 import DataTab from './DataTab'
 import HistoryTab from './HistoryTab'
 import { I18nProvider } from './i18n'
+import MarketplaceTab from './MarketplaceTab'
 import SettingsTab from './SettingsTab'
 import SkillsTab from './SkillsTab'
 import TasksTab from './TasksTab'
@@ -21,12 +22,21 @@ import UpdateCenter from './update/UpdateCenter'
 import { ConfirmHost } from '../ui/confirm'
 
 type TabId =
-  'chat' | 'skills' | 'agents' | 'tasks' | 'workflows' | 'history' | 'tokens' | 'data' | 'settings'
+  | 'chat'
+  | 'skills'
+  | 'agents'
+  | 'tasks'
+  | 'workflows'
+  | 'history'
+  | 'marketplace'
+  | 'tokens'
+  | 'data'
+  | 'settings'
 
 /** Always shown in the top bar. */
 const PINNED_TABS: TabId[] = ['chat', 'workflows', 'history', 'tasks']
 /** Collected under the fixed "More" dropdown. Agents sits right after skills. */
-const MORE_TABS: TabId[] = ['skills', 'agents', 'tokens', 'data', 'settings']
+const MORE_TABS: TabId[] = ['skills', 'agents', 'marketplace', 'tokens', 'data', 'settings']
 
 const TAB_LABEL: Record<TabId, keyof Messages> = {
   chat: 'tabChat',
@@ -35,6 +45,7 @@ const TAB_LABEL: Record<TabId, keyof Messages> = {
   tasks: 'tabTasks',
   workflows: 'tabWorkflows',
   history: 'tabHistory',
+  marketplace: 'tabMarketplace',
   tokens: 'tabTokens',
   data: 'tabData',
   settings: 'tabSettings',
@@ -349,6 +360,9 @@ export default function App() {
       </div>
       <div style={{ display: active === 'history' ? 'contents' : 'none' }}>
         <HistoryTab />
+      </div>
+      <div style={{ display: active === 'marketplace' ? 'contents' : 'none' }}>
+        <MarketplaceTab active={active === 'marketplace'} />
       </div>
       <div style={{ display: active === 'tokens' ? 'contents' : 'none' }}>
         <TokensTab />

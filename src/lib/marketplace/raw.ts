@@ -9,7 +9,7 @@
  * @module lib/marketplace/raw
  */
 
-import { parseMeta, workflowDir } from './meta'
+import { parseMeta, workflowDir, workflowPath } from './meta'
 import {
   MARKETPLACE_BRANCH,
   MARKETPLACE_OWNER,
@@ -57,5 +57,19 @@ export async function fetchPublishedMeta(
     return parseMeta(JSON.parse(text))
   } catch {
     return null
+  }
+}
+
+/** The decoded `workflow.json`, or null when the file is missing. */
+export async function fetchPublishedWorkflow(
+  slug: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<unknown | null> {
+  const text = await fetchRawText(workflowPath(slug), fetchImpl)
+  if (!text) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new MarketplaceError('invalid', 'The published workflow file is not valid JSON')
   }
 }

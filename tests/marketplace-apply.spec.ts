@@ -57,7 +57,7 @@ function existing(version = 1): Workflow {
     updatedAt: 222,
     revision: 4,
     revisionHistory: [{ revision: 4, updatedAt: 222, source: 'manual-edit' }],
-    trigger: { type: 'interval', intervalMinutes: 15, enabled: true },
+    trigger: { type: 'interval', schedule: '15', enabled: true },
     settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
     drawflow: { nodes: [], edges: [] },
     table: { id: 'table-1' },

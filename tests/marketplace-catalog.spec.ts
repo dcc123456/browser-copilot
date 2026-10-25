@@ -86,9 +86,9 @@ describe('mergeCatalog', () => {
 
 function client(overrides: Partial<CatalogClient> = {}): {
   api: CatalogClient
-  calls: Record<string, number>
+  calls: { tree: number; pulls: number; issues: number }
 } {
-  const calls: Record<string, number> = { tree: 0, pulls: 0, issues: 0 }
+  const calls = { tree: 0, pulls: 0, issues: 0 }
   const api: CatalogClient = {
     async listTree() {
       calls.tree += 1
