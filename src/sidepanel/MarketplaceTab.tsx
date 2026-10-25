@@ -15,7 +15,7 @@ import type { Messages } from '../lib/i18n'
 import { sendCommand } from '../lib/messages'
 import { onStoreChanged } from '../lib/store-events'
 import type { Workflow } from '../lib/workflow/types'
-import { findInstalled, planApply } from '../lib/marketplace/apply'
+import { findInstalled } from '../lib/marketplace/apply'
 import { chromeCatalogCache, loadCatalog, type LoadCatalogResult } from '../lib/marketplace/catalog'
 import {
   chromeReactionCache,
@@ -26,7 +26,7 @@ import {
 } from '../lib/marketplace/engagement'
 import { GitHubClient, type GitHubComment } from '../lib/marketplace/github-client'
 import { assetRepoPath, needsUpdate, workflowDir } from '../lib/marketplace/meta'
-import { fetchPublishedWorkflow, rawUrl } from '../lib/marketplace/raw'
+import { rawUrl } from '../lib/marketplace/raw'
 import { clearAuth, getAuth } from '../lib/marketplace/token'
 import {
   MARKETPLACE_BRANCH,
@@ -39,6 +39,7 @@ import {
 } from '../lib/marketplace/types'
 import { confirmDialog } from '../ui/confirm'
 import { useT } from './i18n'
+import { installFromCard } from './marketplace-install'
 import { marketplaceErrorMessage } from './marketplace-errors'
 
 const CATEGORY_KEY: Record<MarketplaceCategory, keyof Messages> = {
@@ -315,22 +316,15 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
 
     setBusySlug(card.meta.slug)
     try {
-      const published = await fetchPublishedWorkflow(card.meta.slug)
-      if (published === null) {
-        throw new MarketplaceError('not-found', `workflows/${card.meta.slug}/workflow.json`)
-      }
-      const plan = planApply(card, published, existing)
-      if (plan.status === 'up-to-date') {
-        setBanner({ kind: 'ok', text: t.marketplaceApplied })
-        return
-      }
-      await sendCommand({ type: 'workflows.save', workflow: plan.workflow })
+      const plan = await installFromCard(card, existing)
       setBanner({
         kind: 'ok',
         text:
-          plan.status === 'update'
-            ? t.marketplaceUpdateDone({ name: plan.workflow.name })
-            : t.marketplaceApplyDone({ name: plan.workflow.name }),
+          plan.status === 'up-to-date'
+            ? t.marketplaceApplied
+            : plan.status === 'update'
+              ? t.marketplaceUpdateDone({ name: plan.workflow.name })
+              : t.marketplaceApplyDone({ name: plan.workflow.name }),
       })
       await loadInstalled()
     } catch (caught) {

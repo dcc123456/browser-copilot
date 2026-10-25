@@ -47,6 +47,12 @@ import { confirmDialog } from '../ui/confirm'
 import { FailureCenterDialog } from './FailureCenter'
 import { WorkflowHealthView } from './WorkflowHealthView'
 import PublishWorkflowDialog from './PublishWorkflowDialog'
+import { installFromCard } from './marketplace-install'
+import { marketplaceErrorMessage } from './marketplace-errors'
+import { pendingUpdates } from '../lib/marketplace/apply'
+import { chromeCatalogCache, loadCatalog } from '../lib/marketplace/catalog'
+import { GitHubClient } from '../lib/marketplace/github-client'
+import { MARKETPLACE_CACHE_TTL_MS, type MarketplaceCard } from '../lib/marketplace/types'
 import { summarizeWorkflowHealth } from '../lib/workflow/workflow-health'
 
 /**
@@ -506,6 +512,75 @@ export default function WorkflowsTab() {
 
   /** Workflow whose publish dialog is open; null when closed. */
   const [publishTarget, setPublishTarget] = useState<Workflow | null>(null)
+
+  /**
+   * Workflow id → the catalog card that is newer than the installed copy.
+   * Empty until the first successful check, so a card never claims an update
+   * it has not verified.
+   */
+  const [marketplaceUpdates, setMarketplaceUpdates] = useState<Record<string, MarketplaceCard>>({})
+  /** Epoch ms before which no new check is made (see below). */
+  const nextUpdateCheckRef = useRef(0)
+
+  /**
+   * Reads the (30-minute cached) marketplace catalog and marks installed
+   * workflows the publisher has moved ahead of.
+   *
+   * The tab refreshes every 5s, so the check is throttled: a normal pass costs
+   * nothing beyond the cached catalog read, and an offline failure waits ten
+   * minutes before asking GitHub again instead of retrying on every tick.
+   */
+  const checkMarketplaceUpdates = useCallback(async (list: Workflow[]): Promise<void> => {
+    if (!list.some((wf) => wf.marketplace)) return
+    if (Date.now() < nextUpdateCheckRef.current) return
+    nextUpdateCheckRef.current = Date.now() + MARKETPLACE_CACHE_TTL_MS
+    try {
+      const catalog = await loadCatalog({
+        client: new GitHubClient(),
+        cache: chromeCatalogCache(),
+      })
+      setMarketplaceUpdates(pendingUpdates(list, catalog.cards))
+    } catch {
+      // Offline: keep the last known state, no banner for an unasked check.
+      nextUpdateCheckRef.current = Date.now() + 10 * 60 * 1000
+    }
+  }, [])
+
+  useEffect(() => {
+    void checkMarketplaceUpdates(workflows)
+  }, [workflows, checkMarketplaceUpdates])
+
+  /** Replaces the executable parts of an installed workflow after confirmation. */
+  const updateFromMarketplace = async (wf: Workflow, card: MarketplaceCard): Promise<void> => {
+    const confirmed = await confirmDialog({
+      title: t.marketplaceUpdateTitle,
+      message: t.marketplaceUpdateMessage({ title: card.meta.title }),
+      confirmText: t.marketplaceUpdate,
+      cancelText: t.cancel,
+    })
+    if (!confirmed) return
+    setBusy(true)
+    try {
+      const plan = await installFromCard(card, wf)
+      if (plan.status === 'update') {
+        setBanner({
+          kind: 'ok',
+          text: t.marketplaceUpdateDone({ name: plan.workflow.name }),
+        })
+      }
+      setMarketplaceUpdates((prev) => {
+        if (!(wf.id in prev)) return prev
+        const next = { ...prev }
+        delete next[wf.id]
+        return next
+      })
+      await load()
+    } catch (error) {
+      setBanner({ kind: 'error', text: marketplaceErrorMessage(t, error) })
+    } finally {
+      setBusy(false)
+    }
+  }
 
   /**
    * Pending chip actions: apply the AI's proposed fixes (or the audit's
@@ -1378,6 +1453,7 @@ export default function WorkflowsTab() {
                   {section.workflows.map((wf) => {
                     const last = lastRunFor(wf)
                     const health = summarizeWorkflowHealth(runs, wf.id)
+                    const updateCard = marketplaceUpdates[wf.id]
                     return (
                       <li
                         className={`task-item${highlightedId === wf.id ? ' task-item-saved' : ''}`}
@@ -1408,6 +1484,9 @@ export default function WorkflowsTab() {
                           <span className="task-chip">
                             {triggerLabel(effectiveTriggerType(wf))}
                           </span>
+                          {updateCard && (
+                            <span className="task-chip text-accent!">{t.marketplaceUpdate}</span>
+                          )}
                           {wf.description && <span className="task-lastrun">{wf.description}</span>}
                         </div>
                         {last && (
@@ -1474,6 +1553,16 @@ export default function WorkflowsTab() {
                           >
                             {t.workflowsPublish}
                           </button>
+                          {updateCard && (
+                            <button
+                              className="text-accent! border-accent!"
+                              disabled={busy}
+                              onClick={() => void updateFromMarketplace(wf, updateCard)}
+                              type="button"
+                            >
+                              {t.marketplaceUpdate}
+                            </button>
+                          )}
                           <button
                             disabled={busy}
                             onClick={() => void duplicateWorkflow(wf.id)}

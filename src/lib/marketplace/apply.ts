@@ -14,6 +14,7 @@ import { commitWorkflowRevision } from '../workflow/workflow-revision'
 import { migrateWorkflow } from '../workflow/migrate'
 import { asWorkflow } from '../workflow/storage'
 import type { Workflow, WorkflowMarketplaceRef } from '../workflow/types'
+import { needsUpdate } from './meta'
 import { MARKETPLACE_REPO_FULL, MarketplaceError, type MarketplaceCard } from './types'
 
 export type ApplyStatus = 'new' | 'update' | 'up-to-date'
@@ -27,6 +28,26 @@ export interface ApplyPlan {
 /** Local workflow installed from `slug`, if any. */
 export function findInstalled(workflows: readonly Workflow[], slug: string): Workflow | undefined {
   return workflows.find((workflow) => workflow.marketplace?.slug === slug)
+}
+
+/**
+ * Workflow id → the catalog card its installed copy has not caught up with.
+ *
+ * The published version is the only comparison: a local edit does not make a
+ * workflow stale, it is what an update is about to overwrite, and a workflow
+ * that was never installed has nothing to update.
+ */
+export function pendingUpdates(
+  workflows: readonly Workflow[],
+  cards: readonly MarketplaceCard[],
+): Record<string, MarketplaceCard> {
+  const bySlug = new Map(cards.map((card) => [card.meta.slug, card]))
+  const updates: Record<string, MarketplaceCard> = {}
+  for (const workflow of workflows) {
+    const card = workflow.marketplace ? bySlug.get(workflow.marketplace.slug) : undefined
+    if (card && needsUpdate(card.meta, workflow.marketplace)) updates[workflow.id] = card
+  }
+  return updates
 }
 
 function marketplaceRef(card: MarketplaceCard, appliedAt: number): WorkflowMarketplaceRef {
