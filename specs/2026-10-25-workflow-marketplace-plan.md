@@ -114,6 +114,26 @@
 - `workflows/.gitkeep`、`CONTRIBUTING.md`、PR 模板。
 - 可选 `scripts/validate-workflow.mjs`（维护者本地校验，不依赖 Actions）。
 
+### Step 10 — 重新编辑与下架（2026-10-25 追加）
+
+| 文件                                              | 动作 | 内容                                                                                  |
+| ------------------------------------------------- | ---- | ------------------------------------------------------------------------------------- |
+| `src/lib/marketplace/github-client.ts`            | 修改 | `deleteFile`（`DELETE /contents/<path>`，带 sha 与分支）                              |
+| `src/lib/marketplace/publish.ts`                  | 修改 | `unpublishWorkflow`：读树 → 定位 `workflows/<slug>/` 全部 blob → 删文件分支 → 下架 PR |
+| `src/lib/marketplace/raw.ts`                      | 修改 | `fetchPublishedAsset`：把已发布截图取回为 Blob，供重新编辑预填                        |
+| `src/lib/marketplace/apply.ts`                    | 修改 | `removedSources`：仅在目录完整且非 stale 时标记“来源已删除”                           |
+| `src/lib/messages.ts` / `src/background/index.ts` | 修改 | `workflows.marketplace`：发布回写引用，只改元数据、不 bump revision                   |
+| `src/lib/workflow/storage.ts`                     | 修改 | `saveWorkflow` 增加 `touchUpdatedAt: false`：元数据写入不更新排序时间戳               |
+| `src/sidepanel/PublishWorkflowDialog.tsx`         | 修改 | 有 `marketplace` 引用时按已发布 meta 预填；首个输入后放弃预填                         |
+| `src/sidepanel/WorkflowsTab.tsx`                  | 修改 | 发布成功回写引用；列表显示“来源已删除”                                                |
+| `src/sidepanel/MarketplaceTab.tsx`                | 修改 | 自己发布的卡片显示“取消发布”，确认后提交删除 PR                                       |
+| `tests/marketplace-publish.spec.ts`               | 修改 | 删除全部分文件、slug 不存在不建分支、分支冲突重试、无 token                           |
+| `tests/marketplace-update.spec.ts`                | 修改 | 完整/截断/stale、非同仓库引用、无引用工作流                                           |
+| `tests/marketplace-publish-dialog.spec.tsx`       | 修改 | 预填已发布信息与图片；预填返回前的手动输入不被覆盖                                    |
+| `tests/workflow-storage.spec.ts`                  | 修改 | `touchUpdatedAt: false` 保留 `updatedAt`，默认写入仍打时间戳                          |
+
+**验收**：发布成功后本地出现 `marketplace` 引用；再次发布沿用同一 slug 且版本 +1；自己的卡片可提交删除 PR（合并后消失）；完整目录下缺失的 slug 显示“来源已删除”。
+
 ## 2. 测试与门禁
 
 - 每步：`pnpm typecheck && pnpm test && pnpm lint && pnpm format:check`。

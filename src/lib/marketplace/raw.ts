@@ -9,7 +9,7 @@
  * @module lib/marketplace/raw
  */
 
-import { parseMeta, workflowDir, workflowPath } from './meta'
+import { assetRepoPath, parseMeta, workflowDir, workflowPath } from './meta'
 import {
   MARKETPLACE_BRANCH,
   MARKETPLACE_OWNER,
@@ -71,5 +71,25 @@ export async function fetchPublishedWorkflow(
     return JSON.parse(text)
   } catch {
     throw new MarketplaceError('invalid', 'The published workflow file is not valid JSON')
+  }
+}
+
+/**
+ * One published screenshot, ready to re-upload.
+ *
+ * Re-editing a listing starts from what is already published, so the dialog
+ * needs the stored assets as blobs. A missing asset degrades to "no image"
+ * instead of failing the whole prefill.
+ */
+export async function fetchPublishedAsset(
+  slug: string,
+  asset: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Blob | null> {
+  try {
+    const response = await fetchImpl(rawUrl(assetRepoPath(slug, asset)))
+    return response.ok ? await response.blob() : null
+  } catch {
+    return null
   }
 }

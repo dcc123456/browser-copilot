@@ -4,7 +4,7 @@
  * compare against.
  */
 import { describe, expect, it } from 'vitest'
-import { pendingUpdates } from '../src/lib/marketplace/apply'
+import { pendingUpdates, removedSources } from '../src/lib/marketplace/apply'
 import type { MarketplaceCard, MarketplaceMeta } from '../src/lib/marketplace/types'
 import type { Workflow } from '../src/lib/workflow/types'
 
@@ -90,5 +90,39 @@ describe('pendingUpdates', () => {
     expect(
       pendingUpdates([installed('wf-1', 'scrape-orders-111', 3)], [card('scrape-orders-111', 2)]),
     ).toEqual({})
+  })
+})
+
+describe('removedSources', () => {
+  it('marks an installed workflow whose slug is gone from a complete catalog', () => {
+    const removed = removedSources(
+      [installed('wf-1', 'deleted-111', 1), installed('wf-2', 'live-222', 1)],
+      [card('live-222', 1)],
+      true,
+    )
+
+    expect([...removed]).toEqual(['wf-1'])
+  })
+
+  it('claims nothing from a truncated or stale catalog', () => {
+    expect([...removedSources([installed('wf-1', 'deleted-111', 1)], [], false)]).toEqual([])
+  })
+
+  it('ignores local workflows that never came from the marketplace', () => {
+    const local: Workflow = {
+      id: 'wf-1',
+      name: 'Hand made',
+      createdAt: 1,
+      updatedAt: 2,
+      drawflow: { nodes: [], edges: [] },
+      settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
+    }
+    expect([...removedSources([local], [], true)]).toEqual([])
+  })
+
+  it('ignores references to a different repository', () => {
+    const foreign = installed('wf-1', 'deleted-111', 1)
+    foreign.marketplace = { ...foreign.marketplace!, repo: 'someone/other-workflows' }
+    expect([...removedSources([foreign], [], true)]).toEqual([])
   })
 })

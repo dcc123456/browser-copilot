@@ -338,6 +338,14 @@ export interface Messages {
   marketplaceTrustConfirm: string
   marketplaceUpdateTitle: string
   marketplaceUpdateMessage: (params: { title: string }) => string
+  /** Action on your own published card: open the removal pull request. */
+  marketplaceUnpublish: string
+  marketplaceUnpublishTitle: string
+  marketplaceUnpublishMessage: (params: { title: string }) => string
+  marketplaceUnpublishConfirm: string
+  marketplaceUnpublishBanner: (params: { number: number }) => string
+  /** Chip on a local workflow whose published source was deleted. */
+  marketplaceSourceRemoved: string
   marketplaceApplyDone: (params: { name: string }) => string
   marketplaceUpdateDone: (params: { name: string }) => string
   /** Select-all checkbox in the Workflows tab toolbar (batch management). */
@@ -1943,6 +1951,14 @@ const en: Messages = {
   marketplaceUpdateTitle: 'Update this workflow?',
   marketplaceUpdateMessage: ({ title }) =>
     `Applying the newer version of "${title}" replaces its steps, trigger and settings. Local modifications will be lost.`,
+  marketplaceUnpublish: 'Unpublish',
+  marketplaceUnpublishTitle: 'Unpublish this workflow?',
+  marketplaceUnpublishMessage: ({ title }) =>
+    `A pull request will remove "${title}" from the marketplace. It disappears once the maintainer merges it; copies already applied keep working.`,
+  marketplaceUnpublishConfirm: 'Submit removal PR',
+  marketplaceUnpublishBanner: ({ number }) =>
+    `Removal PR #${number} submitted. The card disappears after the maintainer merges it.`,
+  marketplaceSourceRemoved: 'Source removed',
   marketplaceApplyDone: ({ name }) => `Added "${name}".`,
   marketplaceUpdateDone: ({ name }) => `Updated "${name}".`,
   workflowsSelectAll: 'Select all',
@@ -3445,6 +3461,14 @@ const zhCN: Messages = {
   marketplaceUpdateTitle: '更新这个工作流？',
   marketplaceUpdateMessage: ({ title }) =>
     `应用「${title}」的新版本会替换它的步骤、触发器和设置，本地修改将会丢失。`,
+  marketplaceUnpublish: '取消发布',
+  marketplaceUnpublishTitle: '取消发布这个工作流？',
+  marketplaceUnpublishMessage: ({ title }) =>
+    `会提交一个 PR 把「${title}」从广场删除，维护者合并后生效；已经「应用」到你本地的副本不受影响，仍可继续使用。`,
+  marketplaceUnpublishConfirm: '提交下架 PR',
+  marketplaceUnpublishBanner: ({ number }) =>
+    `下架 PR #${number} 已提交，维护者合并后该卡片就会消失。`,
+  marketplaceSourceRemoved: '来源已删除',
   marketplaceApplyDone: ({ name }) => `已添加「${name}」。`,
   marketplaceUpdateDone: ({ name }) => `已更新「${name}」。`,
   workflowsSelectAll: '全选',

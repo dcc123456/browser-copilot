@@ -1,5 +1,5 @@
 /**
- * Publishing a workflow as a pull request.
+ * Publishing a workflow as a pull request, and removing one the same way.
  *
  * Split in two so the panel can show the sanitizer warnings BEFORE anything
  * leaves the machine: `preparePublish` is pure (hash, slug, meta, files), and
@@ -9,11 +9,23 @@
  * one write path means one set of failure modes, and the maintainer still
  * reviews every change as a PR.
  *
+ * Unpublishing is the inverse and deliberately keeps the same shape: a branch
+ * that deletes the workflow's files and a PR the maintainer merges. Nothing is
+ * deleted from anyone's local library — copies already applied keep working.
+ *
  * @module lib/marketplace/publish
  */
 
-import type { GitHubPull, GitHubRef, GitHubRepo } from './github-client'
-import { assetPath, assetRepoPath, buildMeta, metaPath, workflowHash, workflowPath } from './meta'
+import type { GitHubPull, GitHubRef, GitHubRepo, GitHubTree } from './github-client'
+import {
+  assetPath,
+  assetRepoPath,
+  buildMeta,
+  metaPath,
+  workflowDir,
+  workflowHash,
+  workflowPath,
+} from './meta'
 import { toPublishableWorkflow, type PublishWarning, type PublishableWorkflow } from './sanitize'
 import { buildSlug } from './slug'
 import {
@@ -86,6 +98,32 @@ export interface PublishResult {
   version: number
   hash: string
   meta: MarketplaceMeta
+}
+
+/** Everything an unpublish needs beyond the publish client. */
+export interface UnpublishClient extends PublishClient {
+  listTree(owner: string, repo: string, branch: string): Promise<GitHubTree>
+  deleteFile(
+    owner: string,
+    repo: string,
+    path: string,
+    input: { message: string; sha: string; branch: string },
+  ): Promise<unknown>
+}
+
+export interface UnpublishDeps {
+  client: UnpublishClient
+  auth: MarketplaceAuth
+  now?: Date
+  sleep?: (ms: number) => Promise<void>
+}
+
+export interface UnpublishResult {
+  prUrl: string
+  prNumber: number
+  slug: string
+  /** Files the removal PR deletes: both JSON files plus every asset. */
+  files: number
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -329,4 +367,90 @@ export async function publishWorkflow(
     findExistingMeta: deps.findExistingMeta,
   })
   return pushPublish(prepared, deps)
+}
+
+/** Repo blobs under `workflows/<slug>/`: the exact set an unpublish deletes. */
+function workflowBlobs(tree: GitHubTree, slug: string): Array<{ path: string; sha: string }> {
+  const prefix = `${workflowDir(slug)}/`
+  return tree.tree
+    .filter((entry) => entry.type === 'blob' && entry.path.startsWith(prefix))
+    .map((entry) => ({ path: entry.path, sha: entry.sha }))
+}
+
+/**
+ * Opens the pull request that removes a published workflow.
+ *
+ * The tree is read from the same branch the removal PR targets, so the shas
+ * GitHub requires for a delete match the files the PR branch will hold. The
+ * directory disappears once its last file is deleted; a merge by the
+ * maintainer then drops the card from the next catalog read.
+ */
+export async function unpublishWorkflow(
+  input: { slug: string; title: string },
+  deps: UnpublishDeps,
+): Promise<UnpublishResult> {
+  if (!deps.auth.token) {
+    throw new MarketplaceError('auth-required', 'Connect GitHub before unpublishing')
+  }
+  const login = deps.auth.login
+  const now = deps.now ?? new Date()
+  const sleep =
+    deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+
+  const upstream = await deps.client.getRepo(MARKETPLACE_OWNER, MARKETPLACE_REPO)
+  const base = upstream.default_branch || MARKETPLACE_BRANCH
+  const writable = await writableOwner(deps.client, login, sleep)
+  const baseRef = await deps.client.getRef(writable, MARKETPLACE_REPO, base)
+  const tree = await deps.client.listTree(writable, MARKETPLACE_REPO, base)
+  const blobs = workflowBlobs(tree, input.slug)
+  if (blobs.length === 0) {
+    throw new MarketplaceError('not-found', `No published files for "${input.slug}" were found`)
+  }
+
+  const commitMessage = `Remove workflow: ${input.title} [wf:${input.slug}]`
+  const body = [
+    'Unpublished from Browser Copilot.',
+    '',
+    `- slug: \`${input.slug}\``,
+    `- version files: ${blobs.length}`,
+    '',
+    '<sub>Merging removes this workflow from the marketplace. Copies already applied locally keep working.</sub>',
+  ].join('\n')
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const branch = `${MARKETPLACE_PR_BRANCH_PREFIX}${input.slug}-${branchStamp(now, attempt)}`
+    try {
+      await deps.client.createRef(writable, MARKETPLACE_REPO, branch, baseRef.object.sha)
+    } catch (error) {
+      if (isConflict(error) && attempt === 0) continue
+      throw error
+    }
+
+    for (const blob of blobs) {
+      await deps.client.deleteFile(writable, MARKETPLACE_REPO, blob.path, {
+        message: commitMessage,
+        sha: blob.sha,
+        branch,
+      })
+    }
+
+    try {
+      const pull = await deps.client.createPull(MARKETPLACE_OWNER, MARKETPLACE_REPO, {
+        title: commitMessage,
+        head: `${login}:${branch}`,
+        base,
+        body,
+      })
+      return {
+        prUrl: pull.html_url,
+        prNumber: pull.number,
+        slug: input.slug,
+        files: blobs.length,
+      }
+    } catch (error) {
+      if (isConflict(error) && attempt === 0) continue
+      throw error
+    }
+  }
+  throw new MarketplaceError('conflict', 'A pull request for this workflow is already open')
 }

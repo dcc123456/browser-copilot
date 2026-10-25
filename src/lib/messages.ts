@@ -25,7 +25,7 @@ import type {
 import type { FeishuConfig, ScheduledTask, TaskRunLog } from './scheduler-types'
 import type { TokenDashboard, TokenRange } from './token-ledger'
 import type { RunOutcomeKind, RunSource, RunStep, RunWindowKind } from '../background/running-tasks'
-import type { Workflow } from './workflow/types'
+import type { Workflow, WorkflowMarketplaceRef } from './workflow/types'
 import type { WorkflowGroup } from './workflow/groups'
 import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
 import type { PendingTakeoverInfo } from './workflow/takeover-pending'
@@ -222,6 +222,14 @@ export type Command =
       verifyRun?: boolean
     }
   | { type: 'workflows.delete'; id: string }
+  /**
+   * Records the listing a workflow was published under.
+   *
+   * Publishing does not change the graph, so this is deliberately not a save:
+   * the next publish reads the reference to update the same slug instead of
+   * minting a new one, and the revision sequence must not show a fake edit.
+   */
+  | { type: 'workflows.marketplace'; id: string; marketplace: WorkflowMarketplaceRef }
   /**
    * Creates an independent copy of a stored workflow under a fresh id. The copy
    * keeps the graph, settings and trigger but starts with no revision history —
@@ -634,6 +642,7 @@ export type CommandResult =
   | { type: 'workflows.get'; workflow?: Workflow }
   | { type: 'workflows.save' }
   | { type: 'workflows.delete' }
+  | { type: 'workflows.marketplace' }
   | { type: 'workflows.duplicate'; workflow?: Workflow }
   | { type: 'workflows.assignGroup' }
   | { type: 'workflowGroups.list'; groups: WorkflowGroup[] }

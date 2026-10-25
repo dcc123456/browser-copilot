@@ -240,14 +240,23 @@ export async function getWorkflow(id: string): Promise<Workflow | undefined> {
   return (await listWorkflows()).find((workflow) => workflow.id === id)
 }
 
-export async function saveWorkflow(workflow: Workflow): Promise<void> {
+/**
+ * Writes one workflow. `updatedAt` is stamped on every save except a
+ * metadata-only write (`touchUpdatedAt: false`), which must not pretend the
+ * workflow itself moved — the list sorts by this field.
+ */
+export async function saveWorkflow(
+  workflow: Workflow,
+  options: { touchUpdatedAt?: boolean } = {},
+): Promise<void> {
   // Serialized per key: the read-modify-write below would otherwise race a
   // concurrent save (both read the same base list, the later write silently
   // dropped the other's workflow). All content writes run in the service
   // worker, so this one-context queue is a complete serialization.
   await withKeyLock(KEY_WORKFLOWS, async () => {
     const list = await listWorkflows()
-    const normalized = asWorkflow({ ...workflow, updatedAt: Date.now() })
+    const updatedAt = options.touchUpdatedAt === false ? workflow.updatedAt : Date.now()
+    const normalized = asWorkflow({ ...workflow, updatedAt })
     if (!normalized) throw new Error('Invalid workflow')
     // Canonicalize on write: legacy shapes (legacy block ids, `values.*` bags,
     // handle-less edges) are migrated before persisting so every consumer — the

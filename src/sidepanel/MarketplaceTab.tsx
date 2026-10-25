@@ -26,6 +26,7 @@ import {
 } from '../lib/marketplace/engagement'
 import { GitHubClient, type GitHubComment } from '../lib/marketplace/github-client'
 import { assetRepoPath, needsUpdate, workflowDir } from '../lib/marketplace/meta'
+import { unpublishWorkflow } from '../lib/marketplace/publish'
 import { rawUrl } from '../lib/marketplace/raw'
 import { clearAuth, getAuth } from '../lib/marketplace/token'
 import {
@@ -102,6 +103,8 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
 
   const [installed, setInstalled] = useState<Workflow[]>([])
   const [busySlug, setBusySlug] = useState<string | null>(null)
+  /** Slug whose removal PR is being opened. */
+  const [removingSlug, setRemovingSlug] = useState<string | null>(null)
   /** Slugs whose published file failed validation; retried only on refresh. */
   const [unavailable, setUnavailable] = useState<Set<string>>(new Set())
 
@@ -341,6 +344,42 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
     }
   }
 
+  /**
+   * Opens the removal PR for a listing authored by the connected account.
+   *
+   * Nothing is removed locally: the card stays until the maintainer merges, and
+   * every copy already applied keeps working afterwards.
+   */
+  const unpublish = async (card: MarketplaceCard): Promise<void> => {
+    if (!auth) return
+    const confirmed = await confirmDialog({
+      title: t.marketplaceUnpublishTitle,
+      message: t.marketplaceUnpublishMessage({ title: card.meta.title }),
+      confirmText: t.marketplaceUnpublishConfirm,
+      cancelText: t.cancel,
+    })
+    if (!confirmed) return
+
+    setRemovingSlug(card.meta.slug)
+    try {
+      const result = await unpublishWorkflow(
+        { slug: card.meta.slug, title: card.meta.title },
+        { client: clientForWrites(), auth },
+      )
+      setBanner({
+        kind: 'ok',
+        text: t.marketplaceUnpublishBanner({ number: result.prNumber }),
+      })
+    } catch (caught) {
+      if (caught instanceof MarketplaceError && caught.code === 'unauthorized') {
+        await forgetRejectedToken()
+      }
+      setBanner({ kind: 'error', text: marketplaceErrorMessage(t, caught) })
+    } finally {
+      setRemovingSlug(null)
+    }
+  }
+
   return (
     <div className="pane">
       {banner && (
@@ -430,6 +469,7 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
             const existing = findInstalled(installed, meta.slug)
             const hasUpdate = !!existing && needsUpdate(meta, existing.marketplace)
             const isUnavailable = unavailable.has(meta.slug)
+            const isMine = !!auth && auth.login.toLowerCase() === meta.author.toLowerCase()
             const cover = meta.images[0]
             const sourceUrl = `https://github.com/${MARKETPLACE_REPO_FULL}/tree/${MARKETPLACE_BRANCH}/${workflowDir(meta.slug)}`
             const issueNumber = card.prNumber
@@ -503,6 +543,15 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                   <a className="text-accent" href={sourceUrl} rel="noreferrer" target="_blank">
                     {t.marketplaceViewOnGithub}
                   </a>
+                  {isMine && (
+                    <button
+                      disabled={busySlug !== null || removingSlug !== null}
+                      onClick={() => void unpublish(card)}
+                      type="button"
+                    >
+                      {t.marketplaceUnpublish}
+                    </button>
+                  )}
                 </div>
                 {isOpen && issueNumber !== null && (
                   <section className="mt-2 border-t border-border pt-2">

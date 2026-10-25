@@ -149,6 +149,13 @@ workflows/<slug>/
 - 执行更新：保留本地 `id`、`folderId`、`createdAt`，替换 `drawflow/trigger/settings/description/name`，刷新 `marketplace.version/hash`，追加 revision（`source = 'marketplace-update'`）。
 - 更新是覆盖式操作，必须二次确认，并在确认文案里写明“本地修改会丢失”。
 
+### 6.5 重新编辑与下架
+
+- 发布成功后把 `{repo, slug, version, hash, author, appliedAt}` 记到本地工作流的 `marketplace` 上（`workflows.marketplace` 命令，只改元数据、不产生 revision，也不改 `updatedAt`——工作流列表按该字段排序，回写不能把它当作一次内容修改）。下次发布读这个引用，沿用同一 slug 并 `version + 1`，PR 标题变 `Update workflow: …`。没有该引用的“从本地直接发布”的工作流，改完再发布会因内容 hash 变化生成新 slug → 广场重复卡片，因此回写是重新编辑的前提。
+- 重新编辑时发布弹窗先用 `raw.githubusercontent.com` 的 `meta.json` 预填标题/描述/分类/标签/视频，并把已发布图片下载回表单（最多 3 张，已压缩）；用户在预填返回前动过任何字段则整段预填放弃，避免覆盖输入。
+- 下架入口在广场卡片上：当 `card.meta.author` 与已连接账号一致（忽略大小写）时显示“取消发布”。确认后 `GET git/trees` 取出 `workflows/<slug>/` 下全部 blob，新建 `submit/<slug>-<stamp>` 分支逐个 `DELETE /contents/...`（带 sha），再开 PR `Remove workflow: <title> [wf:<slug>]`。维护者合并后目录消失，目录刷新（或 30 分钟过期）后卡片消失。
+- 只有“完整且非 stale”的目录读取才能证明某个 slug 不存在：此时本地 `marketplace.slug` 不在目录中的工作流显示“来源已删除”，不再提示更新；本地副本、触发器和历史都不受影响。截断或回退缓存时不做该判断，避免把仍在架上的工作流误标为删除。
+
 ## 7. 点赞与评论
 
 - 目标对象是该工作流已合并 PR 的 issue 通道。

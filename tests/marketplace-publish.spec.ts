@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import type { GitHubPull, GitHubRef, GitHubRepo } from '../src/lib/marketplace/github-client'
+import type {
+  GitHubPull,
+  GitHubRef,
+  GitHubRepo,
+  GitHubTree,
+  GitHubTreeEntry,
+} from '../src/lib/marketplace/github-client'
 import {
   branchStamp,
   preparePublish,
   pushPublish,
+  unpublishWorkflow,
   type PreparedPublish,
-  type PublishClient,
+  type UnpublishClient,
 } from '../src/lib/marketplace/publish'
 import {
   MARKETPLACE_OWNER,
@@ -64,6 +71,8 @@ interface ClientOptions {
   forkReadyAfter?: number
   /** Number of `createRef` calls rejected with a conflict. */
   createRefConflicts?: number
+  /** Repo tree the removal path reads. */
+  tree?: GitHubTreeEntry[]
 }
 
 interface ClientCalls {
@@ -72,10 +81,15 @@ interface ClientCalls {
   getRef: Array<{ owner: string; repo: string; branch: string }>
   createRef: Array<{ owner: string; repo: string; branch: string; sha: string }>
   putFile: Array<{ owner: string; repo: string; path: string; branch: string }>
+  deleteFile: Array<{ owner: string; repo: string; path: string; sha: string; branch: string }>
+  listTree: Array<{ owner: string; repo: string; branch: string }>
   createPull: Array<{ owner: string; repo: string; title: string; head: string; base: string }>
 }
 
-function makeClient(options: ClientOptions = {}): { client: PublishClient; calls: ClientCalls } {
+function makeClient(options: ClientOptions = {}): {
+  client: UnpublishClient
+  calls: ClientCalls
+} {
   const forkReadyAfter = options.forkReadyAfter ?? 0
   let remainingRefConflicts = options.createRefConflicts ?? 0
   let forkPolls = 0
@@ -86,10 +100,12 @@ function makeClient(options: ClientOptions = {}): { client: PublishClient; calls
     getRef: [],
     createRef: [],
     putFile: [],
+    deleteFile: [],
+    listTree: [],
     createPull: [],
   }
 
-  const client: PublishClient = {
+  const client: UnpublishClient = {
     async getRepo(owner: string, repo: string): Promise<GitHubRepo> {
       calls.getRepo.push({ owner, repo })
       if (owner !== MARKETPLACE_OWNER) {
@@ -119,6 +135,20 @@ function makeClient(options: ClientOptions = {}): { client: PublishClient; calls
     async putFile(owner, repo, path, input): Promise<unknown> {
       calls.putFile.push({ owner, repo, path, branch: input.branch })
       return { content: { path } }
+    },
+    async deleteFile(owner, repo, path, input): Promise<unknown> {
+      calls.deleteFile.push({
+        owner,
+        repo,
+        path,
+        sha: input.sha,
+        branch: input.branch,
+      })
+      return { commit: { sha: BASE_SHA } }
+    },
+    async listTree(owner: string, repo: string, branch: string): Promise<GitHubTree> {
+      calls.listTree.push({ owner, repo, branch })
+      return { tree: options.tree ?? [], truncated: false }
     },
     async createPull(owner, repo, input): Promise<GitHubPull> {
       calls.createPull.push({ owner, repo, title: input.title, head: input.head, base: input.base })
@@ -349,6 +379,100 @@ describe('pushPublish', () => {
 
     await expect(
       pushPublish(prepared, { client, auth: { token: '', login: 'octocat' } }),
+    ).rejects.toMatchObject({ code: 'auth-required' })
+  })
+})
+
+describe('unpublishWorkflow', () => {
+  const SLUG = 'scrape-orders-abcdef'
+
+  function treeFor(slug: string): GitHubTreeEntry[] {
+    return [
+      { path: `workflows/${slug}/workflow.json`, type: 'blob', sha: '1'.repeat(40) },
+      { path: `workflows/${slug}/meta.json`, type: 'blob', sha: '2'.repeat(40) },
+      { path: `workflows/${slug}/assets/1.webp`, type: 'blob', sha: '3'.repeat(40) },
+      { path: 'workflows/other-111111/meta.json', type: 'blob', sha: '4'.repeat(40) },
+      { path: 'README.md', type: 'blob', sha: '5'.repeat(40) },
+    ]
+  }
+
+  it('deletes every file under the slug and opens a removal pull request', async () => {
+    const { client, calls } = makeClient({ tree: treeFor(SLUG) })
+
+    const result = await unpublishWorkflow(
+      { slug: SLUG, title: 'Scrape orders' },
+      { client, auth: AUTH, now: NOW, sleep: async () => {} },
+    )
+
+    const branch = `submit/${SLUG}-202610250900`
+    expect(calls.listTree).toEqual([{ owner: 'octocat', repo: MARKETPLACE_REPO, branch: 'main' }])
+    expect(calls.deleteFile.map((call) => call.path)).toEqual([
+      `workflows/${SLUG}/workflow.json`,
+      `workflows/${SLUG}/meta.json`,
+      `workflows/${SLUG}/assets/1.webp`,
+    ])
+    expect(calls.deleteFile.map((call) => call.sha)).toEqual([
+      '1'.repeat(40),
+      '2'.repeat(40),
+      '3'.repeat(40),
+    ])
+    expect(calls.deleteFile.every((call) => call.branch === branch)).toBe(true)
+    expect(calls.createPull).toEqual([
+      {
+        owner: MARKETPLACE_OWNER,
+        repo: MARKETPLACE_REPO,
+        title: `Remove workflow: Scrape orders [wf:${SLUG}]`,
+        head: `octocat:${branch}`,
+        base: 'main',
+      },
+    ])
+    expect(result).toMatchObject({
+      prNumber: 42,
+      slug: SLUG,
+      files: 3,
+      prUrl: `https://github.com/${MARKETPLACE_OWNER}/${MARKETPLACE_REPO}/pull/42`,
+    })
+  })
+
+  it('reports a slug with no published files instead of opening an empty PR', async () => {
+    const { client, calls } = makeClient({ tree: treeFor('another-111111') })
+
+    await expect(
+      unpublishWorkflow(
+        { slug: SLUG, title: 'Scrape orders' },
+        { client, auth: AUTH, now: NOW, sleep: async () => {} },
+      ),
+    ).rejects.toMatchObject({ code: 'not-found' })
+    expect(calls.createRef).toHaveLength(0)
+    expect(calls.deleteFile).toHaveLength(0)
+    expect(calls.createPull).toHaveLength(0)
+  })
+
+  it('retries once on a branch-name conflict', async () => {
+    const { client, calls } = makeClient({
+      tree: treeFor(SLUG),
+      createRefConflicts: 1,
+    })
+
+    await unpublishWorkflow(
+      { slug: SLUG, title: 'Scrape orders' },
+      { client, auth: AUTH, now: NOW, sleep: async () => {} },
+    )
+
+    const base = `submit/${SLUG}-202610250900`
+    expect(calls.createRef.map((call) => call.branch)).toEqual([base, `${base}-1`])
+    expect(calls.deleteFile.every((call) => call.branch === `${base}-1`)).toBe(true)
+    expect(calls.createPull[0]!.head).toBe(`octocat:${base}-1`)
+  })
+
+  it('requires a token', async () => {
+    const { client } = makeClient({ tree: treeFor(SLUG) })
+
+    await expect(
+      unpublishWorkflow(
+        { slug: SLUG, title: 'Scrape orders' },
+        { client, auth: { token: '', login: 'octocat' } },
+      ),
     ).rejects.toMatchObject({ code: 'auth-required' })
   })
 })

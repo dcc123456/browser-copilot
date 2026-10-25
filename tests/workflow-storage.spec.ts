@@ -89,6 +89,32 @@ describe('workflow storage', () => {
     expect(got!.settings.notification).toBe(true)
   })
 
+  it('stamps updatedAt on save but preserves it for a metadata-only write', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(5_000)
+    await saveWorkflow(makeWorkflow({ id: 'a', updatedAt: 1_000 }))
+    expect((await getWorkflow('a'))!.updatedAt).toBe(5_000)
+
+    // Publishing records a marketplace ref; that must not reorder the list as
+    // if the workflow itself had changed.
+    vi.spyOn(Date, 'now').mockReturnValue(9_000)
+    const stored = (await getWorkflow('a'))!
+    await saveWorkflow(
+      {
+        ...stored,
+        marketplace: {
+          repo: 'dcc123456/BC-workflow',
+          slug: 'alpha-abcdef',
+          version: 1,
+          hash: 'b'.repeat(64),
+          author: 'octocat',
+          appliedAt: 2_000,
+        },
+      },
+      { touchUpdatedAt: false },
+    )
+    expect((await getWorkflow('a'))!.updatedAt).toBe(5_000)
+  })
+
   it('returns an empty list when nothing is stored', async () => {
     expect(await listWorkflows()).toEqual([])
     expect(await getWorkflow('missing')).toBeUndefined()

@@ -174,6 +174,18 @@ export class GitHubClient {
     })
   }
 
+  deleteFile(
+    owner: string,
+    repo: string,
+    path: string,
+    input: { message: string; sha: string; branch: string },
+  ): Promise<unknown> {
+    return this.request(`/repos/${owner}/${repo}/contents/${encodePath(path)}`, {
+      method: 'DELETE',
+      body: input,
+    })
+  }
+
   createPull(
     owner: string,
     repo: string,

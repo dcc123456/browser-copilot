@@ -50,6 +50,31 @@ export function pendingUpdates(
   return updates
 }
 
+/**
+ * Workflow ids whose published slug is absent from a complete catalog.
+ *
+ * Only a complete, non-truncated snapshot can prove absence: a capped list or
+ * a stale fallback would mark live workflows as removed. An unpublished source
+ * changes nothing locally — the copy keeps working, it just stops receiving
+ * updates.
+ */
+export function removedSources(
+  workflows: readonly Workflow[],
+  cards: readonly MarketplaceCard[],
+  complete: boolean,
+): Set<string> {
+  const removed = new Set<string>()
+  if (!complete) return removed
+  const slugs = new Set(cards.map((card) => card.meta.slug))
+  for (const workflow of workflows) {
+    const ref = workflow.marketplace
+    if (ref && ref.repo === MARKETPLACE_REPO_FULL && !slugs.has(ref.slug)) {
+      removed.add(workflow.id)
+    }
+  }
+  return removed
+}
+
 function marketplaceRef(card: MarketplaceCard, appliedAt: number): WorkflowMarketplaceRef {
   return {
     repo: MARKETPLACE_REPO_FULL,

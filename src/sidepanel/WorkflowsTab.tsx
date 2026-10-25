@@ -49,10 +49,14 @@ import { WorkflowHealthView } from './WorkflowHealthView'
 import PublishWorkflowDialog from './PublishWorkflowDialog'
 import { installFromCard } from './marketplace-install'
 import { marketplaceErrorMessage } from './marketplace-errors'
-import { pendingUpdates } from '../lib/marketplace/apply'
+import { pendingUpdates, removedSources } from '../lib/marketplace/apply'
 import { chromeCatalogCache, loadCatalog } from '../lib/marketplace/catalog'
 import { GitHubClient } from '../lib/marketplace/github-client'
-import { MARKETPLACE_CACHE_TTL_MS, type MarketplaceCard } from '../lib/marketplace/types'
+import {
+  MARKETPLACE_CACHE_TTL_MS,
+  MARKETPLACE_REPO_FULL,
+  type MarketplaceCard,
+} from '../lib/marketplace/types'
 import { summarizeWorkflowHealth } from '../lib/workflow/workflow-health'
 
 /**
@@ -519,6 +523,8 @@ export default function WorkflowsTab() {
    * it has not verified.
    */
   const [marketplaceUpdates, setMarketplaceUpdates] = useState<Record<string, MarketplaceCard>>({})
+  /** Ids whose published source is gone from a complete catalog. */
+  const [marketplaceRemoved, setMarketplaceRemoved] = useState<Set<string>>(new Set())
   /** Epoch ms before which no new check is made (see below). */
   const nextUpdateCheckRef = useRef(0)
 
@@ -540,6 +546,9 @@ export default function WorkflowsTab() {
         cache: chromeCatalogCache(),
       })
       setMarketplaceUpdates(pendingUpdates(list, catalog.cards))
+      setMarketplaceRemoved(
+        removedSources(list, catalog.cards, !catalog.truncated && !catalog.stale),
+      )
     } catch {
       // Offline: keep the last known state, no banner for an unasked check.
       nextUpdateCheckRef.current = Date.now() + 10 * 60 * 1000
@@ -1487,6 +1496,9 @@ export default function WorkflowsTab() {
                           {updateCard && (
                             <span className="task-chip text-accent!">{t.marketplaceUpdate}</span>
                           )}
+                          {!updateCard && marketplaceRemoved.has(wf.id) && (
+                            <span className="task-chip">{t.marketplaceSourceRemoved}</span>
+                          )}
                           {wf.description && <span className="task-lastrun">{wf.description}</span>}
                         </div>
                         {last && (
@@ -1657,6 +1669,27 @@ export default function WorkflowsTab() {
           workflow={publishTarget}
           onClose={() => setPublishTarget(null)}
           onPublished={(result) => {
+            // Remember the listing so the next publish updates this slug
+            // instead of creating a second card for the same workflow.
+            void (async () => {
+              try {
+                await sendCommand({
+                  type: 'workflows.marketplace',
+                  id: publishTarget.id,
+                  marketplace: {
+                    repo: MARKETPLACE_REPO_FULL,
+                    slug: result.slug,
+                    version: result.version,
+                    hash: result.hash,
+                    author: result.meta.author,
+                    appliedAt: Date.now(),
+                  },
+                })
+                await load()
+              } catch {
+                // The PR is already open; only the local link is missing.
+              }
+            })()
             setBanner({
               kind: 'ok',
               text: t.marketplacePublishBanner({ number: result.prNumber }),

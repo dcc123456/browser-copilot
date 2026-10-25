@@ -23,7 +23,7 @@ import {
   type PreparedPublish,
   type PublishResult,
 } from '../lib/marketplace/publish'
-import { fetchPublishedMeta } from '../lib/marketplace/raw'
+import { fetchPublishedAsset, fetchPublishedMeta } from '../lib/marketplace/raw'
 import { isClassicToken, setAuth, clearAuth, getAuth } from '../lib/marketplace/token'
 import {
   MARKETPLACE_CATEGORIES,
@@ -142,12 +142,45 @@ export default function PublishWorkflowDialog({
     void getAuth().then(setAuthState)
   }, [initialAuth])
 
-  // Any edit invalidates the prepared bytes; a stale preview would publish the
-  // old title/screenshots without the user noticing.
-  const invalidate = (): void => {
+  /**
+   * Any edit invalidates the prepared bytes; a stale preview would publish the
+   * old title/screenshots without the user noticing. The first edit also marks
+   * the draft as author-owned so the async prefill cannot overwrite it.
+   */
+  const editedRef = useRef(false)
+  const edit = (): void => {
+    editedRef.current = true
     setPrepared(null)
     setPublishError(null)
   }
+
+  const publishedSlug = workflow.marketplace?.slug
+  useEffect(() => {
+    if (!publishedSlug) return
+    let cancelled = false
+    void (async () => {
+      const meta = await fetchPublishedMeta(publishedSlug).catch(() => null)
+      if (!meta || cancelled || editedRef.current) return
+      setTitle(meta.title)
+      setDescription(meta.description)
+      setCategory(meta.category)
+      setTagInput(meta.tags.join(', '))
+      setVideoUrl(meta.videoUrl ?? '')
+      const blobs = await Promise.all(
+        meta.images
+          .slice(0, MAX_PUBLISH_IMAGES)
+          .map((asset) => fetchPublishedAsset(publishedSlug, asset)),
+      )
+      if (cancelled || editedRef.current) return
+      const restored = blobs
+        .filter((blob): blob is Blob => blob !== null)
+        .map((blob) => ({ blob, url: URL.createObjectURL(blob) }))
+      if (restored.length > 0) setImages(restored)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [publishedSlug])
 
   const addImages = async (files: FileList | null): Promise<void> => {
     if (!files || files.length === 0) return
@@ -172,7 +205,7 @@ export default function PublishWorkflowDialog({
         }
       }
       setImages(next)
-      invalidate()
+      edit()
     } finally {
       setImageBusy(false)
     }
@@ -374,7 +407,7 @@ export default function PublishWorkflowDialog({
                   disabled={busy}
                   onChange={(event) => {
                     setTitle(event.target.value)
-                    invalidate()
+                    edit()
                   }}
                   placeholder={t.marketplaceFieldTitlePlaceholder}
                   value={title}
@@ -385,7 +418,7 @@ export default function PublishWorkflowDialog({
                   disabled={busy}
                   onChange={(event) => {
                     setDescription(event.target.value)
-                    invalidate()
+                    edit()
                   }}
                   placeholder={t.marketplaceFieldDescriptionPlaceholder}
                   rows={3}
@@ -400,7 +433,7 @@ export default function PublishWorkflowDialog({
                       disabled={busy}
                       onChange={(event) => {
                         setCategory(event.target.value as MarketplaceCategory)
-                        invalidate()
+                        edit()
                       }}
                       value={category}
                     >
@@ -418,7 +451,7 @@ export default function PublishWorkflowDialog({
                       disabled={busy}
                       onChange={(event) => {
                         setTagInput(event.target.value)
-                        invalidate()
+                        edit()
                       }}
                       placeholder={t.marketplaceFieldTagsPlaceholder}
                       value={tagInput}
@@ -432,7 +465,7 @@ export default function PublishWorkflowDialog({
                   disabled={busy}
                   onChange={(event) => {
                     setVideoUrl(event.target.value)
-                    invalidate()
+                    edit()
                   }}
                   placeholder="https://"
                   value={videoUrl}
@@ -457,7 +490,7 @@ export default function PublishWorkflowDialog({
                         onClick={() => {
                           URL.revokeObjectURL(image.url)
                           setImages((current) => current.filter((_, i) => i !== index))
-                          invalidate()
+                          edit()
                         }}
                         title={t.marketplaceImagesRemove}
                         type="button"

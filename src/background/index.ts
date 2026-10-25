@@ -1773,6 +1773,19 @@ async function handleCommand(
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.delete' }
 
+    case 'workflows.marketplace': {
+      // Metadata only: no revision bump, no trigger reschedule, and no
+      // updatedAt change — the workflow itself did not move.
+      const stored = await getWorkflow(command.id)
+      if (stored) {
+        await saveWorkflow(
+          { ...stored, marketplace: command.marketplace },
+          { touchUpdatedAt: false },
+        )
+      }
+      return { type: 'workflows.marketplace' }
+    }
+
     case 'workflows.duplicate': {
       const copy = await duplicateWorkflow(command.id)
       // The copy inherits the trigger, so the alarm set has to be recomputed or
