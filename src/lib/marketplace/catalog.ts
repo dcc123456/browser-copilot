@@ -172,6 +172,24 @@ async function collectPages<T>(
   return { items, truncated: true }
 }
 
+/**
+ * Reads the repository tree, treating an empty repository as an empty catalog.
+ *
+ * GitHub answers 409 (mapped to `conflict`) while the repo has no commits yet,
+ * which is exactly the state the marketplace repo starts in. Reporting it as a
+ * load failure would make a newly created marketplace look broken.
+ */
+async function readTree(client: CatalogClient): Promise<GitHubTree> {
+  try {
+    return await client.listTree(MARKETPLACE_OWNER, MARKETPLACE_REPO, MARKETPLACE_BRANCH)
+  } catch (error) {
+    if (error instanceof MarketplaceError && error.code === 'conflict') {
+      return { tree: [], truncated: false }
+    }
+    throw error
+  }
+}
+
 async function mapLimit<T, R>(
   items: readonly T[],
   limit: number,
@@ -197,7 +215,7 @@ export async function readCatalog(deps: ReadCatalogDeps): Promise<CatalogSnapsho
   const maxPages = deps.maxPages ?? MAX_CATALOG_PAGES
   const fetchMeta = deps.fetchMeta ?? ((slug: string) => fetchPublishedMeta(slug))
 
-  const tree = await client.listTree(MARKETPLACE_OWNER, MARKETPLACE_REPO, MARKETPLACE_BRANCH)
+  const tree = await readTree(client)
   const pulls = await collectPages(
     (page) => client.listClosedPulls(MARKETPLACE_OWNER, MARKETPLACE_REPO, page),
     maxPages,

@@ -11,7 +11,7 @@ import {
   type CatalogSnapshot,
 } from '../src/lib/marketplace/catalog'
 import { buildMeta } from '../src/lib/marketplace/meta'
-import type { MarketplaceMeta } from '../src/lib/marketplace/types'
+import { MarketplaceError, type MarketplaceMeta } from '../src/lib/marketplace/types'
 
 const NOW = new Date('2026-10-25T09:00:00.000Z')
 
@@ -162,6 +162,30 @@ describe('readCatalog', () => {
         },
       }),
     ).rejects.toMatchObject({ code: 'network' })
+  })
+
+  it('reads a repository with no commits as an empty catalog', async () => {
+    const { api } = client({
+      async listTree() {
+        throw new MarketplaceError('conflict', 'Git Repository is empty.', 409)
+      },
+    })
+    const snapshot = await readCatalog({ client: api, fetchMeta: metaReader(), now: () => 5 })
+
+    expect(snapshot.cards).toEqual([])
+    expect(snapshot.truncated).toBe(false)
+    expect(snapshot.fetchedAt).toBe(5)
+  })
+
+  it('still fails when the tree itself cannot be read', async () => {
+    const { api } = client({
+      async listTree() {
+        throw new MarketplaceError('network', 'offline')
+      },
+    })
+    await expect(readCatalog({ client: api, fetchMeta: metaReader() })).rejects.toMatchObject({
+      code: 'network',
+    })
   })
 
   it('caps the displayed entries', async () => {
