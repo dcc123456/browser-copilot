@@ -10,15 +10,18 @@
  */
 
 import { CircleX } from 'lucide-react'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import type { EditFormProps } from '../EditForms'
 import { Checkbox, Field, NumberInput, Select, TextArea, TextInput } from '../shared/Field'
-import PopupField from '../shared/PopupField'
+import Modal from '../../ui/Modal'
 import { bool, num, str } from '../shared/InteractionBase'
 import { useEditorLocale } from '../../locale-context'
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']
 const NO_BODY = ['GET', 'HEAD']
+const BODY_PLACEHOLDER = '{\n  "key": "value"\n}'
+
+type RequestTab = 'headers' | 'body' | 'response'
 
 interface Header {
   name: string
@@ -43,7 +46,11 @@ export default function EditWebhook({ data, onChange }: EditFormProps) {
   const headers = asHeaders(data.headers)
   const hasBody = !NO_BODY.includes(method)
 
-  const [tab, setTab] = useState<'headers' | 'body' | 'response'>('headers')
+  const [tab, setTab] = useState<RequestTab>('headers')
+  const [bodyOpen, setBodyOpen] = useState(false)
+  // Automa resets the tab when the method loses its body; deriving it keeps the
+  // strip and the panel in sync without a second effect.
+  const activeTab: RequestTab = tab === 'body' && !hasBody ? 'headers' : tab
 
   const setHeaders = (next: Header[]) => onChange({ headers: next })
   const updateHeader = (index: number, patch: Partial<Header>) => {
@@ -101,86 +108,118 @@ export default function EditWebhook({ data, onChange }: EditFormProps) {
         />
       </Field>
 
-      <div className="wf-tabs">
+      <div
+        className="mt-2 flex items-stretch gap-1 rounded-lg border border-border bg-sunken p-1"
+        role="tablist"
+      >
         <button
           type="button"
-          className={tab === 'headers' ? 'wf-tab wf-tab-active' : 'wf-tab'}
+          role="tab"
+          aria-selected={activeTab === 'headers'}
+          className={`flex-1 rounded-md px-4 py-2 text-[13px] transition-colors ${
+            activeTab === 'headers'
+              ? 'bg-panel font-semibold text-ink'
+              : 'text-muted hover:bg-hover hover:text-ink'
+          }`}
           onClick={() => setTab('headers')}
         >
-          Headers
+          {bt('Headers')}
         </button>
         {hasBody && (
           <button
             type="button"
-            className={tab === 'body' ? 'wf-tab wf-tab-active' : 'wf-tab'}
+            role="tab"
+            aria-selected={activeTab === 'body'}
+            className={`flex-1 rounded-md px-4 py-2 text-[13px] transition-colors ${
+              activeTab === 'body'
+                ? 'bg-panel font-semibold text-ink'
+                : 'text-muted hover:bg-hover hover:text-ink'
+            }`}
             onClick={() => setTab('body')}
           >
-            Body
+            {bt('Body')}
           </button>
         )}
         <button
           type="button"
-          className={tab === 'response' ? 'wf-tab wf-tab-active' : 'wf-tab'}
+          role="tab"
+          aria-selected={activeTab === 'response'}
+          className={`flex-1 rounded-md px-4 py-2 text-[13px] transition-colors ${
+            activeTab === 'response'
+              ? 'bg-panel font-semibold text-ink'
+              : 'text-muted hover:bg-hover hover:text-ink'
+          }`}
           onClick={() => setTab('response')}
         >
-          Response
+          {bt('Response')}
         </button>
       </div>
 
-      {tab === 'headers' && (
-        <div className="wf-headers">
+      {activeTab === 'headers' && (
+        <div className="mt-3 grid grid-cols-7 items-center gap-2">
           {headers.map((h, i) => (
-            <div className="wf-header-row" key={i}>
-              <TextInput
-                value={h.name}
-                placeholder={`Header ${i + 1}`}
-                onChange={(v) => updateHeader(i, { name: v })}
-              />
-              <TextInput
-                value={h.value}
-                placeholder="Value"
-                onChange={(v) => updateHeader(i, { value: v })}
-              />
+            <Fragment key={i}>
+              <div className="wf-field col-span-3 mb-0!">
+                <TextInput
+                  value={h.name}
+                  placeholder={`${bt('Header')} ${i + 1}`}
+                  onChange={(v) => updateHeader(i, { name: v })}
+                />
+              </div>
+              <div className="wf-field col-span-3 mb-0!">
+                <TextInput
+                  value={h.value}
+                  placeholder={bt('Value')}
+                  onChange={(v) => updateHeader(i, { value: v })}
+                />
+              </div>
               <button
                 type="button"
-                className="wf-icon-btn"
-                title="Remove header"
+                className="col-span-1 inline-flex h-8 w-8 items-center justify-center justify-self-center rounded-md text-faint hover:bg-hover hover:text-ink"
+                title={bt('Remove header')}
+                aria-label={bt('Remove header')}
                 onClick={() => removeHeader(i)}
               >
-                <CircleX size={14} />
+                <CircleX size={16} />
               </button>
-            </div>
+            </Fragment>
           ))}
-          <button type="button" className="wf-btn wf-btn-block" onClick={addHeader}>
-            Add header
-          </button>
+          <div className="col-span-4 mt-2">
+            <button
+              type="button"
+              className="inline-flex w-full items-center justify-center rounded-lg border border-border bg-panel px-3 py-2 text-[13px] font-medium text-ink hover:bg-hover"
+              onClick={addHeader}
+            >
+              {bt('Add header')}
+            </button>
+          </div>
         </div>
       )}
 
-      {tab === 'body' && hasBody && (
-        <PopupField
-          title="Request body"
-          summary={
-            str(data, 'body').trim() ? `${str(data, 'body').length} ${bt('chars')}` : bt('None')
-          }
-          editLabel="Edit body"
-          icon="lucide:FileText"
-          size="lg"
+      {activeTab === 'body' && (
+        <pre
+          className="mt-3 max-h-80 min-h-20 cursor-pointer overflow-auto whitespace-pre rounded-lg border border-border bg-panel-2 p-4 font-mono text-xs leading-relaxed text-ink"
+          role="button"
+          tabIndex={0}
+          title={bt('Edit body')}
+          aria-label={bt('Edit body')}
+          onClick={() => setBodyOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return
+            e.preventDefault()
+            setBodyOpen(true)
+          }}
         >
-          <Field label="Body">
-            <TextArea
-              mono
-              rows={14}
-              value={str(data, 'body')}
-              placeholder={'{\n  "key": "value"\n}'}
-              onChange={(v) => onChange({ body: v })}
-            />
-          </Field>
-        </PopupField>
+          {str(data, 'body').trim() ? (
+            str(data, 'body')
+          ) : (
+            <span className="text-faint">{BODY_PLACEHOLDER}</span>
+          )}
+        </pre>
       )}
 
-      {tab === 'response' && (
-        <div className="wf-tab-body">
+      {activeTab === 'response' && (
+        <div className="mt-3">
           <Field label="Response type">
             <Select
               value={responseType}
@@ -234,6 +273,24 @@ export default function EditWebhook({ data, onChange }: EditFormProps) {
           )}
         </div>
       )}
+
+      <Modal
+        open={bodyOpen}
+        onClose={() => setBodyOpen(false)}
+        title={bt('Request body')}
+        icon="lucide:FileText"
+        size="lg"
+      >
+        <Field label="Body">
+          <TextArea
+            mono
+            rows={14}
+            value={str(data, 'body')}
+            placeholder={BODY_PLACEHOLDER}
+            onChange={(v) => onChange({ body: v })}
+          />
+        </Field>
+      </Modal>
     </div>
   )
 }
