@@ -164,6 +164,13 @@ describe('readCatalog', () => {
     ).rejects.toMatchObject({ code: 'network' })
   })
 
+  it('treats a tree whose metadata is all missing as a failed read', async () => {
+    const { api } = client()
+    await expect(readCatalog({ client: api, fetchMeta: async () => null })).rejects.toMatchObject({
+      code: 'network',
+    })
+  })
+
   it('reads a repository with no commits as an empty catalog', async () => {
     const { api } = client({
       async listTree() {
@@ -270,6 +277,22 @@ describe('loadCatalog', () => {
       now: () => 1000 + 2 * 60 * 60 * 1000,
     })
     expect(result).toMatchObject({ fromCache: true, stale: true, fetchedAt: 1000 })
+  })
+
+  it('never caches an empty catalog when every metadata read misses', async () => {
+    const cached: CatalogSnapshot = { fetchedAt: 1000, cards: [], truncated: false }
+    const cache = memoryCache(cached)
+    const { api } = client()
+    const result = await loadCatalog({
+      client: api,
+      cache,
+      fetchMeta: async () => null,
+      force: true,
+      now: () => 5000,
+    })
+
+    expect(result).toMatchObject({ fromCache: true, stale: true, fetchedAt: 1000 })
+    expect(cache.saved).toHaveLength(0)
   })
 
   it('rethrows without a cache', async () => {

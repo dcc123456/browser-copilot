@@ -226,18 +226,13 @@ export async function readCatalog(deps: ReadCatalogDeps): Promise<CatalogSnapsho
   )
 
   const entries = mergeCatalog(tree.tree, pulls.items, issues.items)
-  let failedFetches = 0
   const metas = await mapLimit(entries, 8, async (entry) => {
     try {
       return await fetchMeta(entry.slug)
     } catch {
-      failedFetches += 1
       return null
     }
   })
-  if (entries.length > 0 && failedFetches === entries.length) {
-    throw new MarketplaceError('network', 'Could not read any workflow metadata from GitHub')
-  }
 
   const cards: MarketplaceCard[] = []
   entries.forEach((entry, index) => {
@@ -250,6 +245,12 @@ export async function readCatalog(deps: ReadCatalogDeps): Promise<CatalogSnapsho
       comments: entry.comments,
     })
   })
+  // A tree that lists work but yields no readable meta means the read raced a
+  // stale cache or the host is unreachable. Caching that as an empty catalog
+  // would hide every published workflow for a full TTL.
+  if (entries.length > 0 && cards.length === 0) {
+    throw new MarketplaceError('network', 'Could not read any workflow metadata from GitHub')
+  }
 
   cards.sort((a, b) => (Date.parse(b.meta.updatedAt) || 0) - (Date.parse(a.meta.updatedAt) || 0))
   const truncated =

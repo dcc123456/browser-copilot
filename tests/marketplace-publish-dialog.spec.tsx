@@ -199,7 +199,7 @@ describe('prefilling a published workflow', () => {
     }
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.endsWith('/meta.json')) {
+      if (url.includes('/meta.json')) {
         return { ok: true, status: 200, text: async () => JSON.stringify(meta) }
       }
       if (url.endsWith('/assets/1.webp')) {
@@ -268,7 +268,7 @@ describe('prefilling a published workflow', () => {
       gateControl.release = resolve
     })
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      if (String(input).endsWith('/meta.json')) {
+      if (String(input).includes('/meta.json')) {
         await gate
         return {
           ok: true,

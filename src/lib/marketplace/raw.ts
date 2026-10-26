@@ -2,9 +2,10 @@
  * Reads published files straight from `raw.githubusercontent.com`.
  *
  * The raw host serves every file with `Access-Control-Allow-Origin: *` and no
- * credential, so catalog reads cost no API quota. It caches for ~5 minutes,
- * which the publish path tolerates: a stale `meta.json` at worst proposes an
- * already-used version number, and the maintainer sees the collision in the PR.
+ * credential, so catalog reads cost no API quota. It caches for ~5 minutes;
+ * `meta.json` opts out (see {@link fetchPublishedMeta}) because a cached 404
+ * hides a workflow merged moments ago, while bundled files and screenshots
+ * tolerate the delay.
  *
  * @module lib/marketplace/raw
  */
@@ -25,14 +26,10 @@ export function rawUrl(path: string): string {
   return `${RAW_BASE}/${path.split('/').map(encodeURIComponent).join('/')}`
 }
 
-/** Returns the file text, or null when it does not exist (404). */
-export async function fetchRawText(
-  path: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<string | null> {
+async function readRawText(url: string, fetchImpl: typeof fetch): Promise<string | null> {
   let response: Response
   try {
-    response = await fetchImpl(rawUrl(path))
+    response = await fetchImpl(url)
   } catch (error) {
     throw new MarketplaceError(
       'network',
@@ -46,12 +43,31 @@ export async function fetchRawText(
   return response.text()
 }
 
-/** The published `meta.json` for a slug, or null when absent/untrustworthy. */
+/** Returns the file text, or null when it does not exist (404). */
+export async function fetchRawText(
+  path: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | null> {
+  return readRawText(rawUrl(path), fetchImpl)
+}
+
+/**
+ * The published `meta.json` for a slug, or null when absent/untrustworthy.
+ *
+ * The raw host caches every response for five minutes, 404s included. A publish
+ * reads this file on `main` just before its own merge, when the path is still
+ * absent; the refresh right after the merge would otherwise be served that
+ * cached 404 and the new card would not appear. GitHub ignores the query, so a
+ * unique one makes each catalog read see the branch as it is now.
+ */
 export async function fetchPublishedMeta(
   slug: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<MarketplaceMeta | null> {
-  const text = await fetchRawText(`${workflowDir(slug)}/meta.json`, fetchImpl)
+  const text = await readRawText(
+    `${rawUrl(`${workflowDir(slug)}/meta.json`)}?v=${Date.now()}`,
+    fetchImpl,
+  )
   if (!text) return null
   try {
     return parseMeta(JSON.parse(text))

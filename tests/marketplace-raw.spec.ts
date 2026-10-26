@@ -49,4 +49,24 @@ describe('raw CDN reads', () => {
       fetchPublishedMeta('scrape-orders-abcdef', fetchReturning('', 404)),
     ).resolves.toBeNull()
   })
+
+  it('bypasses the five-minute raw cache when reading a meta', async () => {
+    const meta = buildMeta({
+      slug: 'scrape-orders-abcdef',
+      title: 'Scrape orders',
+      description: '',
+      category: 'ecommerce',
+      author: 'octocat',
+      version: 2,
+      hash: 'a'.repeat(64),
+    })
+    const urls: string[] = []
+    const recorder = (async (input: RequestInfo | URL) => {
+      urls.push(String(input))
+      return new Response(JSON.stringify(meta))
+    }) as unknown as typeof fetch
+
+    await expect(fetchPublishedMeta('scrape-orders-abcdef', recorder)).resolves.toEqual(meta)
+    expect(urls[0]).toMatch(/\/workflows\/scrape-orders-abcdef\/meta\.json\?v=\d+$/)
+  })
 })

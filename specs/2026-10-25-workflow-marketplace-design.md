@@ -130,6 +130,8 @@ workflows/<slug>/
 2. `GET /repos/dcc123456/BC-workflow/pulls?state=closed&per_page=100&sort=updated&direction=desc` → 只保留 `merged_at != null`，用 `head.ref` 前缀 `submit/<slug>-` 建立 slug → PR number 映射。
 3. `GET /repos/dcc123456/BC-workflow/issues?state=all&per_page=100` → 用 PR number 取 `reactions['+1']` 与 `comments`。
 4. meta 与图片走 `https://raw.githubusercontent.com/dcc123456/BC-workflow/main/workflows/...`。
+5. raw 的每个响应（404 也算）带 `cache-control: max-age=300`。发布流程在合并**前**会读一次 `main` 上的 `meta.json` 算版本号，那次多半是 404；合并后立刻刷新，目录读取会命中这份 5 分钟缓存，工作流就会“消失”。因此第 4 步的 `meta.json` 请求追加 `?v=<时间戳>` 绕开缓存（GitHub 忽略查询串，raw 不计 API 额度）。
+6. 反向保护：tree 已经列出工作流、却一张卡都解析不出来时按“读取失败”处理（回退旧快照并提示），绝不把空目录写进 30 分钟缓存。
 
 结果在内存缓存，并在 `chrome.storage.local` 记 `marketplaceLastCheck`；30 分钟内重复打开不重新请求。超过 100 个条目时分页（最多 3 页），超过上限时只显示“最新 300 个”。
 
