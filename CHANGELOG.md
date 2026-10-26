@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added — A bundled workflow arrives as its own group
+
+Applying a marketplace workflow that calls other workflows now creates a group
+named after the parent and files the parent plus every bundled sub-workflow
+into it, so the call graph shows up together in the workflows list. An
+existing group with that name is reused, and re-applying an update leaves the
+workflow wherever the user put it.
+
 ### Added — Publish drafts survive closing the dialog
 
 Closing the publish dialog halfway through now saves the form — title,

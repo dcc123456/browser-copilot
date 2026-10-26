@@ -13,12 +13,57 @@
  * @module sidepanel/marketplace-install
  */
 
-import { planApplyBundle, type ApplyPlan, type PublishedDependency } from '../lib/marketplace/apply'
+import {
+  planApplyBundle,
+  type ApplyPlan,
+  type BundlePlan,
+  type PublishedDependency,
+} from '../lib/marketplace/apply'
 import { assetRepoPath } from '../lib/marketplace/meta'
 import { fetchPublishedWorkflow, fetchWorkflowAt } from '../lib/marketplace/raw'
 import { MarketplaceError, type MarketplaceCard } from '../lib/marketplace/types'
 import type { Workflow } from '../lib/workflow/types'
 import { sendCommand } from '../lib/messages'
+
+/**
+ * Finds the group called `name`, creating it when absent.
+ *
+ * The worker answers each request with its own result type; the mismatched
+ * branches cannot be reached and exist only to narrow that union.
+ */
+async function groupNamed(name: string): Promise<string> {
+  const listing = await sendCommand({ type: 'workflowGroups.list' })
+  if (listing.type !== 'workflowGroups.list') throw new Error('Unexpected group listing')
+  const existing = listing.groups.find((group) => group.name === name)
+  if (existing) return existing.id
+  const saved = await sendCommand({ type: 'workflowGroups.save', name })
+  if (saved.type !== 'workflowGroups.save') throw new Error('Unexpected group save')
+  return saved.group.id
+}
+
+/**
+ * Files a newly installed bundle into a group named after its parent workflow.
+ *
+ * The group id goes into the records before they are saved, so a failed save
+ * leaves no half-filed bundle behind and a retry finds the same group instead
+ * of creating a second one. An existing group with that name is reused, so
+ * applying another bundle from the same author lands together.
+ *
+ * An update is exempt: re-applying must not pull a workflow back into a group
+ * the user moved it out of.
+ */
+async function fileIntoBundleGroup(plan: BundlePlan): Promise<BundlePlan> {
+  if (plan.status !== 'new' || plan.dependencies.length === 0) return plan
+  const name = plan.workflow.name.trim()
+  if (!name) return plan
+
+  const groupId = await groupNamed(name)
+  return {
+    ...plan,
+    workflow: { ...plan.workflow, folderId: groupId },
+    dependencies: plan.dependencies.map((dependency) => ({ ...dependency, folderId: groupId })),
+  }
+}
 
 export async function installFromCard(
   card: MarketplaceCard,
@@ -38,7 +83,9 @@ export async function installFromCard(
       return { entry, published: body }
     }),
   )
-  const plan = planApplyBundle(card, published, dependencies, library, existing)
+  const plan = await fileIntoBundleGroup(
+    planApplyBundle(card, published, dependencies, library, existing),
+  )
   for (const dependency of plan.dependencies) {
     await sendCommand({ type: 'workflows.save', workflow: dependency })
   }
