@@ -75,8 +75,11 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
  * its optional `url`, and the operator set is derived purely from `disableEdit`,
  * so an editable block is a block the model can call. Measured 31_029 → 31_284,
  * still inside this cap.
+ * `create_scheduled_task` then learned cron (~200 chars: the kind enum entry,
+ * the `expression` argument and its description). It rides the same `ops`
+ * group, so again only this catalog cap moves. Measured 31_400 → 31_597.
  */
-const MAX_CATALOG_CHARS = 31_400
+const MAX_CATALOG_CHARS = 31_600
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the

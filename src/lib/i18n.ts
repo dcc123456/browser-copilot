@@ -121,6 +121,12 @@ export interface Messages {
   taskScheduleRemove: string
   taskSchedModeWeekly: string
   taskSchedModeInterval: string
+  taskSchedModeCron: string
+  taskCronExpression: string
+  taskCronHint: string
+  taskCronInvalid: string
+  taskCronNoNext: string
+  taskCronNext: (params: { when: string }) => string
   taskSchedOnce: string
   taskOnceHint: string
   taskFollows: string
@@ -1786,6 +1792,13 @@ const en: Messages = {
   taskScheduleRemove: 'Remove',
   taskSchedModeWeekly: 'Weekly',
   taskSchedModeInterval: 'Interval',
+  taskSchedModeCron: 'Cron',
+  taskCronExpression: 'Cron expression',
+  taskCronHint:
+    'Five fields: minute hour day-of-month month weekday — e.g. 0 9 * * 1-5 runs at 09:00, Monday to Friday. Local time.',
+  taskCronInvalid: 'This is not a valid five-field cron expression, so it cannot be saved.',
+  taskCronNoNext: 'This expression is valid but never fires (no matching date).',
+  taskCronNext: ({ when }) => `Next run: ${when}`,
   taskSchedOnce: 'Once',
   taskOnceHint:
     'Runs one time at this instant, then this trigger method is used up. Edit the time to run it again.',
@@ -3362,6 +3375,13 @@ const zhCN: Messages = {
   taskScheduleRemove: '移除',
   taskSchedModeWeekly: '每周',
   taskSchedModeInterval: '间隔',
+  taskSchedModeCron: 'Cron',
+  taskCronExpression: 'Cron 表达式',
+  taskCronHint:
+    '共 5 段：分 时 日 月 周，例如 0 9 * * 1-5 表示周一至周五 09:00。按本机本地时间解析。',
+  taskCronInvalid: '这不是有效的 5 段 cron 表达式，无法保存。',
+  taskCronNoNext: '表达式有效，但永远不会触发（没有匹配的日期）。',
+  taskCronNext: ({ when }) => `下次运行：${when}`,
   taskSchedOnce: '一次性',
   taskOnceHint: '只在该时刻运行一次，之后该触发方式失效；要再跑请改时间。',
   taskFollows: '依赖',

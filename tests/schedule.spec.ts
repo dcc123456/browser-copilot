@@ -5,6 +5,7 @@ import {
   describeSchedule,
   isWeekend,
   nextRunAt,
+  normalizeCronExpression,
   normalizeSchedule,
   normalizeScheduleList,
   schedulesOf,
@@ -316,5 +317,79 @@ describe('trigger method lists', () => {
     const next = withSchedules(task, [{ kind: 'none' }])
     expect(next.schedule).toEqual({ kind: 'none' })
     expect(next.schedules).toEqual([])
+  })
+})
+
+describe('cron schedules', () => {
+  const cron = (expression: string): Schedule => ({ kind: 'cron', expression })
+
+  it('computes the next firing in local time', () => {
+    // Mon 2024-01-01 10:07 local → 10:10 for a step pattern.
+    const from = new Date(2024, 0, 1, 10, 7).getTime()
+    const next = new Date(nextRunAt(cron('*/5 * * * *'), from) as number)
+    expect(next.getDate()).toBe(1)
+    expect(next.getHours()).toBe(10)
+    expect(next.getMinutes()).toBe(10)
+  })
+
+  it('rolls a weekday pattern over the weekend', () => {
+    // Friday 2024-01-05 18:00 → Monday the 8th at 09:00.
+    const fri = new Date(2024, 0, 5, 18, 0).getTime()
+    const next = new Date(nextRunAt(cron('0 9 * * 1-5'), fri) as number)
+    expect(next.getDay()).toBe(1)
+    expect(next.getDate()).toBe(8)
+    expect(next.getHours()).toBe(9)
+  })
+
+  it('treats day-of-week 7 as Sunday', () => {
+    const wed = new Date(2024, 0, 3, 12, 0).getTime()
+    const next = new Date(nextRunAt(cron('0 9 * * 7'), wed) as number)
+    expect(next.getDay()).toBe(0)
+    expect(next.getDate()).toBe(7)
+  })
+
+  it('supports day-of-month patterns across months', () => {
+    const midJanuary = new Date(2024, 0, 15, 12, 0).getTime()
+    const next = new Date(nextRunAt(cron('30 8 1 * *'), midJanuary) as number)
+    expect(next.getMonth()).toBe(1)
+    expect(next.getDate()).toBe(1)
+    expect(next.getHours()).toBe(8)
+    expect(next.getMinutes()).toBe(30)
+  })
+
+  it('never arms an unparseable expression', () => {
+    const from = Date.now()
+    expect(nextRunAt(cron('61 * * * *'), from)).toBeNull()
+    expect(nextRunAt(cron('not a cron'), from)).toBeNull()
+    expect(nextRunAt(cron(''), from)).toBeNull()
+  })
+
+  it('never arms a six-field pattern the alarm floor cannot honor', () => {
+    expect(normalizeCronExpression('0 0 9 * * *')).toBeNull()
+  })
+
+  it('never arms a valid pattern that has no occurrence', () => {
+    expect(normalizeCronExpression('0 0 31 2 *')).toBe('0 0 31 2 *')
+    expect(nextRunAt(cron('0 0 31 2 *'), Date.now())).toBeNull()
+  })
+
+  it('collapses whitespace when normalizing', () => {
+    expect(normalizeCronExpression('  0   9 *  *  1-5 ')).toBe('0 9 * * 1-5')
+  })
+
+  it('keeps an invalid expression in storage so the editor can show the typo', () => {
+    expect(normalizeSchedule({ kind: 'cron', expression: '  61  * * * * ' })).toEqual({
+      kind: 'cron',
+      expression: '61 * * * *',
+    })
+    expect(normalizeSchedule({ kind: 'cron' })).toEqual({ kind: 'cron', expression: '' })
+  })
+
+  it('describes the pattern verbatim and mirrors it as the primary schedule', () => {
+    expect(describeSchedule(cron('0 9 * * 1-5'), 'en')).toBe('Cron 0 9 * * 1-5')
+    const task: Pick<ScheduledTask, 'schedule' | 'schedules'> = { schedule: { kind: 'none' } }
+    const next = withSchedules(task, [cron('0 9 * * 1-5')])
+    expect(next.schedule).toEqual(cron('0 9 * * 1-5'))
+    expect(next.schedules).toEqual([cron('0 9 * * 1-5')])
   })
 })

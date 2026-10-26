@@ -69,3 +69,41 @@ more scheduled task.
   contract does not change) and writes `schedules: [schedule]`, so an update
   intentionally replaces the task's trigger methods.
 - `list_scheduled_tasks` reports every entry, joined with `; `.
+
+## Part 3 — cron trigger methods, and an icon remove button
+
+A fourth card mode, `cron`, carrying a standard five-field expression evaluated
+in the machine's local timezone (the same way the existing daily/weekly presets
+mean local wall-clock time).
+
+### Why `croner`
+
+The runner already parses cron for workflow triggers with `croner`
+(`server/src/scheduler.ts`), so the extension reuses the same library instead of
+growing a second cron engine (§5.6). Verified against the installed
+`croner@9.1.0` types and a local spike:
+
+- `new Cron(expr, { paused: true })` validates without arming a timer and throws
+  on a malformed pattern; `nextRun(date)` returns the first firing strictly
+  after `date` in local time, or `null` when the pattern can never occur.
+- It also accepts a six-field (seconds) pattern, which is rejected here on
+  purpose: `chrome.alarms` has a one-minute floor, so a seconds field could not
+  be honored.
+- A pattern that is syntactically valid but never fires (`0 0 31 2 *`) keeps the
+  card, shows a "never occurs" warning, and arms nothing.
+
+### Data + UI
+
+- `Schedule` gains `{ kind: 'cron'; expression: string }`. Storage normalization
+  keeps the trimmed expression even when it is invalid, so an editor round-trip
+  can show the typo instead of silently deleting the trigger; `nextRunAt`
+  returns `null` for an invalid pattern, so nothing is ever armed from one.
+- The editor treats invalid cron as unsaveable (Save disabled + inline bilingual
+  error). A valid pattern shows its next local firing.
+- The per-card remove control becomes an icon button (existing `.icon-btn` +
+  `.danger` styles) whose accessible name/title stays the bilingual
+  "Remove"/"移除" copy.
+- `create_scheduled_task` gains `schedule.kind: "cron"` with a required
+  `expression`, validated explicitly like the other kinds (a model typo is
+  reported, never coerced), and the advertised-payload budget is raised by the
+  measured delta.

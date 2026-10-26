@@ -218,6 +218,53 @@ describe('workflow scheduler alarm prefixes', () => {
     })
   })
 
+  describe('cron trigger methods', () => {
+    beforeEach(() => {
+      vi.mocked(runTask).mockClear()
+    })
+
+    it('arms a cron method at its next local firing', async () => {
+      vi.useFakeTimers()
+      try {
+        // Mon 2024-01-01 10:07:30 local → next */5 boundary is 10:10.
+        vi.setSystemTime(new Date(2024, 0, 1, 10, 7, 30))
+        store.setTasks([
+          makeTask({ id: 'cron', schedule: { kind: 'cron', expression: '*/5 * * * *' } }),
+        ])
+
+        await scheduleTask('cron')
+
+        expect(createdCalls).toEqual(['task:cron'])
+        expect(alarmsByName.get('task:cron')?.when).toBe(new Date(2024, 0, 1, 10, 10).getTime())
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('leaves no alarm when the expression cannot be parsed', async () => {
+      store.setTasks([
+        makeTask({ id: 'bad-cron', schedule: { kind: 'cron', expression: '61 * * * *' } }),
+      ])
+
+      await scheduleTask('bad-cron')
+
+      expect(createdCalls).toEqual([])
+    })
+
+    it('re-arms the fired cron method before running the task', async () => {
+      store.setTasks([
+        makeTask({ id: 'cron', schedule: { kind: 'cron', expression: '*/5 * * * *' } }),
+      ])
+      await scheduleTask('cron')
+      createdCalls.length = 0
+
+      onAlarm({ name: 'task:cron' } as Parameters<typeof onAlarm>[0])
+      await vi.waitFor(() => expect(runTask).toHaveBeenCalledTimes(1))
+
+      expect(createdCalls).toEqual(['task:cron'])
+    })
+  })
+
   describe('one-shot tasks', () => {
     // The module mock is created once per file, so call counts accumulate
     // across tests unless cleared here.

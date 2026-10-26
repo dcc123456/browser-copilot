@@ -193,6 +193,49 @@ describe('create_scheduled_task execution', () => {
     expect(alarm?.when).toBeGreaterThan(Date.now())
   })
 
+  it('creates a cron task from a five-field expression', async () => {
+    const output = await executeTool(
+      'create_scheduled_task',
+      {
+        name: 'Monthly report',
+        schedule: { kind: 'cron', expression: '0 9 1 * *' },
+        prompt: 'Write the monthly report.',
+      },
+      baseCtx,
+    )
+    const parsed = JSON.parse(output) as {
+      ok: boolean
+      id: string
+      schedule: string
+      nextRunAt: string | null
+    }
+    expect(parsed.ok).toBe(true)
+    expect(parsed.schedule).toBe('Cron 0 9 1 * *')
+    expect(parsed.nextRunAt).toBeTruthy()
+
+    const saved = store.tasks[0]!
+    expect(saved.schedule).toEqual({ kind: 'cron', expression: '0 9 1 * *' })
+    expect(saved.schedules).toEqual([{ kind: 'cron', expression: '0 9 1 * *' }])
+    expect(alarmsByName.has(`task:${parsed.id}`)).toBe(true)
+  })
+
+  it('rejects an invalid cron expression instead of coercing it', async () => {
+    const output = await executeTool(
+      'create_scheduled_task',
+      {
+        name: 'Broken cron',
+        schedule: { kind: 'cron', expression: '61 * * * *' },
+        prompt: 'Never runs.',
+      },
+      baseCtx,
+    )
+    const parsed = JSON.parse(output) as { ok: boolean; error: string }
+    expect(parsed.ok).toBe(false)
+    expect(parsed.error).toContain('five-field')
+    expect(store.tasks).toHaveLength(0)
+    expect(alarmsByName.size).toBe(0)
+  })
+
   it('creates a workflow task under the workflow alarm prefix', async () => {
     const output = await executeTool(
       'create_scheduled_task',

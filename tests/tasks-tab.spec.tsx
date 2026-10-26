@@ -166,6 +166,34 @@ const clickEnding = async (root: ParentNode, label: string): Promise<void> => {
 /** The "new task" button carries a leading `+`, so it matches by suffix. */
 const clickCreating = (container: HTMLElement): Promise<void> => clickEnding(container, t.taskNew)
 
+/** Icon-only controls carry no text; their accessible name is the label. */
+const clickAria = async (root: ParentNode, label: string): Promise<void> => {
+  const button = root.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+  if (!button) throw new Error(`no button labelled ${label}`)
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  await flush()
+}
+
+/** Selects an option the way React sees it. */
+const choose = async (select: HTMLSelectElement, value: string): Promise<void> => {
+  await act(async () => {
+    select.value = value
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await flush()
+}
+
+/** Types into an input through React's tracked value setter. */
+const typeInto = async (input: HTMLInputElement, value: string): Promise<void> => {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await flush()
+}
+
 /** The open modal, if any — `FormDialog` renders in place, not through a portal. */
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]')
 
@@ -320,7 +348,13 @@ describe('tasks tab · multiple trigger methods', () => {
     const panel = dialog()!
     expect(panel.querySelectorAll('[data-schedule-index]')).toHaveLength(2)
 
-    await click(panel, t.taskScheduleRemove)
+    // The control is an icon button: no text, the accessible name says "Remove".
+    const remove = panel.querySelector<HTMLButtonElement>(
+      '[data-schedule-index="0"] button.icon-btn.danger',
+    )
+    expect(remove?.textContent?.trim()).toBe('')
+    expect(remove?.getAttribute('aria-label')).toBe(t.taskScheduleRemove)
+    await clickAria(panel, t.taskScheduleRemove)
 
     expect(panel.querySelectorAll('[data-schedule-index]')).toHaveLength(1)
     await click(panel, t.taskSave)
@@ -328,5 +362,82 @@ describe('tasks tab · multiple trigger methods', () => {
     const saved = savedTask()
     expect(saved.schedules).toEqual([{ kind: 'interval', minutes: 30 }])
     expect(saved.schedule).toEqual({ kind: 'interval', minutes: 30 })
+  })
+})
+
+describe('tasks tab · cron trigger methods', () => {
+  const savedTask = (): ScheduledTask => {
+    const save = commands('tasks.save')[0]
+    if (!save || save.type !== 'tasks.save') throw new Error('no tasks.save command')
+    return save.task
+  }
+
+  const saveButton = (panel: ParentNode): HTMLButtonElement | undefined =>
+    [...panel.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent?.trim() === t.taskSave,
+    )
+
+  it('shows a cron task as one chip with its expression', async () => {
+    tasks = [
+      {
+        ...task('t-cron', 'Monthly report'),
+        schedule: { kind: 'cron', expression: '0 9 1 * *' },
+        schedules: [{ kind: 'cron', expression: '0 9 1 * *' }],
+      },
+    ]
+    const { container } = await render()
+
+    const chips = [...container.querySelectorAll('.task-meta .task-chip')].map((chip) =>
+      chip.textContent?.trim(),
+    )
+    expect(chips).toContain('Cron 0 9 1 * *')
+  })
+
+  it('switches a weekly card to cron, validates it, and saves the expression', async () => {
+    const { container } = await render()
+    await click(container, t.edit)
+    const panel = dialog()!
+    const select = panel.querySelector<HTMLSelectElement>('[data-schedule-index="0"] select')!
+    await choose(select, 'cron')
+
+    const expression = panel.querySelector<HTMLInputElement>(
+      '[data-schedule-index="0"] .schedule-config input',
+    )!
+    // The weekly card's time survives the switch.
+    expect(expression.value).toBe('0 9 * * *')
+    expect(panel.textContent).toContain('Next run:')
+
+    await typeInto(expression, '61 * * * *')
+    expect(panel.textContent).toContain(t.taskCronInvalid)
+    expect(saveButton(panel)?.hasAttribute('disabled')).toBe(true)
+    expect(commands('tasks.save')).toHaveLength(0)
+
+    await typeInto(expression, '0 8 * * 1-5')
+    expect(panel.textContent).not.toContain(t.taskCronInvalid)
+    expect(saveButton(panel)?.hasAttribute('disabled')).toBe(false)
+
+    await click(panel, t.taskSave)
+
+    const saved = savedTask()
+    expect(saved.schedules).toEqual([{ kind: 'cron', expression: '0 8 * * 1-5' }])
+    expect(saved.schedule).toEqual({ kind: 'cron', expression: '0 8 * * 1-5' })
+  })
+
+  it('keeps an unparseable expression visible instead of dropping the method', async () => {
+    tasks = [
+      {
+        ...task('t-cron', 'Typo cron'),
+        schedule: { kind: 'cron', expression: '61 * * * *' },
+        schedules: [{ kind: 'cron', expression: '61 * * * *' }],
+      },
+    ]
+    const { container } = await render()
+    await click(container, t.edit)
+    const panel = dialog()!
+
+    const expression = panel.querySelector<HTMLInputElement>('[data-schedule-index="0"] input')!
+    expect(expression.value).toBe('61 * * * *')
+    expect(panel.textContent).toContain(t.taskCronInvalid)
+    expect(saveButton(panel)?.hasAttribute('disabled')).toBe(true)
   })
 })

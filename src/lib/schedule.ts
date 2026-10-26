@@ -7,6 +7,7 @@
  * @module lib/schedule
  */
 
+import { Cron } from 'croner'
 import type { Schedule, ScheduledTask } from './scheduler-types'
 
 /** Monday=0 … Sunday=6, matching `Date.getDay()` offset by one. */
@@ -17,6 +18,46 @@ export function isWeekend(date: Date): boolean {
 
 export const MIN_INTERVAL_MINUTES = 1
 export const MAX_INTERVAL_MINUTES = 24 * 60 // one day
+
+/** Five fields — minute hour day-of-month month day-of-week. */
+const CRON_FIELD_COUNT = 5
+
+/** Collapses a stored expression to the exact text the parser will see. */
+function canonicalCronExpression(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const fields = raw.trim().split(/\s+/).filter(Boolean)
+  return fields.length > 0 ? fields.join(' ') : null
+}
+
+/**
+ * The stored form of a cron expression, or null when it is not a runnable
+ * five-field pattern.
+ *
+ * `croner` (the parser the runner already uses) also accepts a six-field
+ * seconds form; that is rejected here because `chrome.alarms` cannot fire more
+ * than once a minute, so a seconds field could never be honored.
+ */
+export function normalizeCronExpression(raw: unknown): string | null {
+  const expression = canonicalCronExpression(raw)
+  if (!expression || expression.split(' ').length !== CRON_FIELD_COUNT) return null
+  try {
+    // Paused validation: constructing the parser must not schedule a timer.
+    new Cron(expression, { paused: true })
+    return expression
+  } catch {
+    return null
+  }
+}
+
+/** Next firing strictly after `from`, in local time; null when none/invalid. */
+function nextCronRun(expression: string, from: number): number | null {
+  try {
+    const next = new Cron(expression, { paused: true }).nextRun(new Date(from))
+    return next ? next.getTime() : null
+  } catch {
+    return null
+  }
+}
 
 /** Clamps an interval schedule into the range alarms will accept. */
 export function coerceIntervalMinutes(value: unknown): number {
@@ -80,6 +121,14 @@ export function normalizeSchedule(raw: unknown): Schedule {
     return {
       kind: 'interval',
       minutes: coerceIntervalMinutes((value as { minutes?: unknown }).minutes),
+    }
+  }
+  if (value.kind === 'cron') {
+    // The text survives even when it does not parse — the editor shows the typo
+    // instead of deleting the trigger — while the scheduler refuses to arm it.
+    return {
+      kind: 'cron',
+      expression: canonicalCronExpression((value as { expression?: unknown }).expression) ?? '',
     }
   }
   if (value.kind === 'weekdays') {
@@ -160,6 +209,12 @@ export function nextRunAt(schedule: Schedule, from: number): number | null {
   if (schedule.kind === 'interval') {
     return from + coerceIntervalMinutes(schedule.minutes) * 60_000
   }
+  if (schedule.kind === 'cron') {
+    // Normalize first so a hand-edited six-field pattern is not silently armed
+    // at a granularity the alarm API cannot honor.
+    const expression = normalizeCronExpression(schedule.expression)
+    return expression === null ? null : nextCronRun(expression, from)
+  }
 
   const hour = coerceHour(schedule.hour)
   const minute = coerceMinute(schedule.minute)
@@ -201,6 +256,11 @@ export function describeSchedule(schedule: Schedule, locale: string = 'en', now?
   if (schedule.kind === 'interval') {
     const m = coerceIntervalMinutes(schedule.minutes)
     return zh ? `每 ${m} 分钟` : `Every ${m} min`
+  }
+  if (schedule.kind === 'cron') {
+    // The expression is the schedule; paraphrasing it would hide which fields
+    // the user actually wrote.
+    return `Cron ${schedule.expression}`.trim()
   }
   const hhmm = `${pad(coerceHour(schedule.hour))}:${pad(coerceMinute(schedule.minute))}`
   if (schedule.kind === 'weekdays') return zh ? `工作日 ${hhmm}` : `Weekdays ${hhmm}`

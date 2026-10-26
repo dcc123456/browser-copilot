@@ -10,8 +10,15 @@
  * @module sidepanel/TaskEditDialog
  */
 import { useState } from 'react'
+import { Trash2 } from 'lucide-react'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
-import { describeSchedule, schedulesOf, withSchedules } from '../lib/schedule'
+import {
+  describeSchedule,
+  nextRunAt,
+  normalizeCronExpression,
+  schedulesOf,
+  withSchedules,
+} from '../lib/schedule'
 import type { Schedule, ScheduledTask } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
 import { useT } from './i18n'
@@ -41,9 +48,10 @@ type EditorSchedule =
   | Extract<Schedule, { kind: 'weekly' }>
   | Extract<Schedule, { kind: 'once' }>
   | Extract<Schedule, { kind: 'interval' }>
+  | Extract<Schedule, { kind: 'cron' }>
 
 /**
- * Stored schedules render as one of the three card shapes. The legacy
+ * Stored schedules render as one of the four card shapes. The legacy
  * daily/weekdays presets become weekly day sets, which is also what an edit
  * writes back.
  */
@@ -54,7 +62,12 @@ function toEditorSchedule(schedule: Schedule): EditorSchedule {
   if (schedule.kind === 'weekdays') {
     return { kind: 'weekly', days: WEEKDAYS, hour: schedule.hour, minute: schedule.minute }
   }
-  if (schedule.kind === 'weekly' || schedule.kind === 'once' || schedule.kind === 'interval') {
+  if (
+    schedule.kind === 'weekly' ||
+    schedule.kind === 'once' ||
+    schedule.kind === 'interval' ||
+    schedule.kind === 'cron'
+  ) {
     return schedule
   }
   return { kind: 'weekly', days: WEEKDAYS, hour: 9, minute: 0 }
@@ -71,6 +84,15 @@ function toLocalStamp(ms: number): string {
     `${when.getFullYear()}-${pad2(when.getMonth() + 1)}-${pad2(when.getDate())}` +
     `T${pad2(when.getHours())}:${pad2(when.getMinutes())}`
   )
+}
+
+/** Local wall-clock stamp for the cron card's next-run preview. */
+function formatLocal(ms: number, zh: boolean): string {
+  const when = new Date(ms)
+  const date = zh
+    ? `${when.getFullYear()}/${pad2(when.getMonth() + 1)}/${pad2(when.getDate())}`
+    : `${pad2(when.getMonth() + 1)}/${pad2(when.getDate())}/${when.getFullYear()}`
+  return `${date} ${pad2(when.getHours())}:${pad2(when.getMinutes())}`
 }
 
 interface Props {
@@ -155,6 +177,13 @@ export default function TaskEditDialog({
     }
     const hour = current.kind === 'weekly' ? current.hour : 9
     const minute = current.kind === 'weekly' ? current.minute : 0
+    if (kind === 'cron') {
+      // Keep the hour the user already picked: switching from weekly to cron
+      // usually means "same time, different cadence", and a one-line pattern is
+      // the easiest thing to edit.
+      updateSchedule(index, { kind: 'cron', expression: `${minute} ${hour} * * *` })
+      return
+    }
     const days = current.kind === 'weekly' && current.days.length > 0 ? current.days : WEEKDAYS
     updateSchedule(index, { kind: 'weekly', days, hour, minute })
   }
@@ -196,8 +225,19 @@ export default function TaskEditDialog({
     if (!Number.isFinite(at)) return
     updateSchedule(index, { kind: 'once', at })
   }
+  const setCron = (index: number, expression: string): void => {
+    updateSchedule(index, { kind: 'cron', expression })
+  }
 
-  const canSave = task.name.trim().length > 0 && (task.kind !== 'workflow' || !!task.workflowId)
+  // An unparseable cron expression must not be saved: storage keeps it so the
+  // card can show the typo, but the scheduler would never arm it.
+  const hasInvalidCron = schedules.some(
+    (entry) => entry.kind === 'cron' && normalizeCronExpression(entry.expression) === null,
+  )
+  const canSave =
+    task.name.trim().length > 0 &&
+    (task.kind !== 'workflow' || !!task.workflowId) &&
+    !hasInvalidCron
 
   return (
     <FormDialog
@@ -291,6 +331,10 @@ export default function TaskEditDialog({
           )}
 
           {schedules.map((sched, index) => {
+            const cronValid =
+              sched.kind !== 'cron' || normalizeCronExpression(sched.expression) !== null
+            const cronNext =
+              sched.kind === 'cron' && cronValid ? nextRunAt(sched, Date.now()) : null
             return (
               <div
                 className="mb-2 rounded-lg border border-border bg-panel-2 p-3"
@@ -309,14 +353,17 @@ export default function TaskEditDialog({
                     <option value="weekly">{t.taskSchedModeWeekly}</option>
                     <option value="once">{t.taskSchedOnce}</option>
                     <option value="interval">{t.taskSchedModeInterval}</option>
+                    <option value="cron">{t.taskSchedModeCron}</option>
                   </select>
                   <button
-                    className="danger"
+                    aria-label={t.taskScheduleRemove}
+                    className="icon-btn danger ml-auto"
                     disabled={saving}
                     onClick={() => removeSchedule(index)}
+                    title={t.taskScheduleRemove}
                     type="button"
                   >
-                    {t.taskScheduleRemove}
+                    <Trash2 aria-hidden size={15} />
                   </button>
                 </div>
 
@@ -406,9 +453,34 @@ export default function TaskEditDialog({
                   </div>
                 )}
 
-                <div className="schedule-preview" aria-live="polite">
-                  {describeSchedule(sched, zh ? 'zh' : 'en', Date.now())}
-                </div>
+                {sched.kind === 'cron' && (
+                  <div className="schedule-config">
+                    <input
+                      aria-label={t.taskCronExpression}
+                      className="w-full rounded-lg border border-border bg-panel px-2.5 py-1.5 font-mono text-[13px] text-ink outline-none focus:border-accent"
+                      disabled={saving}
+                      onChange={(event) => setCron(index, event.target.value)}
+                      spellCheck={false}
+                      value={sched.expression}
+                    />
+                    <p className="hint">{t.taskCronHint}</p>
+                    {!cronValid && <p className="hint banner-error-inline">{t.taskCronInvalid}</p>}
+                    {cronValid && cronNext !== null && (
+                      <p aria-live="polite" className="schedule-preview">
+                        {t.taskCronNext({ when: formatLocal(cronNext, zh) })}
+                      </p>
+                    )}
+                    {cronValid && cronNext === null && (
+                      <p className="hint banner-error-inline">{t.taskCronNoNext}</p>
+                    )}
+                  </div>
+                )}
+
+                {sched.kind !== 'cron' && (
+                  <div className="schedule-preview" aria-live="polite">
+                    {describeSchedule(sched, zh ? 'zh' : 'en', Date.now())}
+                  </div>
+                )}
               </div>
             )
           })}

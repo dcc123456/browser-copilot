@@ -34,6 +34,17 @@ export type Schedule =
    * The minimum is 1 minute, which is also the floor `chrome.alarms` enforces.
    */
   | { kind: 'interval'; minutes: number }
+  /**
+   * Standard five-field cron (`minute hour day-of-month month day-of-week`),
+   * evaluated in the machine's local timezone; day-of-week 0 and 7 are Sunday.
+   *
+   * The expression is kept verbatim (whitespace aside) even when it does not
+   * parse, so the editor can show the typo and the user can fix it. `nextRunAt`
+   * returns null for an unparseable expression, so nothing is ever armed from
+   * one, and a valid but never-occurring pattern (e.g. 31 February) is left
+   * unarmed as well.
+   */
+  | { kind: 'cron'; expression: string }
 
 /** What the task actually does. */
 export type TaskKind =

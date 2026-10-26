@@ -161,6 +161,7 @@ import {
   coerceOnceAt,
   describeSchedule,
   nextRunAt,
+  normalizeCronExpression,
   normalizeSchedule,
   schedulesOf,
 } from '../lib/schedule'
@@ -1054,7 +1055,7 @@ export const TOOLS: WireTool[] = [
       description:
         'Create (or, with an existing id, update) a scheduled task that runs unattended on a clock. ' +
         'kind "agent-prompt" runs `prompt` through the agent in full auto; kind "workflow" runs a saved workflow by id. ' +
-        'Use when the user asks to do something regularly / every day / on weekdays / on a schedule ("每天早上…", "每周一…", "每隔30分钟…"). ' +
+        'Use when the user asks to do something regularly / every day / on weekdays / on a schedule ("每天早上…", "每周一…", "每隔30分钟…"); kind "cron" covers cadences the presets cannot ("每月1号", "每两小时"). ' +
         'Also: schedule {kind:"once",at} fires at one instant then switches itself off (a deadline, a posting hour); followsTaskId + {{upstream.<key>}} chains a child onto the parent run\'s declared `outputs`, resolved at the CHILD\'s run time, so it can be created before that value exists. ' +
         'Requires approval / 需要用户确认。',
       parameters: {
@@ -1071,9 +1072,9 @@ export const TOOLS: WireTool[] = [
             properties: {
               kind: {
                 type: 'string',
-                enum: ['daily', 'weekdays', 'weekly', 'once', 'interval', 'none'],
+                enum: ['daily', 'weekdays', 'weekly', 'once', 'interval', 'cron', 'none'],
                 description:
-                  '"daily" = every day at hour:minute; "weekdays" = Mon-Fri at hour:minute; "weekly" = the listed days at hour:minute; "once" = one time at an absolute instant, then switched off; "interval" = every N minutes; "none" = manual only (no alarm).',
+                  '"daily" = every day at hour:minute; "weekdays" = Mon-Fri at hour:minute; "weekly" = the listed days at hour:minute; "once" = one time at an absolute instant, then switched off; "interval" = every N minutes; "cron" = a five-field cron expression (local time); "none" = manual only (no alarm).',
               },
               hour: { type: 'number', description: '0-23, for daily/weekdays/weekly.' },
               minute: { type: 'number', description: '0-59, for daily/weekdays/weekly.' },
@@ -1088,6 +1089,11 @@ export const TOOLS: WireTool[] = [
                 description: 'Weekdays for kind "weekly", 0=Sunday … 6=Saturday.',
               },
               minutes: { type: 'number', description: 'Interval length in minutes (1-1440).' },
+              expression: {
+                type: 'string',
+                description:
+                  'kind "cron" only: five fields "minute hour day-of-month month day-of-week", e.g. "0 9 * * 1-5" (weekdays at 09:00). Local time.',
+              },
             },
             required: ['kind'],
           },
@@ -2999,6 +3005,18 @@ function parseScheduleArg(raw: unknown): { schedule?: Schedule; error?: string }
     }
     return { schedule: { kind: 'interval', minutes } }
   }
+  if (kind === 'cron') {
+    const expression = normalizeCronExpression(value['expression'])
+    // Rejected rather than coerced: storage would keep an unparseable pattern
+    // and the scheduler would never arm it, so the model must fix it instead.
+    if (expression === null) {
+      return {
+        error:
+          'schedule.kind "cron" needs a valid five-field "expression": "minute hour day-of-month month day-of-week" in local time, e.g. "0 9 * * 1-5".',
+      }
+    }
+    return { schedule: { kind: 'cron', expression } }
+  }
   if (kind === 'daily' || kind === 'weekdays') {
     const hour = num(value['hour'])
     if (hour === null) return { error: `schedule.kind "${kind}" needs a numeric "hour" (0-23).` }
@@ -3030,8 +3048,8 @@ function parseScheduleArg(raw: unknown): { schedule?: Schedule; error?: string }
   }
   return {
     error:
-      'schedule.kind must be one of: "daily", "weekdays", "weekly", "once", "interval", "none". ' +
-      'Examples: {"kind":"weekdays","hour":9} · {"kind":"weekly","days":[1],"hour":10,"minute":30} · {"kind":"once","at":"2026-11-02T20:30"} · {"kind":"interval","minutes":30}.',
+      'schedule.kind must be one of: "daily", "weekdays", "weekly", "once", "interval", "cron", "none". ' +
+      'Examples: {"kind":"weekdays","hour":9} · {"kind":"weekly","days":[1],"hour":10,"minute":30} · {"kind":"once","at":"2026-11-02T20:30"} · {"kind":"interval","minutes":30} · {"kind":"cron","expression":"0 9 * * 1-5"}.',
   }
 }
 
