@@ -293,4 +293,11 @@ describe('the settings card', () => {
 
     expect(sendMessageSpy).toHaveBeenCalledWith({ type: 'update.check', force: false })
   })
+
+  it('re-checks a state past the check window when the panel opens', async () => {
+    const { sendMessageSpy } = installChrome({ state: availableState() })
+    await render(createElement(UpdateSettingsCard))
+
+    expect(sendMessageSpy).toHaveBeenCalledWith({ type: 'update.check', force: false })
+  })
 })

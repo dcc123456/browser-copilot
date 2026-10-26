@@ -11,6 +11,8 @@ export const UPDATE_REPO_OWNER = 'dcc123456'
 export const UPDATE_REPO_NAME = 'browser-copilot'
 export const UPDATE_RELEASES_URL = `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}/releases`
 export const UPDATE_LATEST_API_URL = `https://api.github.com/repos/${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}/releases/latest`
+/** Public redirect to the newest tag page; reads without spending API quota. */
+export const UPDATE_LATEST_PAGE_URL = `${UPDATE_RELEASES_URL}/latest`
 export const UPDATE_ASSET_URL_PREFIX = `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO_NAME}/releases/download/`
 
 export const UPDATE_STATE_KEY = 'update.state'

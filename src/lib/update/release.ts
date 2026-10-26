@@ -18,6 +18,34 @@ import { isNewerVersion, normalizeVersion, parseSemver } from './version'
 /** Release bodies are stored in `chrome.storage.local`; keep them bounded. */
 const MAX_NOTES_LENGTH = 4000
 
+const TAG_PAGE_PREFIX = `${UPDATE_RELEASES_URL}/tag/`
+
+/**
+ * Reads the tag from the final URL of the `/releases/latest` redirect.
+ *
+ * This costs no API quota, so a routine "is there anything newer?" check never
+ * touches the anonymous limit shared with the marketplace. Only a tag that
+ * passes the same stable-version rule as the API path is accepted.
+ */
+export function latestTagFromRedirectUrl(finalUrl: string): string | null {
+  if (!finalUrl.startsWith(TAG_PAGE_PREFIX)) return null
+  let pathname: string
+  try {
+    pathname = new URL(finalUrl).pathname
+  } catch {
+    return null
+  }
+  const encoded = pathname.slice(new URL(TAG_PAGE_PREFIX).pathname.length).replace(/\/$/, '')
+  if (!encoded || encoded.includes('/')) return null
+  let tag: string
+  try {
+    tag = decodeURIComponent(encoded)
+  } catch {
+    return null
+  }
+  return parseSemver(tag) ? tag : null
+}
+
 export interface ParsedLatestRelease {
   release: UpdateReleaseInfo
   /** Present only when `available` is true and the variant asset validates. */

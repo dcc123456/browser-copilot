@@ -133,7 +133,9 @@ interface UpdateState {
 ```
 
 - 后台 `src/background/update-checker.ts`：`update-check` alarm（12h，安装/启动时立即检查一次）、`checkForUpdates({force})`、写入 `chrome.storage.local` key `update.state`。
+- 例行检查先走零配额探测：带 `redirect: 'follow'` 请求公开的 `https://github.com/<owner>/<repo>/releases/latest`，从最终 `response.url` 解析 tag（`latestTagFromRedirectUrl`），不调用 `api.github.com`。若最新 tag 不高于当前版本，直接写“已是最新”状态；只有确实存在新版本时才调用一次 `/releases/latest` API 取 digest、notes 与资产地址。探测返回 `null` 或抛错时回落到原 API 路径。这样更新检查与工作流广场不再争抢同一个匿名 60 次/小时额度。
 - 瞬时失败（`network` / `rate-limited`）安排一次性 `update-retry` alarm：优先用 GitHub 响应头里的 `x-ratelimit-reset` 或 `Retry-After`，否则按 15 分钟起步、逐次翻倍、上限 6 小时的退避；重试时间被夹在「当前 +30s」到「当前 +6h」之间。成功检查清除 `failures` / `retryAt` 与重试 alarm。`update-retry` 触发时强制绕过新鲜度守卫；重试到期前，启动检查与面板挂载都复用已存状态，不再消耗共享 IP 配额。
+- 面板打开时的自愈：`useUpdateSnapshot({autoCheck})` 在状态缺失、重试到期、或状态超过 12 小时（且没有待执行的重试）时发起一次非强制检查，避免 alarm 未触发时状态永久停在旧错误上。
 - 侧边栏通过 `chrome.storage.onChanged` 读取状态；手动检查发 `{ type: 'update.check', force: true }`，返回 `{ type: 'update.state', state }`。
 - 免责/关闭：`update.dismissedVersion` 存 `chrome.storage.local`；新版本出现时自然重新显示。
 - 已写入待重载：`update.pendingReloadVersion`；banner 显示 “已下载，Reload 生效”，重载后新版本发现 `pending <= current` 时清除。

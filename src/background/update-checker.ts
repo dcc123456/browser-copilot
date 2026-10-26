@@ -10,10 +10,12 @@
  */
 
 import { performUpdateCheck } from '../lib/update/check'
+import { latestTagFromRedirectUrl } from '../lib/update/release'
 import {
   UPDATE_CHECK_ALARM,
   UPDATE_CHECK_INTERVAL_MINUTES,
   UPDATE_LATEST_API_URL,
+  UPDATE_LATEST_PAGE_URL,
   UPDATE_RETRY_ALARM,
   UPDATE_STATE_KEY,
   UpdateFailure,
@@ -23,6 +25,7 @@ import {
 import { variantFromManifest } from '../lib/update/variant'
 
 const FETCH_TIMEOUT_MS = 15_000
+const PROBE_TIMEOUT_MS = 10_000
 
 let inFlight: Promise<UpdateState> | null = null
 
@@ -54,6 +57,7 @@ async function runCheck(force: boolean): Promise<UpdateState> {
     previous,
     force,
     now: Date.now(),
+    fetchLatestTag: fetchLatestTagFromRedirect,
     fetchPayload: fetchLatestReleasePayload,
   })
   await chrome.storage.local.set({ [UPDATE_STATE_KEY]: state })
@@ -70,6 +74,33 @@ async function scheduleRetryAlarm(state: UpdateState): Promise<void> {
     await chrome.alarms.create(UPDATE_RETRY_ALARM, { when: state.retryAt })
   } else {
     await chrome.alarms.clear(UPDATE_RETRY_ALARM)
+  }
+}
+
+/**
+ * GitHub's public `/releases/latest` redirect resolves to the newest tag page.
+ * Reading the final URL costs no API quota, unlike `/releases/latest` on
+ * api.github.com, which shares 60 calls/hour with the marketplace.
+ */
+async function fetchLatestTagFromRedirect(): Promise<string | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+  try {
+    const response = await fetch(UPDATE_LATEST_PAGE_URL, {
+      redirect: 'follow',
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: { Accept: 'text/html' },
+      signal: controller.signal,
+    })
+    void response.body?.cancel()
+    if (!response.ok) return null
+    return latestTagFromRedirectUrl(response.url)
+  } catch {
+    // The API call below turns an outage into the error the user sees.
+    return null
+  } finally {
+    clearTimeout(timer)
   }
 }
 

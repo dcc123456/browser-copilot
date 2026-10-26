@@ -6,15 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-### Fixed — Rate-limited update checks retry themselves
+### Fixed — Update checks no longer drain the GitHub API quota
 
-A GitHub quota rejection used to leave the updater showing an error until the
-next 12-hour alarm, so a released build could sit unfound for most of a day.
-A rate-limited or offline check now schedules a one-shot retry — at the reset
-time GitHub reports when it sends one, otherwise with exponential backoff from
-15 minutes up to 6 hours. Startup checks and panel mounts leave the stored
-state alone until that retry is due, a successful check clears the failure
-counter, and the update card states when the retry will run.
+The updater and the workflow marketplace share the anonymous 60-request/hour
+budget, so normal use could leave the next release check rate-limited and
+stuck. A routine check now follows GitHub's public `/releases/latest`
+redirect, which settles on the newest tag page without spending API quota, and
+asks the API only once a newer tag actually exists — for the asset digest and
+notes. A blocked or unreadable probe falls back to the old API path. A failed
+check still retries at GitHub's reset time or with 15-minute-to-6-hour
+backoff, a successful check clears it, and opening the panel or settings
+re-checks a state older than the 12-hour window so a missed alarm heals by
+itself.
 
 ## [0.6.10] - 2026-10-26
 

@@ -21,6 +21,7 @@ import {
   type InstallType,
 } from '../../lib/update/state'
 import {
+  UPDATE_CHECK_INTERVAL_MINUTES,
   UPDATE_DISMISSED_KEY,
   UPDATE_PENDING_KEY,
   UPDATE_STATE_KEY,
@@ -144,12 +145,15 @@ export function useUpdateSnapshot(options: { autoCheck?: boolean } = {}): Update
   useEffect(() => {
     if (!options.autoCheck || !loaded || didAutoCheck.current) return
     didAutoCheck.current = true
-    const retryDue =
-      state !== null &&
-      state.error !== null &&
-      typeof state.retryAt === 'number' &&
-      state.retryAt <= Date.now()
-    if (!state || retryDue) void checkNow(false)
+    const retryAt = state?.error ? state.retryAt : null
+    const retryPending = typeof retryAt === 'number' && retryAt > Date.now()
+    const retryDue = typeof retryAt === 'number' && retryAt <= Date.now()
+    // A failed state keeps the last successful `checkedAt`, so an old timestamp
+    // must not override a promised retry. Without one, a stale state is how a
+    // missed alarm heals the next time the user opens the panel.
+    const stale =
+      state !== null && Date.now() - state.checkedAt >= UPDATE_CHECK_INTERVAL_MINUTES * 60_000
+    if (!state || retryDue || (stale && !retryPending)) void checkNow(false)
   }, [options.autoCheck, loaded, state, checkNow])
 
   const dismiss = useCallback(async (version: string) => {

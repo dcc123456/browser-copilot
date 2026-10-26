@@ -6,6 +6,7 @@ import {
   UPDATE_RETRY_MAX_MS,
   updateRetryDelayMs,
 } from '../src/lib/update/check'
+import { latestTagFromRedirectUrl } from '../src/lib/update/release'
 import { UpdateFailure, type UpdateState } from '../src/lib/update/types'
 import { variantFromManifest } from '../src/lib/update/variant'
 
@@ -226,6 +227,72 @@ describe('performUpdateCheck', () => {
     })
     expect(state.error?.code).toBe('invalid-release')
     expect(state.available).toBe(false)
+  })
+})
+
+describe('the quota-free latest-tag probe', () => {
+  it('reads a stable tag from the redirect target only', () => {
+    expect(
+      latestTagFromRedirectUrl('https://github.com/dcc123456/browser-copilot/releases/tag/v0.6.10'),
+    ).toBe('v0.6.10')
+    expect(
+      latestTagFromRedirectUrl('https://github.com/dcc123456/browser-copilot/releases'),
+    ).toBeNull()
+    expect(latestTagFromRedirectUrl('https://github.com/other/repo/releases/tag/v9.9.9')).toBeNull()
+    expect(
+      latestTagFromRedirectUrl(
+        'https://github.com/dcc123456/browser-copilot/releases/tag/v0.7.0-rc.1',
+      ),
+    ).toBeNull()
+    expect(latestTagFromRedirectUrl('https://example.com/releases/tag/v0.6.10')).toBeNull()
+    expect(latestTagFromRedirectUrl('not a url')).toBeNull()
+  })
+
+  it('answers an up-to-date build without spending API quota', async () => {
+    const fetchPayload = vi.fn(async () => payload())
+    const state = await performUpdateCheck({
+      ...baseInput,
+      currentVersion: '0.6.10',
+      previous: null,
+      fetchLatestTag: async () => 'v0.6.10',
+      fetchPayload,
+    })
+    expect(fetchPayload).not.toHaveBeenCalled()
+    expect(state).toMatchObject({
+      available: false,
+      latest: null,
+      asset: null,
+      error: null,
+      failures: 0,
+      retryAt: null,
+      checkedAt: 2_000,
+    })
+  })
+
+  it('asks the API once for a newer tag', async () => {
+    const fetchPayload = vi.fn(async () => payload())
+    const state = await performUpdateCheck({
+      ...baseInput,
+      previous: null,
+      fetchLatestTag: async () => TAG,
+      fetchPayload,
+    })
+    expect(fetchPayload).toHaveBeenCalledTimes(1)
+    expect(state.available).toBe(true)
+    expect(state.asset?.name).toBe(ASSET)
+  })
+
+  it('falls back to the API when the probe cannot answer', async () => {
+    const fetchPayload = vi.fn(async () => payload())
+    for (const fetchLatestTag of [
+      async () => null,
+      async () => {
+        throw new Error('blocked')
+      },
+    ]) {
+      await performUpdateCheck({ ...baseInput, previous: null, fetchLatestTag, fetchPayload })
+    }
+    expect(fetchPayload).toHaveBeenCalledTimes(2)
   })
 })
 

@@ -16,6 +16,7 @@ import {
   type UpdateState,
   type UpdateVariant,
 } from './types'
+import { isNewerVersion, normalizeVersion, parseSemver } from './version'
 
 /** Avoid hammering GitHub when several startup events fire close together. */
 export const UPDATE_MIN_CHECK_INTERVAL_MS = 5 * 60_000
@@ -40,6 +41,11 @@ export interface UpdateCheckInput {
   previous: UpdateState | null
   force: boolean
   now: number
+  /**
+   * Resolves the latest tag from GitHub's public release redirect, which costs
+   * no API quota. Omitted or rejected means "ask the API instead".
+   */
+  fetchLatestTag?: () => Promise<string | null>
   /** Resolves the raw `/releases/latest` JSON; throws `UpdateFailure` on transport errors. */
   fetchPayload: () => Promise<unknown>
 }
@@ -59,6 +65,29 @@ export async function performUpdateCheck(input: UpdateCheckInput): Promise<Updat
       input.now - previous.checkedAt < UPDATE_MIN_CHECK_INTERVAL_MS
     ) {
       return previous
+    }
+  }
+
+  // The quota-free probe answers the common "nothing new" case; the API is
+  // only asked for asset digests and notes once a newer tag actually exists.
+  if (input.fetchLatestTag && parseSemver(input.currentVersion)) {
+    const latestTag = await input.fetchLatestTag().catch(() => null)
+    const latestVersion = latestTag === null ? null : normalizeVersion(latestTag)
+    if (
+      latestVersion &&
+      parseSemver(latestVersion) &&
+      !isNewerVersion(latestVersion, input.currentVersion)
+    ) {
+      return {
+        checkedAt: input.now,
+        currentVersion: input.currentVersion,
+        latest: null,
+        asset: null,
+        available: false,
+        error: null,
+        failures: 0,
+        retryAt: null,
+      }
     }
   }
 
