@@ -51,9 +51,9 @@ export function findInstalled(workflows: readonly Workflow[], slug: string): Wor
 /**
  * Workflow id → the catalog card its installed copy has not caught up with.
  *
- * The published version is the only comparison: a local edit does not make a
- * workflow stale, it is what an update is about to overwrite, and a workflow
- * that was never installed has nothing to update.
+ * A newer published version, or a changed hash at the same version, makes a
+ * copy stale. A local edit does not: that is what an update is about to
+ * overwrite, and a workflow that was never installed has nothing to update.
  */
 export function pendingUpdates(
   workflows: readonly Workflow[],
@@ -123,7 +123,7 @@ export function planApply(
   const ref = marketplaceRef(card, now)
 
   if (existing) {
-    if (existing.marketplace && existing.marketplace.version >= card.meta.version) {
+    if (existing.marketplace && !needsUpdate(card.meta, existing.marketplace)) {
       return { status: 'up-to-date', workflow: existing }
     }
     return {

@@ -139,6 +139,8 @@ workflows/<slug>/
 
 封面（第一张截图）、标题、描述、作者、分类/标签、👍/💬 计数、来源链接、按钮状态：`应用` / `已添加` / `可更新`。
 
+三种 chip 必须是三种不同的视觉，不只靠文字区分：作者是中性灰胶囊；分类是强调色填充胶囊（`bg-accent-soft` + `text-accent`）；标签是带描边、方角、`#` 前缀、保持原文大小写的小标签。样式全部走 Tailwind 语义 token（`.task-chip` 的基础字号/内边距保留，颜色与圆角用工具类覆盖），不新增手写 class。
+
 ### 6.3 应用
 
 - `parseMeta` + `asWorkflow` + `migrateWorkflow` 校验；非法内容直接拒绝并在卡片上标记“不可用”。
@@ -149,9 +151,13 @@ workflows/<slug>/
 
 ### 6.4 更新
 
-- 远端 `meta.version > workflow.marketplace.version`（或 hash 不同且版本更高）→ 卡片与本地工作流列表显示“可更新”。
+- 判定“可更新”只看已发布侧：`meta.version > marketplace.version`，或版本相同但 `meta.hash !== marketplace.hash` → 卡片与本地工作流列表显示“可更新”。
+  - 版本是发布者的契约，但同一个 slug 可以“下架 → 重新发布”并复用旧版本号；只比版本会让这次内容更新永远推不到已安装用户，因此同版本必须再比内容 hash。
+  - 本地修改不会改 `marketplace.hash`（它记录的是当初应用下来的发布内容），所以本地编辑本身不会触发更新提示——它正是更新要覆盖的对象。
+  - 已发布的版本**低于**本地记录时永不提示更新，避免 30 分钟目录快照回退时把用户“降级”。
 - 执行更新：保留本地 `id`、`folderId`、`createdAt`，替换 `drawflow/trigger/settings/description/name`，刷新 `marketplace.version/hash`，追加 revision（`source = 'marketplace-update'`）。
 - 更新是覆盖式操作，必须二次确认，并在确认文案里写明“本地修改会丢失”。
+- 已安装工作流的检测节流复用目录 TTL（30 分钟）；离线失败后 10 分钟再试，避免 5 秒一轮的工作流列表反复打 GitHub。
 
 ### 6.5 重新编辑与下架
 

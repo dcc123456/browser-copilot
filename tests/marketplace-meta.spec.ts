@@ -220,10 +220,13 @@ describe('marketplace ref', () => {
     expect(isMarketplaceRef(null)).toBe(false)
   })
 
-  it('flags an update only when the upstream version moved', () => {
+  it('flags an update when the published version or content moved', () => {
     const meta = makeMeta()
     expect(needsUpdate(meta, ref)).toBe(false)
     expect(needsUpdate({ ...meta, version: 3 }, ref)).toBe(true)
+    expect(needsUpdate({ ...meta, version: 2 }, ref)).toBe(false)
+    expect(needsUpdate({ ...meta, version: 2, hash: 'b'.repeat(64) }, ref)).toBe(true)
+    expect(needsUpdate({ ...meta, version: 1 }, ref)).toBe(false)
     expect(needsUpdate({ ...meta, version: 3 }, { ...ref, slug: 'other-slug' })).toBe(false)
     expect(needsUpdate(meta, undefined)).toBe(false)
   })

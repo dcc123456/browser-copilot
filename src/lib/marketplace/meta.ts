@@ -376,11 +376,21 @@ export function isMarketplaceRef(value: unknown): value is WorkflowMarketplaceRe
   )
 }
 
-/** True when the published workflow has a version the local copy has not seen. */
+/**
+ * True when the published listing moved ahead of the installed copy.
+ *
+ * Version is the contract, but a listing can be re-published under a number it
+ * already used (removed, then added back). The published content hash catches
+ * that, so everyone who installed the old bytes still gets the publisher's
+ * change. A published version *below* the installed one is never an update: a
+ * stale catalog snapshot must not offer a downgrade.
+ */
 export function needsUpdate(
   remote: MarketplaceMeta,
   local: WorkflowMarketplaceRef | undefined,
 ): boolean {
   if (!local) return false
-  return remote.slug === local.slug && remote.version > local.version
+  if (remote.slug !== local.slug) return false
+  if (remote.version > local.version) return true
+  return remote.version === local.version && remote.hash !== local.hash
 }

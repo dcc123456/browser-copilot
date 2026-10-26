@@ -1,6 +1,8 @@
 /**
- * Update detection is version-based: a locally edited workflow is not stale,
- * it is what an update overwrites, and an unpublished slug has nothing to
+ * Update detection follows the published listing, not the local copy: a newer
+ * version or a changed content hash at the same version flags the installed
+ * workflow. A local edit never touches `marketplace.hash`, so it is not stale —
+ * it is what an update overwrites — and an unpublished slug has nothing to
  * compare against.
  */
 import { describe, expect, it } from 'vitest'
@@ -59,11 +61,20 @@ describe('pendingUpdates', () => {
     expect(updates['wf-1']?.meta.version).toBe(2)
   })
 
-  it('does not flag a local edit at the same published version', () => {
-    // The local hash differs (the user edited the graph) but the publisher has
-    // not released anything new — an update here would silently discard work.
+  it('flags a listing re-published under the same version', () => {
+    // A slug can be removed and added back under a number it already used, so
+    // the version alone would hide the new content forever.
     const updates = pendingUpdates(
       [installed('wf-1', 'scrape-orders-111', 2, 'f'.repeat(64))],
+      [card('scrape-orders-111', 2)],
+    )
+
+    expect(Object.keys(updates)).toEqual(['wf-1'])
+  })
+
+  it('leaves a copy that matches the published content alone', () => {
+    const updates = pendingUpdates(
+      [installed('wf-1', 'scrape-orders-111', 2)],
       [card('scrape-orders-111', 2)],
     )
 
@@ -86,9 +97,12 @@ describe('pendingUpdates', () => {
     expect(pendingUpdates([installed('wf-1', 'deleted-111', 1)], [])).toEqual({})
   })
 
-  it('ignores an older published version', () => {
+  it('never offers a downgrade from an older catalog snapshot', () => {
     expect(
-      pendingUpdates([installed('wf-1', 'scrape-orders-111', 3)], [card('scrape-orders-111', 2)]),
+      pendingUpdates(
+        [installed('wf-1', 'scrape-orders-111', 3, 'f'.repeat(64))],
+        [card('scrape-orders-111', 2)],
+      ),
     ).toEqual({})
   })
 })

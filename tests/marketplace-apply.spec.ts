@@ -51,7 +51,7 @@ function published(): unknown {
   }
 }
 
-function existing(version = 1): Workflow {
+function existing(version = 1, hash = 'a'.repeat(64)): Workflow {
   return {
     id: 'local-1',
     name: 'My edited copy',
@@ -70,7 +70,7 @@ function existing(version = 1): Workflow {
       repo: 'dcc123456/BC-workflow',
       slug: 'scrape-orders-abcdef',
       version,
-      hash: 'a'.repeat(64),
+      hash,
       author: 'octocat',
       appliedAt: 50,
     },
@@ -103,8 +103,23 @@ describe('planApply', () => {
   })
 
   it('reports up-to-date without rewriting the local copy', () => {
-    const local = existing(2)
+    const local = existing(2, 'b'.repeat(64))
     const plan = planApply(card(2), published(), local, NOW)
+    expect(plan.status).toBe('up-to-date')
+    expect(plan.workflow).toBe(local)
+  })
+
+  it('updates a copy the publisher re-released under the same version', () => {
+    const plan = planApply(card(2), published(), existing(2, 'a'.repeat(64)), NOW)
+
+    expect(plan.status).toBe('update')
+    expect(plan.workflow.marketplace?.hash).toBe('b'.repeat(64))
+  })
+
+  it('does not downgrade to an older published version', () => {
+    const local = existing(3, 'a'.repeat(64))
+    const plan = planApply(card(2), published(), local, NOW)
+
     expect(plan.status).toBe('up-to-date')
     expect(plan.workflow).toBe(local)
   })
@@ -280,7 +295,7 @@ describe('planApplyBundle', () => {
   })
 
   it('installs nothing extra when the parent is already up to date', () => {
-    const local = existing(2)
+    const local = existing(2, 'b'.repeat(64))
     const plan = planApplyBundle(
       bundleCard(2),
       callGraph('Scrape orders', ['child-1']),

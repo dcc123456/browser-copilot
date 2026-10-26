@@ -501,18 +501,24 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                   ) : null}
                 </div>
                 <div className="task-meta">
-                  <span className="task-chip">
+                  <span className="task-chip" data-chip="author">
                     {t.marketplaceByAuthor({ author: meta.author })}
                   </span>
-                  <span className="task-chip">{categoryLabel(t, meta.category)}</span>
+                  <span className="task-chip bg-accent-soft! text-accent!" data-chip="category">
+                    {categoryLabel(t, meta.category)}
+                  </span>
                   {bundleCount > 0 && (
                     <span className="task-chip">
                       {t.marketplaceCardBundle({ count: bundleCount })}
                     </span>
                   )}
                   {meta.tags.map((tag) => (
-                    <span className="task-chip" key={tag}>
-                      {tag}
+                    <span
+                      className="task-chip rounded! border border-border bg-transparent! py-0! normal-case! tracking-normal! text-muted!"
+                      data-chip="tag"
+                      key={tag}
+                    >
+                      #{tag}
                     </span>
                   ))}
                 </div>
