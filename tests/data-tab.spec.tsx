@@ -31,6 +31,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { Command } from '../src/lib/messages'
 import type { PasswordEntry, UserProfile } from '../src/lib/types'
 import { messagesFor } from '../src/lib/i18n'
+import { notifyStoreChanged } from '../src/lib/store-events'
 import { I18nProvider } from '../src/sidepanel/i18n'
 import DataTab from '../src/sidepanel/DataTab'
 
@@ -278,5 +279,20 @@ describe('data tab · password editing opens a dialog', () => {
 
     expect(commands('passwords.save')).toHaveLength(0)
     expect(dialog()).toBeNull()
+  })
+
+  it('shows a credential imported in the background without a reload', async () => {
+    const { container } = await render()
+    await openSecrets(container)
+    expect(container.textContent).not.toContain('Marketplace import')
+
+    passwords = [entry('mkt-demo-secrets-gh', 'Marketplace import'), ...passwords]
+    await act(async () => {
+      notifyStoreChanged('passwords')
+    })
+    await flush()
+
+    expect(container.textContent).toContain('Marketplace import')
+    expect(commands('passwords.list').length).toBeGreaterThanOrEqual(2)
   })
 })

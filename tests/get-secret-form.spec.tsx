@@ -24,6 +24,7 @@ import EditGetSecret from '../src/workflow-editor/blocks/batchC/EditGetSecret'
 import { EDITOR_STRINGS } from '../src/workflow-editor/i18n'
 import { EditorLocaleContext, makeEditorLocale } from '../src/workflow-editor/locale-context'
 import { credentialVariableNameOf } from '../src/lib/workflow/secret-params'
+import { notifyStoreChanged } from '../src/lib/store-events'
 
 const ENTRIES = [
   {
@@ -162,6 +163,31 @@ describe('get-secret output naming', () => {
     await mount({ credential: 'pat::token', variableName: 'token' })
     expect(document.body.textContent).toContain('GitHub PAT · token')
     expect(document.body.innerHTML).not.toContain('SUPER-SECRET')
+  })
+
+  it('lists a credential imported while the form is open', async () => {
+    const container = await mountForm({ credential: '', variableName: '' })
+    expect(container.textContent).not.toContain('Marketplace import')
+
+    mocks.listPasswords.mockResolvedValue([
+      ...ENTRIES,
+      {
+        id: 'mkt-demo-secrets-gh',
+        label: 'Marketplace import',
+        fields: [{ key: 'token', value: 'ghp_published', secret: true }],
+        createdAt: 2,
+        updatedAt: 2,
+        useCount: 0,
+      },
+    ])
+    await act(async () => {
+      notifyStoreChanged('passwords')
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain('Marketplace import · token')
   })
 })
 

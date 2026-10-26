@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { sendCommand } from '../lib/messages'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
+import { onStoreChanged } from '../lib/store-events'
 import { newId } from '../lib/storage'
 import { downloadJSONFile } from '../lib/download-json'
 import {
@@ -89,6 +90,17 @@ export default function DataTab() {
     void loadProfiles().catch((error) => flash('error', (error as Error).message))
     void loadPasswords().catch((error) => flash('error', (error as Error).message))
   }, [loadProfiles, loadPasswords])
+
+  // A workflow applied from the marketplace imports its credentials in the
+  // background, and this tab stays mounted (hidden) while the user is in 广场 —
+  // without the notification the new entries only appeared after a reload.
+  useEffect(
+    () =>
+      onStoreChanged('passwords', () => {
+        void loadPasswords().catch((error) => flash('error', (error as Error).message))
+      }),
+    [loadPasswords],
+  )
 
   // Same contract as the other tabs: the storage folder can reconnect itself
   // mid-session (lib/fs-reconnect) after an extension update, and these lists

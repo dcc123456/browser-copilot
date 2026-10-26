@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed — An imported credential shows up without a reload
+
+Applying a listing that carries credentials writes them in the background, but
+the Data tab and an already-open `get-secret` form had read the vault once when
+they mounted, so the new entries and field names stayed invisible until the
+panel was reloaded. Both now listen for vault changes and refresh in place.
+
 ### Added — Credentials travel with a published workflow
 
 Publishing a workflow that uses stored credentials now lists the referenced

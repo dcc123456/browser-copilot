@@ -34,6 +34,7 @@ import {
   type SecretRow,
 } from '../../../lib/workflow/secret-params'
 import { listPasswords } from '../../../lib/storage'
+import { onStoreChanged } from '../../../lib/store-events'
 import type { PasswordEntry } from '../../../lib/types'
 import type { EditFormProps } from '../EditForms'
 
@@ -83,6 +84,11 @@ function workingRowsOf(
 export default function EditGetSecret({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
   const [entries, setEntries] = useState<PasswordEntry[] | null>(null)
+  // A marketplace apply imports credentials while this editor may already be
+  // open in another tab; the dropdown has to pick them up without a reload.
+  const [vaultVersion, setVaultVersion] = useState(0)
+
+  useEffect(() => onStoreChanged('passwords', () => setVaultVersion((version) => version + 1)), [])
 
   useEffect(() => {
     let cancelled = false
@@ -96,7 +102,7 @@ export default function EditGetSecret({ data, onChange }: EditFormProps) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [vaultVersion])
 
   // One option per (credential · field) pair. The label shows the friendly
   // credential name + field key so they can recognise it without staring at ids.
