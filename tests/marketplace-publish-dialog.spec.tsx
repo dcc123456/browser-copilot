@@ -87,6 +87,19 @@ describe('publish dialog', () => {
     expect(markup).toContain('去 GitHub 创建令牌')
   })
 
+  it('translates the attachment field on the Chinese panel', () => {
+    const markup = render({ token: `ghp_${'a'.repeat(30)}`, login: 'octocat' }, 'zh-CN')
+    expect(markup).toContain('附件')
+    expect(markup).toContain('添加文件')
+  })
+
+  it('offers an attachment field with its limits', () => {
+    const markup = render({ token: `ghp_${'a'.repeat(30)}`, login: 'octocat' })
+    expect(markup).toContain('Attachments')
+    expect(markup).toContain('Up to 3 files, 200 KB each')
+    expect(markup).toContain('Add files')
+  })
+
   it('names the workflows that will be published alongside this one', () => {
     const workflow = makeWorkflow()
     workflow.drawflow.nodes = [callNode('n1', 'local-2')]
@@ -179,6 +192,7 @@ describe('prefilling a published workflow', () => {
       version: 2,
       hash: 'a'.repeat(64),
       images: ['assets/1.webp'],
+      attachments: [{ name: 'orders.csv', path: 'attachments/orders.csv', size: 2048 }],
       videoUrl: 'https://example.com/v',
       createdAt: '2026-10-01T00:00:00.000Z',
       updatedAt: '2026-10-02T00:00:00.000Z',
@@ -193,6 +207,13 @@ describe('prefilling a published workflow', () => {
           ok: true,
           status: 200,
           blob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: 'image/webp' }),
+        }
+      }
+      if (url.endsWith('/attachments/orders.csv')) {
+        return {
+          ok: true,
+          status: 200,
+          blob: async () => new Blob([new Uint8Array(2048)], { type: 'text/csv' }),
         }
       }
       return { ok: false, status: 404, text: async () => '' }
@@ -228,6 +249,8 @@ describe('prefilling a published workflow', () => {
     expect(container.querySelector('textarea')?.value).toBe('Previous copy')
     expect(container.querySelector('select')?.value).toBe('data')
     expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:restored')
+    expect(container.textContent).toContain('orders.csv')
+    expect(container.textContent).toContain('2 KB')
   })
 
   it('keeps a keystroke that lands before the published listing arrives', async () => {
@@ -362,6 +385,54 @@ describe('prefilling a published workflow', () => {
       (input) => (input as HTMLInputElement).value === '行业调研',
     ) as HTMLInputElement
     expect(custom).toBeDefined()
+  })
+
+  it('accepts a small attachment and rejects an oversized one without any request', async () => {
+    const fetchCalls: string[] = []
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      fetchCalls.push(String(input))
+      return { ok: false, status: 404, text: async () => '' }
+    }) as unknown as typeof fetch
+    URL.createObjectURL = () => 'blob:attachment'
+    URL.revokeObjectURL = () => {}
+
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    await act(async () => {
+      root.render(
+        createElement(
+          I18nProvider,
+          { value: { locale: 'en', t: messagesFor('en') } },
+          createElement(PublishWorkflowDialog, {
+            workflow: makeWorkflow(),
+            library: [makeWorkflow()],
+            onClose: () => {},
+            initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
+          }),
+        ),
+      )
+    })
+
+    const fileInput = [...container.querySelectorAll('input[type="file"]')].at(
+      -1,
+    ) as HTMLInputElement
+    const big = new File([new Uint8Array(200 * 1024 + 1)], 'big.csv', { type: 'text/csv' })
+    Object.defineProperty(fileInput, 'files', { value: [big], configurable: true })
+    await act(async () => {
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(container.textContent).toContain('Each attachment must be 200 KB or smaller.')
+    expect(container.textContent).not.toContain('big.csv')
+
+    const small = new File([new Uint8Array(2048)], 'orders.csv', { type: 'text/csv' })
+    Object.defineProperty(fileInput, 'files', { value: [small], configurable: true })
+    await act(async () => {
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(container.textContent).toContain('orders.csv')
+    expect(container.textContent).toContain('2 KB')
+    expect(fetchCalls).toEqual([])
   })
 
   it('refuses to publish a custom category with no name', async () => {

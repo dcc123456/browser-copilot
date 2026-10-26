@@ -17,6 +17,12 @@
  */
 
 import type { Workflow } from '../workflow/types'
+import {
+  attachmentFile,
+  attachmentPath,
+  formatAttachmentSize,
+  uniqueAttachmentFile,
+} from './attachments'
 import { collectDependencies } from './dependencies'
 import type { GitHubPull, GitHubRef, GitHubRepo, GitHubTree } from './github-client'
 import {
@@ -36,10 +42,14 @@ import {
   MARKETPLACE_OWNER,
   MARKETPLACE_PR_BRANCH_PREFIX,
   MARKETPLACE_REPO,
+  MAX_ATTACHMENT_NAME_CHARS,
   MAX_BUNDLE_WORKFLOWS,
+  MAX_PUBLISH_ATTACHMENT_BYTES,
+  MAX_PUBLISH_ATTACHMENTS,
   MAX_PUBLISH_IMAGE_BYTES,
   MAX_PUBLISH_IMAGES,
   MarketplaceError,
+  type MarketplaceAttachment,
   type MarketplaceAuth,
   type MarketplaceMeta,
   type MarketplacePublishInput,
@@ -197,6 +207,25 @@ export async function preparePublish(
     }
   }
 
+  const attachments = input.attachments ?? []
+  if (attachments.length > MAX_PUBLISH_ATTACHMENTS) {
+    throw new MarketplaceError(
+      'invalid',
+      `At most ${MAX_PUBLISH_ATTACHMENTS} attachments can be published`,
+    )
+  }
+  for (const attachment of attachments) {
+    if (!attachment.name.trim()) {
+      throw new MarketplaceError('invalid', 'Attachment name is empty')
+    }
+    if (attachment.blob.size > MAX_PUBLISH_ATTACHMENT_BYTES) {
+      throw new MarketplaceError(
+        'invalid',
+        `Each attachment must be ${MAX_PUBLISH_ATTACHMENT_BYTES / 1024} KB or smaller`,
+      )
+    }
+  }
+
   const now = options.now ?? new Date()
   const bundle = collectDependencies(input.workflow, options.library ?? [])
   if (bundle.missing.length > 0) {
@@ -235,6 +264,15 @@ export async function preparePublish(
   const json = JSON.stringify(publishable, null, 2)
   const hash = await workflowHash(json)
 
+  const takenAttachmentFiles = new Set<string>()
+  const publishedAttachments: MarketplaceAttachment[] = attachments.map((attachment) => ({
+    name: attachment.name.trim().slice(0, MAX_ATTACHMENT_NAME_CHARS),
+    path: attachmentPath(
+      uniqueAttachmentFile(attachmentFile(attachment.name), takenAttachmentFiles),
+    ),
+    size: attachment.blob.size,
+  }))
+
   let slug: string
   let version = 1
   if (localRef && localRef.author === author) {
@@ -266,6 +304,7 @@ export async function preparePublish(
     category: input.category,
     tags: input.tags,
     dependencies: dependencies.map(({ id, name, path }) => ({ id, name, path })),
+    attachments: publishedAttachments,
     author,
     version,
     hash: finalHash,
@@ -285,6 +324,12 @@ export async function preparePublish(
     files.push({
       path: assetRepoPath(slug, dependency.path),
       contentBase64: textToBase64(dependency.json),
+    })
+  }
+  for (let index = 0; index < attachments.length; index += 1) {
+    files.push({
+      path: assetRepoPath(slug, publishedAttachments[index]!.path),
+      contentBase64: await blobToBase64(attachments[index]!.blob),
     })
   }
   for (let index = 0; index < input.images.length; index += 1) {
@@ -324,6 +369,12 @@ function pullBody(meta: MarketplaceMeta): string {
   ]
   if (meta.dependencies?.length) {
     lines.push(`- bundle: ${meta.dependencies.map((dep) => `\`${dep.name}\``).join(', ')}`)
+  }
+  if (meta.attachments?.length) {
+    const files = meta.attachments.map(
+      (file) => `\`${file.name}\` (${formatAttachmentSize(file.size)})`,
+    )
+    lines.push(`- attachments: ${files.join(', ')}`)
   }
   if (meta.videoUrl) lines.push(`- video: ${meta.videoUrl}`)
   lines.push('', '<sub>Merging makes this workflow available to every Browser Copilot user.</sub>')

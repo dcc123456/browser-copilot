@@ -9,6 +9,8 @@ import { normalizeCategory } from './categories'
 import { normalizeTags } from './meta'
 import {
   MAX_DESCRIPTION_CHARS,
+  MAX_PUBLISH_ATTACHMENT_BYTES,
+  MAX_PUBLISH_ATTACHMENTS,
   MAX_PUBLISH_IMAGE_BYTES,
   MAX_PUBLISH_IMAGES,
   MAX_TITLE_CHARS,
@@ -23,6 +25,8 @@ export type PublishFormError =
   | 'too-many-images'
   | 'image-too-large'
   | 'image-type'
+  | 'too-many-attachments'
+  | 'attachment-too-large'
 
 export interface PublishFormValues {
   title: string
@@ -31,6 +35,8 @@ export interface PublishFormValues {
   description: string
   videoUrl: string
   images: readonly Pick<File, 'type' | 'size'>[]
+  /** Small files committed under `attachments/`. */
+  attachments?: readonly Pick<File, 'name' | 'size'>[]
 }
 
 /** Returns the first invalid field, or null when the form can be published. */
@@ -47,6 +53,11 @@ export function validatePublishForm(values: PublishFormValues): PublishFormError
   for (const image of values.images) {
     if (!image.type.startsWith('image/')) return 'image-type'
     if (image.size > MAX_PUBLISH_IMAGE_BYTES) return 'image-too-large'
+  }
+  const attachments = values.attachments ?? []
+  if (attachments.length > MAX_PUBLISH_ATTACHMENTS) return 'too-many-attachments'
+  for (const attachment of attachments) {
+    if (attachment.size > MAX_PUBLISH_ATTACHMENT_BYTES) return 'attachment-too-large'
   }
   return null
 }

@@ -172,6 +172,24 @@
 
 **验收**：发布一个调用其它工作流的工作流时，弹窗列出将随行的工作流；合并后仓库中出现 `workflows/<slug>/deps/*.json` 且 `meta.json` 带 `dependencies`；另一个本地库应用该卡片后，父工作流的 `execute-workflow` 步骤指向 `mkt-<slug>-<file>`，被调用工作流以同一 id 落库且不自动运行；再次更新替换同一份副本；缺少被调用工作流时无法发布。
 
+### Step 13 — 发布附件（≤200 KB，2026-10-26 追加）
+
+| 文件                                                          | 动作 | 内容                                                                                                                                |
+| ------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/marketplace/attachments.ts`                          | 新增 | 文件名净化、`attachments/` 路径白名单、同名去重、`formatAttachmentSize`                                                             |
+| `src/lib/marketplace/types.ts`                                | 修改 | `MAX_PUBLISH_ATTACHMENTS = 3`、`MAX_PUBLISH_ATTACHMENT_BYTES = 200 KB`、`MarketplaceAttachment`、`PublishAttachment`、meta 可选字段 |
+| `src/lib/marketplace/meta.ts`                                 | 修改 | `buildMeta` 严格校验数量/大小/路径；`parseMeta` 按条丢弃非法附件                                                                    |
+| `src/lib/marketplace/form.ts`                                 | 修改 | `too-many-attachments` / `attachment-too-large`                                                                                     |
+| `src/lib/marketplace/publish.ts`                              | 修改 | 校验附件、提交 `attachments/*`、meta 记录、PR 正文附件行                                                                            |
+| `src/lib/i18n.ts`                                             | 修改 | 弹窗附件字段/提示/错误、卡片附件链接与大小文案（en + zh-CN）                                                                        |
+| `src/sidepanel/PublishWorkflowDialog.tsx`                     | 修改 | 附件选择与移除、大小提示、预填已发布附件、`preparePublish` 入参                                                                     |
+| `src/sidepanel/MarketplaceTab.tsx`                            | 修改 | 卡片列出附件链接（raw 地址，新标签页打开）                                                                                          |
+| `tests/marketplace-attachments.spec.ts`                       | 新增 | 净化/去重/白名单/大小显示                                                                                                           |
+| `tests/marketplace-card-attachments.spec.tsx`                 | 新增 | 卡片附件链接指向 raw 文件                                                                                                           |
+| `tests/marketplace-{meta,form,publish,publish-dialog}.spec.*` | 修改 | meta 往返与拒收、表单错误、提交字节与 PR 正文、弹窗字段与预填                                                                       |
+
+**验收**：发布弹窗可选 ≤200 KB 的附件（最多 3 个），超限立即报错且不联网；发布后 PR 中出现 `workflows/<slug>/attachments/<file>`，`meta.json` 有 `attachments`；广场卡片显示附件链接并能打开原始文件；再次编辑能带回已发布附件。
+
 ## 2. 测试与门禁
 
 - 每步：`pnpm typecheck && pnpm test && pnpm lint && pnpm format:check`。

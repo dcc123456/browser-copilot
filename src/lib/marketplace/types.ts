@@ -32,6 +32,10 @@ export const MARKETPLACE_PR_BRANCH_PREFIX = 'submit/'
 
 export const MAX_PUBLISH_IMAGES = 3
 export const MAX_PUBLISH_IMAGE_BYTES = 1024 * 1024
+/** Files a listing may carry for download; each stays small enough to diff. */
+export const MAX_PUBLISH_ATTACHMENTS = 3
+export const MAX_PUBLISH_ATTACHMENT_BYTES = 200 * 1024
+export const MAX_ATTACHMENT_NAME_CHARS = 120
 export const MAX_WORKFLOW_JSON_BYTES = 512 * 1024
 export const MAX_TITLE_CHARS = 120
 export const MAX_DESCRIPTION_CHARS = 2000
@@ -81,6 +85,16 @@ export interface MarketplaceDependency {
   path: string
 }
 
+/** One downloadable file published next to the workflow. */
+export interface MarketplaceAttachment {
+  /** Original file name, shown to the user. */
+  name: string
+  /** Workflow-relative file, e.g. `attachments/orders.csv`. */
+  path: string
+  /** Byte length, so a card can show the size without downloading. */
+  size: number
+}
+
 /** One published workflow, as stored in `workflows/<slug>/meta.json`. */
 export interface MarketplaceMeta {
   schema: typeof MARKETPLACE_SCHEMA_VERSION
@@ -103,6 +117,11 @@ export interface MarketplaceMeta {
    * listings published before bundles existed.
    */
   dependencies?: MarketplaceDependency[]
+  /**
+   * Files committed under `attachments/`. Absent on listings published before
+   * attachments existed; malformed entries are dropped on read.
+   */
+  attachments?: MarketplaceAttachment[]
   /** External video link; videos are never committed to the repo. */
   videoUrl?: string
   createdAt: string
@@ -162,5 +181,13 @@ export type MarketplacePublishInput = {
   tags: string[]
   /** Already-compressed image files, in display order. */
   images: Blob[]
+  /** Files to commit under `attachments/`, each at most 200 KB. */
+  attachments?: PublishAttachment[]
   videoUrl?: string
+}
+
+/** A user-picked file, still carrying the name it will be listed under. */
+export interface PublishAttachment {
+  name: string
+  blob: Blob
 }

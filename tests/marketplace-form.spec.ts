@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseTagInput, validatePublishForm } from '../src/lib/marketplace/form'
-import { MAX_PUBLISH_IMAGE_BYTES } from '../src/lib/marketplace/types'
+import { MAX_PUBLISH_ATTACHMENT_BYTES, MAX_PUBLISH_IMAGE_BYTES } from '../src/lib/marketplace/types'
 
 function values(overrides: Partial<Parameters<typeof validatePublishForm>[0]> = {}) {
   return {
@@ -49,6 +49,21 @@ describe('publish form validation', () => {
         values({ images: [{ type: 'image/webp', size: MAX_PUBLISH_IMAGE_BYTES + 1 }] }),
       ),
     ).toBe('image-too-large')
+  })
+
+  it('limits the number and size of attachments', () => {
+    const attachment = { name: 'orders.csv', size: 1024 }
+    expect(
+      validatePublishForm(
+        values({ attachments: [attachment, attachment, attachment, attachment] }),
+      ),
+    ).toBe('too-many-attachments')
+    expect(
+      validatePublishForm(
+        values({ attachments: [{ ...attachment, size: MAX_PUBLISH_ATTACHMENT_BYTES + 1 }] }),
+      ),
+    ).toBe('attachment-too-large')
+    expect(validatePublishForm(values({ attachments: [attachment] }))).toBeNull()
   })
 
   it('splits, trims and de-duplicates tags', () => {

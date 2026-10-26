@@ -151,6 +151,58 @@ describe('marketplace meta — bundled dependencies', () => {
   })
 })
 
+describe('marketplace meta — attachments', () => {
+  const attachment = { name: 'Orders 模板.csv', path: 'attachments/orders.csv', size: 2048 }
+
+  it('round-trips the attachment list', () => {
+    const meta = buildMeta({ ...makeMetaInput(), attachments: [attachment] })
+    expect(meta.attachments).toEqual([attachment])
+    expect(parseMeta(JSON.parse(JSON.stringify(meta)))).toEqual(meta)
+  })
+
+  it('omits the field when nothing is attached', () => {
+    expect(makeMeta().attachments).toBeUndefined()
+    expect(parseMeta({ ...makeMeta(), attachments: [] })?.attachments).toBeUndefined()
+  })
+
+  it('drops unusable entries instead of rejecting the whole card', () => {
+    const parsed = parseMeta({
+      ...makeMeta(),
+      attachments: [
+        attachment,
+        { ...attachment, path: 'attachments/../secret' },
+        { ...attachment, path: 'attachments/orders.csv' },
+        { ...attachment, path: 'attachments/orders-2.csv', name: '   ' },
+        { ...attachment, path: 'attachments/orders-3.csv', size: 200 * 1024 + 1 },
+        'nope',
+      ],
+    })
+    expect(parsed?.attachments).toEqual([attachment])
+    expect(parseMeta({ ...makeMeta(), attachments: 'nope' })?.attachments).toBeUndefined()
+  })
+
+  it('refuses to build a record with an unsafe or oversized attachment', () => {
+    expect(() =>
+      buildMeta({ ...makeMetaInput(), attachments: [{ ...attachment, path: 'attachments/a/b' }] }),
+    ).toThrow()
+    expect(() =>
+      buildMeta({ ...makeMetaInput(), attachments: [{ ...attachment, name: ' ' }] }),
+    ).toThrow()
+    expect(() =>
+      buildMeta({
+        ...makeMetaInput(),
+        attachments: [{ ...attachment, size: 200 * 1024 + 1 }],
+      }),
+    ).toThrow()
+    expect(() =>
+      buildMeta({
+        ...makeMetaInput(),
+        attachments: [attachment, attachment, attachment, { ...attachment, path: 'attachments/x' }],
+      }),
+    ).toThrow()
+  })
+})
+
 describe('marketplace ref', () => {
   const ref: WorkflowMarketplaceRef = {
     repo: 'dcc123456/BC-workflow',

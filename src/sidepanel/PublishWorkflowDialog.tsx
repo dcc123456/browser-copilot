@@ -10,12 +10,13 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ImagePlus, Trash2 } from 'lucide-react'
+import { ImagePlus, Paperclip, Trash2 } from 'lucide-react'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
 import { useT } from './i18n'
 import type { Messages } from '../lib/i18n'
 import { GitHubClient } from '../lib/marketplace/github-client'
 import { compressImage } from '../lib/marketplace/image'
+import { formatAttachmentSize } from '../lib/marketplace/attachments'
 import { categoryLabel, isBuiltinCategory } from '../lib/marketplace/categories'
 import { collectDependencies } from '../lib/marketplace/dependencies'
 import { parseTagInput, validatePublishForm, type PublishFormError } from '../lib/marketplace/form'
@@ -33,6 +34,8 @@ import {
   MARKETPLACE_REPO_FULL,
   MAX_BUNDLE_WORKFLOWS,
   MAX_CATEGORY_CHARS,
+  MAX_PUBLISH_ATTACHMENT_BYTES,
+  MAX_PUBLISH_ATTACHMENTS,
   MAX_PUBLISH_IMAGES,
   MarketplaceError,
   type MarketplaceAuth,
@@ -55,6 +58,8 @@ const FORM_ERROR_KEY: Record<PublishFormError, keyof Messages> = {
   'too-many-images': 'marketplaceFormTooManyImages',
   'image-too-large': 'marketplaceFormImageTooLarge',
   'image-type': 'marketplaceFormImageType',
+  'too-many-attachments': 'marketplaceFormTooManyAttachments',
+  'attachment-too-large': 'marketplaceFormAttachmentTooLarge',
 }
 
 /**
@@ -70,6 +75,13 @@ export function connectFailureText(t: Messages, error: unknown): string {
 }
 
 interface SelectedImage {
+  blob: Blob
+  url: string
+}
+
+/** A small file committed with the listing; the name is what the card shows. */
+interface SelectedAttachment {
+  name: string
   blob: Blob
   url: string
 }
@@ -158,6 +170,7 @@ export default function PublishWorkflowDialog({
   const [videoUrl, setVideoUrl] = useState('')
   const [images, setImages] = useState<SelectedImage[]>([])
   const [imageBusy, setImageBusy] = useState(false)
+  const [attachments, setAttachments] = useState<SelectedAttachment[]>([])
 
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState<PublishFormError | null>(null)
@@ -166,12 +179,16 @@ export default function PublishWorkflowDialog({
   const [result, setResult] = useState<PublishResult | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
   // Object URLs must outlive individual renders; revoke them on unmount only.
   const imagesRef = useRef<SelectedImage[]>([])
   imagesRef.current = images
+  const attachmentsRef = useRef<SelectedAttachment[]>([])
+  attachmentsRef.current = attachments
   useEffect(() => {
     return () => {
       for (const image of imagesRef.current) URL.revokeObjectURL(image.url)
+      for (const file of attachmentsRef.current) URL.revokeObjectURL(file.url)
     }
   }, [])
 
@@ -215,6 +232,16 @@ export default function PublishWorkflowDialog({
         .filter((blob): blob is Blob => blob !== null)
         .map((blob) => ({ blob, url: URL.createObjectURL(blob) }))
       if (restored.length > 0) setImages(restored)
+      const publishedAttachments = meta.attachments ?? []
+      const attachmentBlobs = await Promise.all(
+        publishedAttachments.map((file) => fetchPublishedAsset(publishedSlug, file.path)),
+      )
+      if (cancelled || editedRef.current) return
+      const restoredAttachments = publishedAttachments.flatMap((file, index) => {
+        const blob = attachmentBlobs[index]
+        return blob ? [{ name: file.name, blob, url: URL.createObjectURL(blob) }] : []
+      })
+      if (restoredAttachments.length > 0) setAttachments(restoredAttachments)
     })()
     return () => {
       cancelled = true
@@ -248,6 +275,25 @@ export default function PublishWorkflowDialog({
     } finally {
       setImageBusy(false)
     }
+  }
+
+  const addAttachments = (files: FileList | null): void => {
+    if (!files || files.length === 0) return
+    setFormError(null)
+    const next = [...attachments]
+    for (const file of Array.from(files)) {
+      if (next.length >= MAX_PUBLISH_ATTACHMENTS) {
+        setFormError('too-many-attachments')
+        break
+      }
+      if (file.size > MAX_PUBLISH_ATTACHMENT_BYTES) {
+        setFormError('attachment-too-large')
+        continue
+      }
+      next.push({ name: file.name, blob: file, url: URL.createObjectURL(file) })
+    }
+    setAttachments(next)
+    edit()
   }
 
   const connect = async (): Promise<void> => {
@@ -285,6 +331,7 @@ export default function PublishWorkflowDialog({
       description,
       videoUrl,
       images: images.map((image) => image.blob),
+      attachments: attachments.map((file) => ({ name: file.name, size: file.blob.size })),
     })
     if (validation) {
       setFormError(validation)
@@ -304,6 +351,7 @@ export default function PublishWorkflowDialog({
             category: effectiveCategory,
             tags: parseTagInput(tagInput),
             images: images.map((image) => image.blob),
+            attachments: attachments.map((file) => ({ name: file.name, blob: file.blob })),
             ...(videoUrl.trim() ? { videoUrl: videoUrl.trim() } : {}),
           },
           {
@@ -613,6 +661,67 @@ export default function PublishWorkflowDialog({
                 />
                 <span className="mt-1 block text-[11.5px] leading-snug text-muted">
                   {imageBusy ? t.marketplaceImagesCompressing : t.marketplaceFieldImagesHint}
+                </span>
+              </div>
+
+              <div className="mb-3">
+                <span className="mb-1 block text-[12px] font-medium text-muted">
+                  {t.marketplaceFieldAttachments}
+                </span>
+                {attachments.length > 0 && (
+                  <ul className="m-0 list-none space-y-1 p-0">
+                    {attachments.map((file, index) => (
+                      <li
+                        className="flex items-center gap-2 rounded-md border border-border px-2 py-1 text-[11.5px] text-ink"
+                        key={file.url}
+                      >
+                        <span className="min-w-0 flex-1 truncate" title={file.name}>
+                          {file.name}
+                        </span>
+                        <span className="shrink-0 text-muted">
+                          {formatAttachmentSize(file.blob.size)}
+                        </span>
+                        <button
+                          aria-label={t.marketplaceAttachmentsRemove}
+                          className="flex! h-5! w-5! shrink-0 items-center! justify-center! rounded! border-0! bg-transparent! p-0! text-muted! hover:text-ink!"
+                          disabled={busy}
+                          onClick={() => {
+                            URL.revokeObjectURL(file.url)
+                            setAttachments((current) => current.filter((_, i) => i !== index))
+                            edit()
+                          }}
+                          title={t.marketplaceAttachmentsRemove}
+                          type="button"
+                        >
+                          <Trash2 size={11} aria-hidden="true" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {attachments.length < MAX_PUBLISH_ATTACHMENTS && (
+                  <button
+                    className="mt-1 inline-flex items-center gap-1 rounded-md border border-dashed border-border px-2 py-1 text-[11.5px] text-muted hover:bg-hover"
+                    disabled={busy}
+                    onClick={() => attachmentInputRef.current?.click()}
+                    type="button"
+                  >
+                    <Paperclip size={12} aria-hidden="true" />
+                    {t.marketplaceAttachmentsAdd}
+                  </button>
+                )}
+                <input
+                  ref={attachmentInputRef}
+                  className="hidden"
+                  multiple
+                  onChange={(event) => {
+                    addAttachments(event.target.files)
+                    event.target.value = ''
+                  }}
+                  type="file"
+                />
+                <span className="mt-1 block text-[11.5px] leading-snug text-muted">
+                  {t.marketplaceFieldAttachmentsHint}
                 </span>
               </div>
 

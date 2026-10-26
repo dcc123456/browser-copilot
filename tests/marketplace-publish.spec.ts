@@ -252,6 +252,52 @@ describe('preparePublish', () => {
     expect(prepared.meta.images).toEqual(['assets/1.webp'])
   })
 
+  it('commits attachments under attachments/ and records them in meta', async () => {
+    const prepared = await prepare(
+      makeInput({
+        attachments: [
+          { name: '订单数据.csv', blob: new Blob([new Uint8Array([4, 5, 6])]) },
+          { name: 'orders.csv', blob: new Blob([new Uint8Array([7])]) },
+          { name: 'notes.txt', blob: new Blob(['hi']) },
+        ],
+      }),
+    )
+
+    expect(prepared.files.map((file) => file.path)).toEqual([
+      `workflows/${prepared.slug}/workflow.json`,
+      `workflows/${prepared.slug}/meta.json`,
+      `workflows/${prepared.slug}/attachments/file.csv`,
+      `workflows/${prepared.slug}/attachments/orders.csv`,
+      `workflows/${prepared.slug}/attachments/notes.txt`,
+    ])
+    expect(prepared.meta.attachments).toEqual([
+      { name: '订单数据.csv', path: 'attachments/file.csv', size: 3 },
+      { name: 'orders.csv', path: 'attachments/orders.csv', size: 1 },
+      { name: 'notes.txt', path: 'attachments/notes.txt', size: 2 },
+    ])
+    expect([...Buffer.from(prepared.files[2]!.contentBase64, 'base64')]).toEqual([4, 5, 6])
+  })
+
+  it('rejects oversized or too many attachments', async () => {
+    await expect(
+      prepare(
+        makeInput({
+          attachments: [{ name: 'big.csv', blob: new Blob([new Uint8Array(200 * 1024 + 1)]) }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'invalid' })
+    await expect(
+      prepare(
+        makeInput({
+          attachments: Array.from({ length: 4 }, (_, index) => ({
+            name: `file-${index}.csv`,
+            blob: new Blob(['x']),
+          })),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'invalid' })
+  })
+
   it('bumps the same slug when republishing a workflow you already own', async () => {
     const prepared = await prepare(
       makeInput({
@@ -496,6 +542,22 @@ describe('pushPublish', () => {
       `workflows/${prepared.slug}/deps/collect-numbers.json`,
     )
     expect(calls.createPull[0]!.body).toContain('- bundle: `Collect numbers`')
+  })
+
+  it('lists the attached files in the pull request body', async () => {
+    const prepared = await prepare(
+      makeInput({
+        attachments: [{ name: 'orders.csv', blob: new Blob([new Uint8Array(2048)]) }],
+      }),
+    )
+    const { client, calls } = makeClient()
+
+    await pushPublish(prepared, { client, auth: AUTH, now: NOW, sleep: async () => {} })
+
+    expect(calls.putFile.map((call) => call.path)).toContain(
+      `workflows/${prepared.slug}/attachments/orders.csv`,
+    )
+    expect(calls.createPull[0]!.body).toContain('- attachments: `orders.csv` (2 KB)')
   })
 
   it('forks the repo and polls until GitHub exposes it', async () => {

@@ -10,15 +10,20 @@
  */
 
 import type { WorkflowMarketplaceRef } from '../workflow/types'
+import { isAttachmentPath } from './attachments'
 import { isValidSlug } from './slug'
 import {
   MARKETPLACE_SCHEMA_VERSION,
+  MAX_ATTACHMENT_NAME_CHARS,
   MAX_BUNDLE_WORKFLOWS,
   MAX_DESCRIPTION_CHARS,
+  MAX_PUBLISH_ATTACHMENT_BYTES,
+  MAX_PUBLISH_ATTACHMENTS,
   MAX_TAGS,
   MAX_TAG_CHARS,
   MAX_TITLE_CHARS,
   MarketplaceError,
+  type MarketplaceAttachment,
   type MarketplaceDependency,
   type MarketplaceMeta,
 } from './types'
@@ -96,6 +101,7 @@ export interface BuildMetaInput {
   category: string
   tags?: readonly string[]
   dependencies?: readonly MarketplaceDependency[]
+  attachments?: readonly MarketplaceAttachment[]
   author: string
   version: number
   hash: string
@@ -136,6 +142,37 @@ function normalizeDependencies(items: readonly MarketplaceDependency[]): Marketp
   })
 }
 
+/** Validates the download list a publisher is about to commit. */
+function normalizeAttachments(items: readonly MarketplaceAttachment[]): MarketplaceAttachment[] {
+  if (items.length > MAX_PUBLISH_ATTACHMENTS) {
+    throw new MarketplaceError(
+      'invalid',
+      `A listing can carry at most ${MAX_PUBLISH_ATTACHMENTS} attachments`,
+    )
+  }
+  const paths = new Set<string>()
+  return items.map((item) => {
+    const name = item.name.trim()
+    if (!name || name.length > MAX_ATTACHMENT_NAME_CHARS) {
+      throw new MarketplaceError('invalid', 'Attachment name is empty or too long')
+    }
+    if (!isAttachmentPath(item.path)) {
+      throw new MarketplaceError('invalid', `Invalid attachment path: ${item.path}`)
+    }
+    if (!Number.isInteger(item.size) || item.size < 0 || item.size > MAX_PUBLISH_ATTACHMENT_BYTES) {
+      throw new MarketplaceError(
+        'invalid',
+        `Each attachment must be ${MAX_PUBLISH_ATTACHMENT_BYTES / 1024} KB or smaller`,
+      )
+    }
+    if (paths.has(item.path)) {
+      throw new MarketplaceError('invalid', 'An attachment is listed twice')
+    }
+    paths.add(item.path)
+    return { name, path: item.path, size: item.size }
+  })
+}
+
 /** Builds a validated `meta.json`; throws {@link MarketplaceError} on bad input. */
 export function buildMeta(input: BuildMetaInput): MarketplaceMeta {
   if (!isValidSlug(input.slug)) {
@@ -166,6 +203,7 @@ export function buildMeta(input: BuildMetaInput): MarketplaceMeta {
   }
   const images = Array.from({ length: imageCount }, (_, index) => assetPath(index))
   const dependencies = normalizeDependencies(input.dependencies ?? [])
+  const attachments = normalizeAttachments(input.attachments ?? [])
   const videoUrl = input.videoUrl?.trim() || undefined
   if (videoUrl && !/^https?:\/\//i.test(videoUrl)) {
     throw new MarketplaceError('invalid', 'Video link must start with http:// or https://')
@@ -183,6 +221,7 @@ export function buildMeta(input: BuildMetaInput): MarketplaceMeta {
     hash: input.hash,
     images,
     ...(dependencies.length ? { dependencies } : {}),
+    ...(attachments.length ? { attachments } : {}),
     ...(videoUrl ? { videoUrl } : {}),
     createdAt: stamp,
     updatedAt: stamp,
@@ -216,6 +255,36 @@ function parseDependencies(raw: unknown): MarketplaceDependency[] | null {
     dependencies.push({ id, name, path })
   }
   return dependencies
+}
+
+/**
+ * Reads the download list. Attachments only affect links on a card, so a bad
+ * entry is dropped instead of making the whole listing unusable.
+ */
+function parseAttachments(raw: unknown): MarketplaceAttachment[] {
+  if (!Array.isArray(raw)) return []
+  const paths = new Set<string>()
+  const attachments: MarketplaceAttachment[] = []
+  for (const item of raw) {
+    if (attachments.length >= MAX_PUBLISH_ATTACHMENTS) break
+    if (!isRecord(item)) continue
+    const path = item['path']
+    if (typeof path !== 'string' || !isAttachmentPath(path) || paths.has(path)) continue
+    const name = item['name']
+    if (typeof name !== 'string' || !name.trim()) continue
+    const size = item['size']
+    if (
+      typeof size !== 'number' ||
+      !Number.isInteger(size) ||
+      size < 0 ||
+      size > MAX_PUBLISH_ATTACHMENT_BYTES
+    ) {
+      continue
+    }
+    paths.add(path)
+    attachments.push({ name: name.trim().slice(0, MAX_ATTACHMENT_NAME_CHARS), path, size })
+  }
+  return attachments
 }
 
 /**
@@ -262,6 +331,7 @@ export function parseMeta(value: unknown): MarketplaceMeta | null {
   const updatedAt = isoOrEmpty(value['updatedAt']) || createdAt
   const dependencies = parseDependencies(value['dependencies'])
   if (dependencies === null) return null
+  const attachments = parseAttachments(value['attachments'])
 
   return {
     schema: MARKETPLACE_SCHEMA_VERSION,
@@ -275,6 +345,7 @@ export function parseMeta(value: unknown): MarketplaceMeta | null {
     hash,
     images,
     ...(dependencies.length ? { dependencies } : {}),
+    ...(attachments.length ? { attachments } : {}),
     ...(videoUrl ? { videoUrl } : {}),
     createdAt,
     updatedAt,

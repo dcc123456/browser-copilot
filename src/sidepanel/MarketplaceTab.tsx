@@ -15,6 +15,7 @@ import { sendCommand } from '../lib/messages'
 import { onStoreChanged } from '../lib/store-events'
 import type { Workflow } from '../lib/workflow/types'
 import { findInstalled } from '../lib/marketplace/apply'
+import { formatAttachmentSize } from '../lib/marketplace/attachments'
 import { categoryKey, categoryLabel, categoryOptions } from '../lib/marketplace/categories'
 import { chromeCatalogCache, loadCatalog, type LoadCatalogResult } from '../lib/marketplace/catalog'
 import {
@@ -519,6 +520,22 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                   <p className="mt-1.5 mb-0 text-[12px] leading-snug text-muted">
                     {meta.description}
                   </p>
+                )}
+                {!!meta.attachments?.length && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">
+                    <span className="text-muted">{t.marketplaceCardAttachments}</span>
+                    {meta.attachments.map((file) => (
+                      <a
+                        className="text-accent"
+                        href={rawUrl(assetRepoPath(meta.slug, file.path))}
+                        key={file.path}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {file.name} ({formatAttachmentSize(file.size)})
+                      </a>
+                    ))}
+                  </div>
                 )}
                 <div className="mt-1 flex items-center gap-3 text-[11.5px] text-muted">
                   <span>{t.marketplaceLikeCount({ count: likeState?.likes ?? card.likes })}</span>

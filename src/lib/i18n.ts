@@ -269,6 +269,10 @@ export interface Messages {
   marketplaceImagesAdd: string
   marketplaceImagesRemove: string
   marketplaceImagesCompressing: string
+  marketplaceFieldAttachments: string
+  marketplaceFieldAttachmentsHint: string
+  marketplaceAttachmentsAdd: string
+  marketplaceAttachmentsRemove: string
   marketplaceCategoryEcommerce: string
   marketplaceCategoryOrders: string
   marketplaceCategoryMarketing: string
@@ -318,6 +322,8 @@ export interface Messages {
   marketplaceFormTooManyImages: string
   marketplaceFormImageTooLarge: string
   marketplaceFormImageType: string
+  marketplaceFormTooManyAttachments: string
+  marketplaceFormAttachmentTooLarge: string
   marketplaceErrorAuthRequired: string
   marketplaceErrorUnauthorized: string
   marketplaceErrorForbidden: string
@@ -351,6 +357,8 @@ export interface Messages {
   marketplaceByAuthor: (params: { author: string }) => string
   /** Chip on a card that bundles the workflows its steps call. */
   marketplaceCardBundle: (params: { count: number }) => string
+  /** Label in front of a card's attachment links. */
+  marketplaceCardAttachments: string
   marketplaceLikeCount: (params: { count: number }) => string
   marketplaceCommentCount: (params: { count: number }) => string
   marketplaceLikeAction: string
@@ -1908,6 +1916,11 @@ const en: Messages = {
   marketplaceImagesAdd: 'Add images',
   marketplaceImagesRemove: 'Remove image',
   marketplaceImagesCompressing: 'Preparing images…',
+  marketplaceFieldAttachments: 'Attachments',
+  marketplaceFieldAttachmentsHint:
+    'Up to 3 files, 200 KB each. They are committed to the public repository with the workflow.',
+  marketplaceAttachmentsAdd: 'Add files',
+  marketplaceAttachmentsRemove: 'Remove attachment',
   marketplaceCategoryEcommerce: 'E-commerce',
   marketplaceCategoryOrders: 'Orders & fulfillment',
   marketplaceCategoryMarketing: 'Marketing',
@@ -1958,6 +1971,8 @@ const en: Messages = {
   marketplaceFormTooManyImages: 'You can attach at most 3 images.',
   marketplaceFormImageTooLarge: 'Each image must be 1 MB or smaller.',
   marketplaceFormImageType: 'Only image files can be attached.',
+  marketplaceFormTooManyAttachments: 'You can attach at most 3 files.',
+  marketplaceFormAttachmentTooLarge: 'Each attachment must be 200 KB or smaller.',
   marketplaceErrorAuthRequired: 'Connect GitHub first.',
   marketplaceErrorUnauthorized: 'GitHub rejected the token (invalid or revoked). Paste a new one.',
   marketplaceErrorForbidden:
@@ -1992,6 +2007,7 @@ const en: Messages = {
   marketplaceByAuthor: ({ author }) => `by @${author}`,
   marketplaceCardBundle: ({ count }) =>
     `Includes ${count} called workflow${count === 1 ? '' : 's'}`,
+  marketplaceCardAttachments: 'Attachments',
   marketplaceLikeCount: ({ count }) => `${count} like${count === 1 ? '' : 's'}`,
   marketplaceCommentCount: ({ count }) => `${count} comment${count === 1 ? '' : 's'}`,
   marketplaceLikeAction: 'Like',
@@ -3448,6 +3464,11 @@ const zhCN: Messages = {
   marketplaceImagesAdd: '添加图片',
   marketplaceImagesRemove: '移除图片',
   marketplaceImagesCompressing: '正在处理图片…',
+  marketplaceFieldAttachments: '附件',
+  marketplaceFieldAttachmentsHint:
+    '最多 3 个，单个不超过 200 KB。附件会随工作流一起提交到公开仓库。',
+  marketplaceAttachmentsAdd: '添加文件',
+  marketplaceAttachmentsRemove: '移除附件',
   marketplaceCategoryEcommerce: '电商',
   marketplaceCategoryOrders: '订单履约',
   marketplaceCategoryMarketing: '营销推广',
@@ -3497,6 +3518,8 @@ const zhCN: Messages = {
   marketplaceFormTooManyImages: '最多只能附加 3 张图片。',
   marketplaceFormImageTooLarge: '单张图片不能超过 1 MB。',
   marketplaceFormImageType: '只能附加图片文件。',
+  marketplaceFormTooManyAttachments: '最多只能附加 3 个文件。',
+  marketplaceFormAttachmentTooLarge: '每个附件不能超过 200 KB。',
   marketplaceErrorAuthRequired: '请先连接 GitHub。',
   marketplaceErrorUnauthorized: 'GitHub 判定令牌无效（可能已撤销），请重新粘贴一个新令牌。',
   marketplaceErrorForbidden:
@@ -3529,6 +3552,7 @@ const zhCN: Messages = {
   marketplaceViewOnGithub: '在 GitHub 查看',
   marketplaceByAuthor: ({ author }) => `作者 @${author}`,
   marketplaceCardBundle: ({ count }) => `含 ${count} 个子工作流`,
+  marketplaceCardAttachments: '附件',
   marketplaceLikeCount: ({ count }) => `${count} 个赞`,
   marketplaceCommentCount: ({ count }) => `${count} 条评论`,
   marketplaceLikeAction: '点赞',
