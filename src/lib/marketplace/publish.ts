@@ -43,6 +43,7 @@ import {
   workflowPath,
 } from './meta'
 import { toPublishableWorkflow, type PublishWarning, type PublishableWorkflow } from './sanitize'
+import { collectSecretRefs, filledPasswordFields, normalizePublishedSecrets } from './secrets'
 import { buildSlug } from './slug'
 import {
   MARKETPLACE_AUTO_MERGE_PULLS,
@@ -246,12 +247,25 @@ export async function preparePublish(
     )
   }
 
+  const secretRefs = collectSecretRefs([
+    input.workflow,
+    ...bundle.dependencies.map((dependency) => dependency.workflow),
+  ])
+  const secrets = normalizePublishedSecrets(secretRefs, input.secrets ?? [])
+  const secretWarnings: PublishWarning[] = secrets.flatMap((secret) =>
+    filledPasswordFields([secret]).map((field) => ({
+      kind: 'secret-value' as const,
+      nodeLabel: secret.label,
+      param: field.key,
+    })),
+  )
+
   const localRef = input.workflow.marketplace
   const provisionalSlug =
     localRef && localRef.author === author ? localRef.slug : buildSlug(input.workflow.name, '')
   const sanitized = toPublishableWorkflow(input.workflow, provisionalSlug)
   const publishable = sanitized.workflow
-  const warnings: PublishWarning[] = [...sanitized.warnings]
+  const warnings: PublishWarning[] = [...sanitized.warnings, ...secretWarnings]
   const dependencies: PreparedDependency[] = bundle.dependencies.map((dependency) => {
     const file = dependencyFile(dependency.path)
     if (!file) {
@@ -312,6 +326,7 @@ export async function preparePublish(
     tags: input.tags,
     dependencies: dependencies.map(({ id, name, path }) => ({ id, name, path })),
     attachments: publishedAttachments,
+    ...(secrets.length ? { secrets } : {}),
     author,
     version,
     hash: finalHash,
@@ -382,6 +397,9 @@ function pullBody(meta: MarketplaceMeta): string {
       (file) => `\`${file.name}\` (${formatAttachmentSize(file.size)})`,
     )
     lines.push(`- attachments: ${files.join(', ')}`)
+  }
+  if (meta.secrets?.length) {
+    lines.push(`- credentials: ${meta.secrets.map((secret) => `\`${secret.label}\``).join(', ')}`)
   }
   if (meta.videoUrl) lines.push(`- video: ${meta.videoUrl}`)
   lines.push('', '<sub>Merging makes this workflow available to every Browser Copilot user.</sub>')

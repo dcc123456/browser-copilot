@@ -21,6 +21,11 @@ import { categoryLabel, isBuiltinCategory } from '../lib/marketplace/categories'
 import { collectDependencies } from '../lib/marketplace/dependencies'
 import { parseTagInput, validatePublishForm, type PublishFormError } from '../lib/marketplace/form'
 import {
+  applySecretOverrides,
+  planPublishedSecrets,
+  secretValueKey,
+} from '../lib/marketplace/secrets'
+import {
   preparePublish,
   pushPublish,
   type PreparedPublish,
@@ -29,6 +34,8 @@ import {
 import type { PublishWarning } from '../lib/marketplace/sanitize'
 import { fetchPublishedAsset, fetchPublishedMeta } from '../lib/marketplace/raw'
 import { invalidateCatalogCache } from '../lib/marketplace/catalog'
+import { sendCommand } from '../lib/messages'
+import type { PasswordEntry } from '../lib/types'
 import {
   blobToDraftFile,
   clearDraft,
@@ -97,6 +104,12 @@ interface SelectedAttachment {
 
 /** One warning line; a bundled workflow names itself so the node is findable. */
 function warningText(t: Messages, warning: PublishWarning): string {
+  if (warning.kind === 'secret-value') {
+    return t.marketplacePublishWarningSecretValue({
+      credential: warning.nodeLabel,
+      field: warning.param,
+    })
+  }
   if (warning.kind === 'credential-literal') {
     return warning.workflow
       ? t.marketplacePublishWarningBundledCredential({
@@ -164,6 +177,27 @@ export default function PublishWorkflowDialog({
   const bundle = useMemo(() => collectDependencies(workflow, library), [workflow, library])
   const missingRefs = bundle.missing.map((call) => call.workflowId || call.nodeLabel)
   const tooMany = bundle.dependencies.length > MAX_BUNDLE_WORKFLOWS
+  /**
+   * The credentials the published graphs reference, defaulted from the local
+   * vault. Password fields arrive empty, everything else carries the local
+   * value; `secretValues` holds only what the publisher typed over.
+   */
+  const [vault, setVault] = useState<PasswordEntry[] | null>(null)
+  const [secretValues, setSecretValues] = useState<Record<string, string>>({})
+  const secretPlan = useMemo(
+    () =>
+      planPublishedSecrets(
+        [workflow, ...bundle.dependencies.map((item) => item.workflow)],
+        vault ?? [],
+      ),
+    [workflow, bundle, vault],
+  )
+  const secrets = useMemo(
+    () => applySecretOverrides(secretPlan.secrets, secretValues),
+    [secretPlan, secretValues],
+  )
+  // Until the listing arrives every reference looks missing; say nothing yet.
+  const missingCredentials = vault === null ? [] : secretPlan.missing
   const [auth, setAuthState] = useState<MarketplaceAuth | null | undefined>(initialAuth)
   const [tokenInput, setTokenInput] = useState('')
   const [connecting, setConnecting] = useState(false)
@@ -206,6 +240,7 @@ export default function PublishWorkflowDialog({
     videoUrl,
     images,
     attachments,
+    secretValues,
   })
   formRef.current = {
     title,
@@ -216,6 +251,7 @@ export default function PublishWorkflowDialog({
     videoUrl,
     images,
     attachments,
+    secretValues,
   }
   const resultRef = useRef<PublishResult | null>(null)
   resultRef.current = result
@@ -230,6 +266,20 @@ export default function PublishWorkflowDialog({
     if (initialAuth !== undefined) return
     void getAuth().then(setAuthState)
   }, [initialAuth])
+
+  useEffect(() => {
+    let cancelled = false
+    void sendCommand({ type: 'passwords.list' })
+      .then((listing) => {
+        if (!cancelled) setVault(listing.type === 'passwords.list' ? listing.entries : [])
+      })
+      .catch(() => {
+        if (!cancelled) setVault([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   /**
    * Any edit invalidates the prepared bytes; a stale preview would publish the
@@ -263,6 +313,7 @@ export default function PublishWorkflowDialog({
       setCustomCategory(draft.customCategory)
       setTagInput(draft.tags)
       setVideoUrl(draft.videoUrl)
+      setSecretValues(draft.secretValues)
       const restoredImages = draft.images.flatMap((file) => {
         const blob = draftFileToBlob(file)
         return blob ? [{ blob, url: URL.createObjectURL(blob) }] : []
@@ -314,6 +365,7 @@ export default function PublishWorkflowDialog({
           videoUrl: snapshot.videoUrl,
           images: draftImages,
           attachments: draftAttachments,
+          secretValues: snapshot.secretValues,
           savedAt: Date.now(),
         })
       })().catch(() => {
@@ -335,6 +387,7 @@ export default function PublishWorkflowDialog({
     setCustomCategory('')
     setTagInput('')
     setVideoUrl('')
+    setSecretValues({})
     setImages((current) => {
       for (const image of current) URL.revokeObjectURL(image.url)
       return []
@@ -491,6 +544,7 @@ export default function PublishWorkflowDialog({
             tags: parseTagInput(tagInput),
             images: images.map((image) => image.blob),
             attachments: attachments.map((file) => ({ name: file.name, blob: file.blob })),
+            secrets,
             ...(videoUrl.trim() ? { videoUrl: videoUrl.trim() } : {}),
           },
           {
@@ -524,7 +578,15 @@ export default function PublishWorkflowDialog({
     : warningsPending
       ? t.marketplacePublishAnyway
       : t.marketplacePublishSubmit
-  const disabled = busy || imageBusy || connecting || !auth || missingRefs.length > 0 || tooMany
+  const disabled =
+    busy ||
+    imageBusy ||
+    connecting ||
+    !auth ||
+    vault === null ||
+    missingRefs.length > 0 ||
+    missingCredentials.length > 0 ||
+    tooMany
 
   return (
     <FormDialog
@@ -884,6 +946,53 @@ export default function PublishWorkflowDialog({
                   {t.marketplaceFieldAttachmentsHint}
                 </span>
               </div>
+
+              {(secrets.length > 0 || missingCredentials.length > 0) && (
+                <section className="mb-3 rounded-lg border border-border bg-panel-2 p-3">
+                  <h3 className="m-0 text-[12.5px] font-semibold text-ink">
+                    {t.marketplaceFieldSecrets}
+                  </h3>
+                  <p className="mt-1 mb-2 text-[11.5px] leading-snug text-muted">
+                    {t.marketplaceFieldSecretsHint}
+                  </p>
+                  {secrets.map((secret) => (
+                    <div className="mt-2 first:mt-0" key={secret.id}>
+                      <div className="text-[12px] font-medium text-ink">
+                        {secret.label || secret.id}
+                      </div>
+                      {secret.fields.map((field) => (
+                        <label className="mt-1 block" key={field.key}>
+                          <span className="mb-0.5 block text-[11.5px] text-muted">{field.key}</span>
+                          <input
+                            autoComplete="off"
+                            disabled={busy}
+                            onChange={(event) => {
+                              const value = event.target.value
+                              setSecretValues((current) => ({
+                                ...current,
+                                [secretValueKey(secret.id, field.key)]: value,
+                              }))
+                              edit()
+                            }}
+                            type={field.secret ? 'password' : 'text'}
+                            value={field.value}
+                          />
+                          {field.secret && (
+                            <span className="mt-1 block text-[11px] leading-snug text-muted">
+                              {t.marketplaceSecretsPasswordHint}
+                            </span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                  {missingCredentials.length > 0 && (
+                    <p className="mt-1 mb-0 text-[11.5px] leading-snug text-err" role="alert">
+                      {t.marketplaceSecretsMissing({ names: missingCredentials.join(', ') })}
+                    </p>
+                  )}
+                </section>
+              )}
 
               {warningsPending && (
                 <section className="mb-3 rounded-lg border border-border bg-accent-soft p-3">

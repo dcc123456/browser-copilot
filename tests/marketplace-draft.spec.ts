@@ -45,6 +45,7 @@ function makeDraft(overrides: Partial<PublishDraft> = {}): PublishDraft {
     videoUrl: '',
     images: [{ type: 'image/png', dataUrl: PNG }],
     attachments: [{ name: 'orders.csv', type: 'text/csv', dataUrl: 'data:text/csv;base64,YSxi' }],
+    secretValues: {},
     savedAt: Date.now(),
     ...overrides,
   }

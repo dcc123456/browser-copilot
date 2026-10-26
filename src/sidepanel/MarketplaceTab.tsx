@@ -374,6 +374,7 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
     const existing = findInstalled(installed, card.meta.slug)
     const isUpdate = !!existing && needsUpdate(card.meta, existing.marketplace)
     const bundled = (card.meta.dependencies ?? []).map((entry) => entry.name)
+    const credentials = (card.meta.secrets ?? []).map((entry) => entry.label || entry.id)
     const message = isUpdate
       ? [
           t.marketplaceUpdateMessage({ title: card.meta.title }),
@@ -382,6 +383,9 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
       : [
           t.marketplaceTrustMessage({ title: card.meta.title, author: card.meta.author }),
           ...(bundled.length ? [t.marketplaceTrustBundled({ names: bundled.join(', ') })] : []),
+          ...(credentials.length
+            ? [t.marketplaceTrustSecrets({ names: credentials.join(', ') })]
+            : []),
         ].join('\n\n')
     const confirmed = await confirmDialog({
       title: isUpdate ? t.marketplaceUpdateTitle : t.marketplaceTrustTitle,

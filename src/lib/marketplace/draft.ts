@@ -18,10 +18,15 @@ import {
   MAX_ATTACHMENT_NAME_CHARS,
   MAX_CATEGORY_CHARS,
   MAX_DESCRIPTION_CHARS,
+  MAX_LISTING_SECRETS,
+  MAX_LISTING_SECRET_FIELDS,
   MAX_PUBLISH_ATTACHMENT_BYTES,
   MAX_PUBLISH_ATTACHMENTS,
   MAX_PUBLISH_IMAGE_BYTES,
   MAX_PUBLISH_IMAGES,
+  MAX_SECRET_ID_CHARS,
+  MAX_SECRET_KEY_CHARS,
+  MAX_SECRET_VALUE_CHARS,
   MAX_TAG_CHARS,
   MAX_TAGS,
   MAX_TITLE_CHARS,
@@ -40,6 +45,13 @@ export const MAX_DRAFTS = 8
 
 const MAX_VIDEO_CHARS = 2048
 const MAX_TAGS_INPUT_CHARS = MAX_TAGS * (MAX_TAG_CHARS + 2)
+/**
+ * Edited credential values, keyed `<credentialId>::<fieldKey>`. A draft can
+ * hold a real password the user typed for publication, so the caps mirror the
+ * published-secret limits rather than allowing an unbounded blob.
+ */
+const MAX_SECRET_OVERRIDES = MAX_LISTING_SECRETS * MAX_LISTING_SECRET_FIELDS
+const MAX_SECRET_VALUE_KEY_CHARS = MAX_SECRET_ID_CHARS + MAX_SECRET_KEY_CHARS + 2
 /** Base64 grows bytes by 4/3; the data-URL header plus a margin fits in 128 chars. */
 const MAX_IMAGE_DATA_URL_CHARS = Math.ceil((MAX_PUBLISH_IMAGE_BYTES * 4) / 3) + 128
 const MAX_ATTACHMENT_DATA_URL_CHARS = Math.ceil((MAX_PUBLISH_ATTACHMENT_BYTES * 4) / 3) + 128
@@ -65,6 +77,8 @@ export interface PublishDraft {
   videoUrl: string
   images: DraftFile[]
   attachments: DraftFile[]
+  /** Values the publisher typed into the credential fields, keyed by `secretValueKey`. */
+  secretValues: Record<string, string>
   /** Epoch ms of the last save. */
   savedAt: number
 }
@@ -97,6 +111,19 @@ function parseFiles(raw: unknown, max: number, maxChars: number, needsName: bool
   })
 }
 
+function parseSecretValues(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>).slice(
+    0,
+    MAX_SECRET_OVERRIDES,
+  )) {
+    if (typeof value !== 'string' || key.length > MAX_SECRET_VALUE_KEY_CHARS) continue
+    out[key] = value.slice(0, MAX_SECRET_VALUE_CHARS)
+  }
+  return out
+}
+
 /**
  * Validates a stored value. A draft is a convenience, never a trust input:
  * malformed fields fall back to empty strings and bad files are dropped one by
@@ -124,6 +151,7 @@ export function parseDraft(raw: unknown, workflowId: string): PublishDraft | nul
       MAX_ATTACHMENT_DATA_URL_CHARS,
       true,
     ),
+    secretValues: parseSecretValues(value.secretValues),
     savedAt,
   }
 }

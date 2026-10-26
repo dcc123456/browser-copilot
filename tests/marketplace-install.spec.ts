@@ -8,12 +8,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowGroup } from '../src/lib/workflow/groups'
 import type { Workflow } from '../src/lib/workflow/types'
-import type { MarketplaceCard, MarketplaceDependency } from '../src/lib/marketplace/types'
+import type {
+  MarketplaceCard,
+  MarketplaceDependency,
+  MarketplaceSecret,
+} from '../src/lib/marketplace/types'
 
 const mock = vi.hoisted(() => {
   const calls: Array<{ type: string; [key: string]: unknown }> = []
   const state = {
     groups: [] as WorkflowGroup[],
+    passwords: [] as unknown[],
     failGroupList: false,
   }
   async function sendCommand(command: { type: string; [key: string]: unknown }) {
@@ -32,6 +37,13 @@ const mock = vi.hoisted(() => {
       }
       state.groups.push(group)
       return { type: 'workflowGroups.save', group }
+    }
+    if (command.type === 'passwords.list') {
+      return { type: 'passwords.list', entries: [...state.passwords] }
+    }
+    if (command.type === 'passwords.save') {
+      state.passwords.push(command.entry)
+      return { type: 'passwords.save', entry: command.entry }
     }
     if (command.type === 'workflows.save') return { type: 'workflows.save' }
     return { type: command.type }
@@ -76,7 +88,29 @@ function graph(name: string, targets: string[]): unknown {
   }
 }
 
-function card(dependencies: MarketplaceDependency[] = []): MarketplaceCard {
+function secretGraph(name: string, credential: string): unknown {
+  return {
+    id: 'published-id',
+    name,
+    settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
+    drawflow: {
+      nodes: [
+        {
+          id: 'secret-0',
+          label: 'Get secret',
+          position: { x: 0, y: 0 },
+          data: { blockId: 'get-secret', values: { credential, variableName: 'token' } },
+        },
+      ],
+      edges: [],
+    },
+  }
+}
+
+function card(
+  dependencies: MarketplaceDependency[] = [],
+  secrets: MarketplaceSecret[] = [],
+): MarketplaceCard {
   return {
     meta: buildMeta({
       slug: SLUG,
@@ -84,6 +118,7 @@ function card(dependencies: MarketplaceDependency[] = []): MarketplaceCard {
       description: 'Open the orders page.',
       category: 'ecommerce',
       dependencies,
+      secrets,
       author: 'octocat',
       version: 2,
       hash: 'b'.repeat(64),
@@ -123,9 +158,18 @@ function savedWorkflows(): Workflow[] {
     .map((command) => command.workflow as Workflow)
 }
 
+function savedPasswords(): Array<{ id: string; fields: Array<{ key: string; value: string }> }> {
+  return mock.calls
+    .filter((command) => command.type === 'passwords.save')
+    .map(
+      (command) => command.entry as { id: string; fields: Array<{ key: string; value: string }> },
+    )
+}
+
 beforeEach(() => {
   mock.calls.length = 0
   mock.state.groups = []
+  mock.state.passwords = []
   mock.state.failGroupList = false
   mock.published.parent = graph('Scrape orders', ['child-1'])
   mock.published.dependency = graph('Collect numbers', [])
@@ -200,5 +244,49 @@ describe('installing a bundle', () => {
     ).rejects.toThrow(/group read failed/)
     expect(savedWorkflows()).toEqual([])
     expect(mock.state.groups).toEqual([])
+  })
+
+  it('saves the imported credential before the workflow that uses it', async () => {
+    mock.published.parent = secretGraph('Scrape orders', 'gh::token')
+
+    await installFromCard(
+      card(
+        [],
+        [
+          {
+            id: 'gh',
+            label: 'GitHub',
+            fields: [
+              { key: 'token', value: 'ghp_live' },
+              { key: 'password', value: '', secret: true },
+            ],
+          },
+        ],
+      ),
+      undefined,
+      [],
+    )
+
+    expect(mock.calls.map((command) => command.type)).toEqual([
+      'passwords.list',
+      'passwords.save',
+      'workflows.save',
+    ])
+    expect(savedPasswords()).toEqual([
+      {
+        id: 'mkt-scrape-orders-abcdef-gh',
+        label: 'GitHub',
+        fields: [
+          { key: 'token', value: 'ghp_live' },
+          { key: 'password', value: '', secret: true },
+        ],
+        createdAt: expect.any(Number),
+        updatedAt: expect.any(Number),
+        useCount: 0,
+      },
+    ])
+    expect(savedWorkflows()[0]!.drawflow.nodes[0]!.data).toMatchObject({
+      credential: 'mkt-scrape-orders-abcdef-gh::token',
+    })
   })
 })

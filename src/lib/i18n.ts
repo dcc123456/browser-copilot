@@ -276,6 +276,10 @@ export interface Messages {
   marketplaceFieldAttachmentsHint: string
   marketplaceAttachmentsAdd: string
   marketplaceAttachmentsRemove: string
+  marketplaceFieldSecrets: string
+  marketplaceFieldSecretsHint: string
+  marketplaceSecretsPasswordHint: string
+  marketplaceSecretsMissing: (params: { names: string }) => string
   marketplaceCategoryEcommerce: string
   marketplaceCategoryOrders: string
   marketplaceCategoryMarketing: string
@@ -306,6 +310,7 @@ export interface Messages {
   marketplacePublishWarningsHint: string
   marketplacePublishWarningCredential: (params: { node: string; param: string }) => string
   marketplacePublishWarningEmbeddedData: (params: { node: string; param: string }) => string
+  marketplacePublishWarningSecretValue: (params: { credential: string; field: string }) => string
   marketplacePublishWarningBundledCredential: (params: {
     workflow: string
     node: string
@@ -382,6 +387,8 @@ export interface Messages {
   marketplaceTrustMessage: (params: { title: string; author: string }) => string
   /** Extra trust sentence naming the called workflows the listing installs. */
   marketplaceTrustBundled: (params: { names: string }) => string
+  /** Extra trust sentence naming the credentials the listing imports into the vault. */
+  marketplaceTrustSecrets: (params: { names: string }) => string
   marketplaceTrustConfirm: string
   marketplaceUpdateTitle: string
   marketplaceUpdateMessage: (params: { title: string }) => string
@@ -1934,6 +1941,12 @@ const en: Messages = {
     'Up to 3 files, 200 KB each. They are committed to the public repository with the workflow.',
   marketplaceAttachmentsAdd: 'Add files',
   marketplaceAttachmentsRemove: 'Remove attachment',
+  marketplaceFieldSecrets: 'Credentials',
+  marketplaceFieldSecretsHint:
+    'The referenced credential names and field names are published so the workflow runs after install. Password fields start empty; other fields start at your current value.',
+  marketplaceSecretsPasswordHint: 'Password field — published empty unless you type one.',
+  marketplaceSecretsMissing: ({ names }) =>
+    `Your vault has no matching credential for: ${names}. Add it in Data → Passwords & identities and reopen this dialog.`,
   marketplaceCategoryEcommerce: 'E-commerce',
   marketplaceCategoryOrders: 'Orders & fulfillment',
   marketplaceCategoryMarketing: 'Marketing',
@@ -1970,6 +1983,8 @@ const en: Messages = {
     `Node "${node}" contains a literal credential in "${param}".`,
   marketplacePublishWarningEmbeddedData: ({ node, param }) =>
     `Node "${node}" contains embedded data in "${param}"; it was removed.`,
+  marketplacePublishWarningSecretValue: ({ credential, field }) =>
+    `Credential "${credential}" field "${field}" is filled in and will be published as plain text.`,
   marketplacePublishWarningBundledCredential: ({ workflow, node, param }) =>
     `In "${workflow}", node "${node}" contains a literal credential in "${param}".`,
   marketplacePublishWarningBundledEmbeddedData: ({ workflow, node, param }) =>
@@ -2043,6 +2058,8 @@ const en: Messages = {
   marketplaceTrustMessage: ({ title, author }) =>
     `"${title}" by @${author} can perform actions on pages you open. It will not run automatically; start it yourself after reviewing its steps.`,
   marketplaceTrustBundled: ({ names }) => `It also installs the workflows it calls: ${names}.`,
+  marketplaceTrustSecrets: ({ names }) =>
+    `It also imports these credentials into your vault: ${names}.`,
   marketplaceTrustConfirm: 'Apply',
   marketplaceUpdateTitle: 'Update this workflow?',
   marketplaceUpdateMessage: ({ title }) =>
@@ -3493,6 +3510,12 @@ const zhCN: Messages = {
     '最多 3 个，单个不超过 200 KB。附件会随工作流一起提交到公开仓库。',
   marketplaceAttachmentsAdd: '添加文件',
   marketplaceAttachmentsRemove: '移除附件',
+  marketplaceFieldSecrets: '凭证字段',
+  marketplaceFieldSecretsHint:
+    '会随工作流一起发布所引用的凭据名与字段名，应用后即可直接运行。密码字段默认为空，其他字段默认填入你当前的值。',
+  marketplaceSecretsPasswordHint: '密码字段——不填写则发布为空。',
+  marketplaceSecretsMissing: ({ names }) =>
+    `本地密钥中没有这些凭据：${names}。请在「数据 → 密钥与字段」中添加后重新打开此对话框。`,
   marketplaceCategoryEcommerce: '电商',
   marketplaceCategoryOrders: '订单履约',
   marketplaceCategoryMarketing: '营销推广',
@@ -3529,6 +3552,8 @@ const zhCN: Messages = {
     `节点「${node}」的「${param}」填写的是明文凭据。`,
   marketplacePublishWarningEmbeddedData: ({ node, param }) =>
     `节点「${node}」的「${param}」含有内嵌数据，已移除。`,
+  marketplacePublishWarningSecretValue: ({ credential, field }) =>
+    `凭据「${credential}」的「${field}」已填写，会以明文发布。`,
   marketplacePublishWarningBundledCredential: ({ workflow, node, param }) =>
     `工作流「${workflow}」的节点「${node}」中，「${param}」填写的是明文凭据。`,
   marketplacePublishWarningBundledEmbeddedData: ({ workflow, node, param }) =>
@@ -3598,6 +3623,7 @@ const zhCN: Messages = {
   marketplaceTrustMessage: ({ title, author }) =>
     `@${author} 的「${title}」会在你打开的页面上执行操作。它不会自动运行；查看步骤后请自行启动。`,
   marketplaceTrustBundled: ({ names }) => `同时会安装它调用的工作流：${names}。`,
+  marketplaceTrustSecrets: ({ names }) => `同时会把这些凭据导入你的密钥库：${names}。`,
   marketplaceTrustConfirm: '应用',
   marketplaceUpdateTitle: '更新这个工作流？',
   marketplaceUpdateMessage: ({ title }) =>

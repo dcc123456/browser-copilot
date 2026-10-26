@@ -61,6 +61,15 @@ export const MAX_CATEGORY_CHARS = 24
  */
 export const MAX_BUNDLE_WORKFLOWS = 20
 
+/** Credentials one listing may carry, and the fields across all of them. */
+export const MAX_LISTING_SECRETS = 20
+export const MAX_LISTING_SECRET_FIELDS = 64
+/** A field value is usually a token or an e-mail; long blobs do not belong here. */
+export const MAX_SECRET_VALUE_CHARS = 4000
+export const MAX_SECRET_KEY_CHARS = 120
+export const MAX_SECRET_LABEL_CHARS = 120
+export const MAX_SECRET_ID_CHARS = 200
+
 /**
  * Built-in categories, kept as slugs so the panel translates them. A publisher
  * may also type a category of their own; that label is stored verbatim in
@@ -106,6 +115,28 @@ export interface MarketplaceAttachment {
   size: number
 }
 
+/** One field of a credential a listing needs. */
+export interface MarketplaceSecretField {
+  key: string
+  /**
+   * Default the applying user starts with. A password-style field is published
+   * empty (the publisher would otherwise be committing a live secret); every
+   * other field carries the publisher's value so the workflow runs on arrival.
+   */
+  value: string
+  /** Password-style field: masked in the UI and empty by default. */
+  secret?: boolean
+}
+
+/** One credential (密钥与字段 entry) a listing needs to run. */
+export interface MarketplaceSecret {
+  /** Publisher-local credential id; apply maps it to a local id. */
+  id: string
+  label: string
+  url?: string
+  fields: MarketplaceSecretField[]
+}
+
 /** One published workflow, as stored in `workflows/<slug>/meta.json`. */
 export interface MarketplaceMeta {
   schema: typeof MARKETPLACE_SCHEMA_VERSION
@@ -133,6 +164,11 @@ export interface MarketplaceMeta {
    * attachments existed; malformed entries are dropped on read.
    */
   attachments?: MarketplaceAttachment[]
+  /**
+   * Credentials the workflow's `get-secret` steps resolve at run time. Absent
+   * on listings published before credentials travelled with the graph.
+   */
+  secrets?: MarketplaceSecret[]
   /** External video link; videos are never committed to the repo. */
   videoUrl?: string
   createdAt: string
@@ -195,6 +231,12 @@ export type MarketplacePublishInput = {
   /** Files to commit under `attachments/`, each at most 200 KB. */
   attachments?: PublishAttachment[]
   videoUrl?: string
+  /**
+   * Credential fields the graph's `get-secret` steps reference, already edited
+   * in the dialog (password fields default to an empty value). Publish keeps
+   * only the referenced ones and refuses to run when one is missing.
+   */
+  secrets?: MarketplaceSecret[]
 }
 
 /** A user-picked file, still carrying the name it will be listed under. */

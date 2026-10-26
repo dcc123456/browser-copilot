@@ -503,6 +503,83 @@ describe('preparePublish', () => {
       },
     ])
   })
+
+  it('publishes the referenced credential fields and warns about a filled password', async () => {
+    const workflow = makeWorkflow({
+      drawflow: {
+        nodes: [
+          {
+            id: 's1',
+            label: 'Get secret',
+            position: { x: 0, y: 0 },
+            data: {
+              blockId: 'get-secret',
+              values: { credential: 'gh::token', variableName: 'token' },
+            },
+          },
+          {
+            id: 's2',
+            label: 'Get secret',
+            position: { x: 0, y: 0 },
+            data: {
+              blockId: 'get-secret',
+              values: { credential: 'gh::password', variableName: 'password' },
+            },
+          },
+        ],
+        edges: [],
+      },
+    })
+
+    const prepared = await prepare(
+      makeInput({
+        workflow,
+        secrets: [
+          {
+            id: 'gh',
+            label: 'GitHub',
+            fields: [
+              { key: 'token', value: 'ghp_live' },
+              { key: 'password', value: 'typed', secret: true },
+              { key: 'unreferenced', value: 'dropped' },
+            ],
+          },
+        ],
+      }),
+    )
+
+    expect(prepared.meta.secrets).toEqual([
+      {
+        id: 'gh',
+        label: 'GitHub',
+        fields: [
+          { key: 'token', value: 'ghp_live' },
+          { key: 'password', value: 'typed', secret: true },
+        ],
+      },
+    ])
+    expect(prepared.warnings).toEqual([
+      { kind: 'secret-value', nodeLabel: 'GitHub', param: 'password' },
+    ])
+  })
+
+  it('refuses to publish a step whose credential has no record', async () => {
+    const workflow = makeWorkflow({
+      drawflow: {
+        nodes: [
+          {
+            id: 's1',
+            label: 'Get secret',
+            position: { x: 0, y: 0 },
+            data: { blockId: 'get-secret', values: { credential: 'gh::token' } },
+          },
+        ],
+        edges: [],
+      },
+    })
+
+    await expect(prepare(makeInput({ workflow }))).rejects.toMatchObject({ code: 'invalid' })
+  })
 })
 
 describe('pushPublish', () => {

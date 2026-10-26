@@ -203,6 +203,81 @@ describe('marketplace meta — attachments', () => {
   })
 })
 
+describe('marketplace meta — published credentials', () => {
+  const credential = {
+    id: 'gh',
+    label: 'GitHub',
+    url: 'https://github.com',
+    fields: [
+      { key: 'username', value: 'octocat' },
+      { key: 'password', value: '', secret: true },
+    ],
+  }
+
+  it('round-trips the referenced credential fields', () => {
+    const meta = buildMeta({ ...makeMetaInput(), secrets: [credential] })
+    expect(meta.secrets).toEqual([credential])
+    expect(parseMeta(JSON.parse(JSON.stringify(meta)))).toEqual(meta)
+  })
+
+  it('omits the field for a listing that needs no credential', () => {
+    expect(makeMeta().secrets).toBeUndefined()
+    expect(parseMeta({ ...makeMeta(), secrets: [] })?.secrets).toBeUndefined()
+  })
+
+  it('drops malformed entries and fields instead of the whole listing', () => {
+    const parsed = parseMeta({
+      ...makeMeta(),
+      secrets: [
+        { id: '  ', label: 'Broken', fields: credential.fields },
+        { ...credential, fields: [] },
+        { ...credential, fields: [null, { key: '  ', value: 'x' }, { key: 'token', value: 7 }] },
+        credential,
+        { ...credential, id: 'other', fields: [{ key: 'USERNAME', value: 'again' }] },
+      ],
+    })
+
+    expect(parsed).not.toBeNull()
+    expect(parsed?.secrets).toEqual([
+      {
+        id: 'gh',
+        label: 'GitHub',
+        url: 'https://github.com',
+        fields: [{ key: 'token', value: '' }],
+      },
+      { ...credential, id: 'other', fields: [{ key: 'USERNAME', value: 'again' }] },
+    ])
+  })
+
+  it('rejects a record publish cannot write safely', () => {
+    expect(parseMeta({ ...makeMeta(), secrets: 'nope' })?.secrets).toBeUndefined()
+    expect(() => buildMeta({ ...makeMetaInput(), secrets: [{ ...credential, id: '' }] })).toThrow()
+    expect(() =>
+      buildMeta({
+        ...makeMetaInput(),
+        secrets: [
+          {
+            ...credential,
+            fields: [
+              { key: 'token', value: 'a' },
+              { key: 'Token', value: 'b' },
+            ],
+          },
+        ],
+      }),
+    ).toThrow()
+    expect(() =>
+      buildMeta({
+        ...makeMetaInput(),
+        secrets: [
+          credential,
+          { ...credential, fields: [{ key: 'username', value: 'other-copy' }] },
+        ],
+      }),
+    ).toThrow(/twice/i)
+  })
+})
+
 describe('marketplace ref', () => {
   const ref: WorkflowMarketplaceRef = {
     repo: 'dcc123456/BC-workflow',

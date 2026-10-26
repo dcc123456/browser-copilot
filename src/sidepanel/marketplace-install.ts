@@ -6,9 +6,11 @@
  * cannot drift: a stale card that resolves to `up-to-date` must not rewrite the
  * local record, and a missing file must fail loudly instead of saving nothing.
  *
- * A listing may carry the workflows it calls. They are fetched and planned
- * before anything is written, so a bundle never lands half-installed, and the
- * dependencies are saved first — the parent's steps point at them.
+ * A listing may carry the workflows it calls, and the credentials its
+ * `get-secret` steps reference. Everything is fetched and planned before
+ * anything is written, so a listing never lands half-installed; the vault is
+ * saved first, then the dependencies, then the parent — every reference points
+ * at something that already exists.
  *
  * @module sidepanel/marketplace-install
  */
@@ -22,6 +24,7 @@ import {
 import { assetRepoPath } from '../lib/marketplace/meta'
 import { fetchPublishedWorkflow, fetchWorkflowAt } from '../lib/marketplace/raw'
 import { MarketplaceError, type MarketplaceCard } from '../lib/marketplace/types'
+import type { PasswordEntry } from '../lib/types'
 import type { Workflow } from '../lib/workflow/types'
 import { sendCommand } from '../lib/messages'
 
@@ -65,6 +68,13 @@ async function fileIntoBundleGroup(plan: BundlePlan): Promise<BundlePlan> {
   }
 }
 
+/** The local vault, read only when the listing actually needs credentials. */
+async function localCredentials(): Promise<PasswordEntry[]> {
+  const listing = await sendCommand({ type: 'passwords.list' })
+  if (listing.type !== 'passwords.list') throw new Error('Unexpected credential listing')
+  return listing.entries
+}
+
 export async function installFromCard(
   card: MarketplaceCard,
   existing: Workflow | undefined,
@@ -83,9 +93,15 @@ export async function installFromCard(
       return { entry, published: body }
     }),
   )
+  const credentials = card.meta.secrets?.length ? await localCredentials() : []
   const plan = await fileIntoBundleGroup(
-    planApplyBundle(card, published, dependencies, library, existing),
+    planApplyBundle(card, published, dependencies, library, existing, Date.now(), credentials),
   )
+  // The vault goes first: every get-secret step in the records below points at
+  // these ids, so a workflow saved against a missing credential cannot run.
+  for (const entry of plan.credentials) {
+    await sendCommand({ type: 'passwords.save', entry })
+  }
   for (const dependency of plan.dependencies) {
     await sendCommand({ type: 'workflows.save', workflow: dependency })
   }

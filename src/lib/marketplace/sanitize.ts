@@ -11,11 +11,13 @@
  */
 
 import type { Workflow, WorkflowSettings, WorkflowTrigger } from '../workflow/types'
+import { nodeBlockId } from '../workflow/node-params'
+import { SECRET_PRODUCER_BLOCK } from '../workflow/secret-params'
 import { MarketplaceError, MAX_DESCRIPTION_CHARS, MAX_WORKFLOW_JSON_BYTES } from './types'
 
 /** One thing the user must look at before the publish is allowed through. */
 export interface PublishWarning {
-  kind: 'credential-literal' | 'embedded-data'
+  kind: 'credential-literal' | 'embedded-data' | 'secret-value'
   nodeLabel: string
   /** Dotted path inside the node's `data`, e.g. `secret.password`. */
   param: string
@@ -89,12 +91,18 @@ class WarningSet {
 /**
  * Recursively cleans one node's `data`. Embedded data URLs become empty
  * strings (the step keeps its shape; the payload does not leave the machine).
+ *
+ * `referencesCredentials` is set for `get-secret` nodes: their `credential`
+ * param is a `<id>::<field>` REFERENCE, not a typed-in literal, so warning
+ * about it would train the publisher to click through real warnings. The
+ * values those steps fetch travel separately, through `meta.secrets`.
  */
 function cleanValue(
   value: unknown,
   path: string,
   nodeLabel: string,
   warnings: WarningSet,
+  referencesCredentials = false,
 ): unknown {
   if (typeof value === 'string') {
     if (EMBEDDED_DATA_RE.test(value.trim())) {
@@ -104,7 +112,9 @@ function cleanValue(
     return value
   }
   if (Array.isArray(value)) {
-    return value.map((item, index) => cleanValue(item, `${path}[${index}]`, nodeLabel, warnings))
+    return value.map((item, index) =>
+      cleanValue(item, `${path}[${index}]`, nodeLabel, warnings, referencesCredentials),
+    )
   }
   if (isRecord(value)) {
     const out: Record<string, unknown> = {}
@@ -115,6 +125,7 @@ function cleanValue(
       // cannot see in a diff review of JSON. Credential REFERENCES
       // (`{{password}}`) are safe and stay quiet.
       if (
+        !referencesCredentials &&
         typeof child === 'string' &&
         child.trim() &&
         !child.includes('{{') &&
@@ -122,7 +133,7 @@ function cleanValue(
       ) {
         warnings.add({ kind: 'credential-literal', nodeLabel, param: childPath })
       }
-      out[key] = cleanValue(child, childPath, nodeLabel, warnings)
+      out[key] = cleanValue(child, childPath, nodeLabel, warnings, referencesCredentials)
     }
     return out
   }
@@ -146,9 +157,13 @@ export function toPublishableWorkflow(workflow: Workflow, slug: string): Sanitiz
   const warnings = new WarningSet()
   const nodes = workflow.drawflow.nodes.map((node) => {
     const nodeLabel = node.label || node.id
+    const referencesCredentials = nodeBlockId(node) === SECRET_PRODUCER_BLOCK
     return {
       ...node,
-      data: cleanValue(node.data, '', nodeLabel, warnings) as Record<string, unknown>,
+      data: cleanValue(node.data, '', nodeLabel, warnings, referencesCredentials) as Record<
+        string,
+        unknown
+      >,
     }
   })
   const description = workflow.description?.trim().slice(0, MAX_DESCRIPTION_CHARS)

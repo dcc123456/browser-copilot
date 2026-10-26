@@ -10,12 +10,14 @@
  */
 
 import { newId } from '../storage'
+import type { PasswordEntry } from '../types'
 import { commitWorkflowRevision } from '../workflow/workflow-revision'
 import { migrateWorkflow } from '../workflow/migrate'
 import { asWorkflow } from '../workflow/storage'
 import type { Workflow, WorkflowMarketplaceRef } from '../workflow/types'
 import { rewriteWorkflowCalls } from './dependencies'
 import { dependencyFile, needsUpdate } from './meta'
+import { planSecretImport, rewriteWorkflowSecrets } from './secrets'
 import {
   MARKETPLACE_REPO_FULL,
   MarketplaceError,
@@ -41,6 +43,11 @@ export interface PublishedDependency {
 export interface BundlePlan extends ApplyPlan {
   /** Dependency records to save BEFORE the parent; empty when up-to-date. */
   dependencies: Workflow[]
+  /**
+   * Vault entries to save BEFORE the workflows: every `get-secret` step points
+   * at these ids, so saving a workflow first would leave it unusable.
+   */
+  credentials: PasswordEntry[]
 }
 
 /** Local workflow installed from `slug`, if any. */
@@ -181,7 +188,9 @@ export function bundleDependencyId(parentSlug: string, path: string): string {
  * Calls are rewritten to the ids this install is about to use, which is what
  * makes a published `execute-workflow` step work on someone else's machine.
  * `library` is the installed library, used to find a dependency copy from a
- * previous version so it is replaced rather than duplicated.
+ * previous version so it is replaced rather than duplicated. `credentials` is
+ * the local vault, used to reuse values the user already filled in instead of
+ * overwriting them with the published defaults.
  */
 export function planApplyBundle(
   card: MarketplaceCard,
@@ -190,6 +199,7 @@ export function planApplyBundle(
   library: readonly Workflow[],
   existing: Workflow | undefined,
   now = Date.now(),
+  credentials: readonly PasswordEntry[] = [],
 ): BundlePlan {
   const declared = card.meta.dependencies ?? []
   if (declared.length !== dependencies.length) {
@@ -209,8 +219,16 @@ export function planApplyBundle(
 
   const parent = asWorkflow(published)
   if (!parent) throw new MarketplaceError('invalid', 'The published workflow is not readable')
-  const plan = planApply(card, rewriteWorkflowCalls(parent, ids), existing, now)
-  if (plan.status === 'up-to-date') return { ...plan, dependencies: [] }
+  const imported = planSecretImport(card.meta.slug, card.meta.secrets, credentials, now)
+  const plan = planApply(
+    card,
+    rewriteWorkflowSecrets(rewriteWorkflowCalls(parent, ids), imported.idMap),
+    existing,
+    now,
+  )
+  if (plan.status === 'up-to-date') {
+    return { ...plan, dependencies: [], credentials: [] }
+  }
 
   const installedById = new Map(library.map((workflow) => [workflow.id, workflow]))
   const records: Workflow[] = dependencies.map((dependency): Workflow => {
@@ -221,7 +239,10 @@ export function planApplyBundle(
         `The bundled workflow "${dependency.entry.name}" is not readable`,
       )
     }
-    const incoming = rewriteWorkflowCalls(migrateWorkflow(raw), ids)
+    const incoming = rewriteWorkflowSecrets(
+      rewriteWorkflowCalls(migrateWorkflow(raw), ids),
+      imported.idMap,
+    )
     const id = ids.get(dependency.entry.id)!
     const current = installedById.get(id)
     const trigger = incoming.trigger ? { ...incoming.trigger, enabled: false } : undefined
@@ -253,5 +274,5 @@ export function planApplyBundle(
     }
   })
 
-  return { ...plan, dependencies: records }
+  return { ...plan, dependencies: records, credentials: imported.entries }
 }

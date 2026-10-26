@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added — Credentials travel with a published workflow
+
+Publishing a workflow that uses stored credentials now lists the referenced
+credential and field names in the publish dialog and commits them with the
+listing. Password-style fields start empty and every other field starts at the
+local value; both can be edited, and a filled password raises the existing
+"publish anyway" warning. Applying such a listing imports the credentials into
+the local vault before any workflow is saved, rewrites the `get-secret` steps in
+the parent and its bundled sub-workflows to the imported ids, so the workflow
+runs without picking a credential again. Re-applying keeps values the user has
+already typed and only adds missing fields.
+
 ### Added — A bundled workflow arrives as its own group
 
 Applying a marketplace workflow that calls other workflows now creates a group

@@ -17,8 +17,14 @@ import {
   MAX_ATTACHMENT_NAME_CHARS,
   MAX_BUNDLE_WORKFLOWS,
   MAX_DESCRIPTION_CHARS,
+  MAX_LISTING_SECRETS,
+  MAX_LISTING_SECRET_FIELDS,
   MAX_PUBLISH_ATTACHMENT_BYTES,
   MAX_PUBLISH_ATTACHMENTS,
+  MAX_SECRET_ID_CHARS,
+  MAX_SECRET_KEY_CHARS,
+  MAX_SECRET_LABEL_CHARS,
+  MAX_SECRET_VALUE_CHARS,
   MAX_TAGS,
   MAX_TAG_CHARS,
   MAX_TITLE_CHARS,
@@ -26,6 +32,8 @@ import {
   type MarketplaceAttachment,
   type MarketplaceDependency,
   type MarketplaceMeta,
+  type MarketplaceSecret,
+  type MarketplaceSecretField,
 } from './types'
 import { normalizeCategory } from './categories'
 
@@ -102,6 +110,7 @@ export interface BuildMetaInput {
   tags?: readonly string[]
   dependencies?: readonly MarketplaceDependency[]
   attachments?: readonly MarketplaceAttachment[]
+  secrets?: readonly MarketplaceSecret[]
   author: string
   version: number
   hash: string
@@ -173,6 +182,59 @@ function normalizeAttachments(items: readonly MarketplaceAttachment[]): Marketpl
   })
 }
 
+function normalizeSecrets(items: readonly MarketplaceSecret[]): MarketplaceSecret[] {
+  if (items.length > MAX_LISTING_SECRETS) {
+    throw new MarketplaceError(
+      'invalid',
+      `A listing can carry at most ${MAX_LISTING_SECRETS} credentials`,
+    )
+  }
+  const ids = new Set<string>()
+  let fieldCount = 0
+  return items.map((item) => {
+    const id = item.id.trim()
+    if (!id || id.length > MAX_SECRET_ID_CHARS) {
+      throw new MarketplaceError('invalid', 'Credential id is empty or too long')
+    }
+    if (ids.has(id)) throw new MarketplaceError('invalid', 'A credential is listed twice')
+    ids.add(id)
+    const label = item.label.trim()
+    if (!label || label.length > MAX_SECRET_LABEL_CHARS) {
+      throw new MarketplaceError('invalid', 'Credential label is empty or too long')
+    }
+    if (item.fields.length === 0) {
+      throw new MarketplaceError('invalid', 'A credential has no fields')
+    }
+    const keys = new Set<string>()
+    const fields = item.fields.map((field): MarketplaceSecretField => {
+      const key = field.key.trim()
+      if (!key || key.length > MAX_SECRET_KEY_CHARS) {
+        throw new MarketplaceError('invalid', 'Credential field name is empty or too long')
+      }
+      const normalizedKey = key.toLowerCase()
+      if (keys.has(normalizedKey)) {
+        throw new MarketplaceError('invalid', `Credential field "${key}" is listed twice`)
+      }
+      keys.add(normalizedKey)
+      if (field.value.length > MAX_SECRET_VALUE_CHARS) {
+        throw new MarketplaceError(
+          'invalid',
+          `Credential field "${key}" is longer than ${MAX_SECRET_VALUE_CHARS} characters`,
+        )
+      }
+      return { key, value: field.value, ...(field.secret ? { secret: true } : {}) }
+    })
+    fieldCount += fields.length
+    if (fieldCount > MAX_LISTING_SECRET_FIELDS) {
+      throw new MarketplaceError(
+        'invalid',
+        `A listing can carry at most ${MAX_LISTING_SECRET_FIELDS} credential fields`,
+      )
+    }
+    return { id, label, ...(item.url?.trim() ? { url: item.url.trim() } : {}), fields }
+  })
+}
+
 /** Builds a validated `meta.json`; throws {@link MarketplaceError} on bad input. */
 export function buildMeta(input: BuildMetaInput): MarketplaceMeta {
   if (!isValidSlug(input.slug)) {
@@ -204,6 +266,7 @@ export function buildMeta(input: BuildMetaInput): MarketplaceMeta {
   const images = Array.from({ length: imageCount }, (_, index) => assetPath(index))
   const dependencies = normalizeDependencies(input.dependencies ?? [])
   const attachments = normalizeAttachments(input.attachments ?? [])
+  const secrets = normalizeSecrets(input.secrets ?? [])
   const videoUrl = input.videoUrl?.trim() || undefined
   if (videoUrl && !/^https?:\/\//i.test(videoUrl)) {
     throw new MarketplaceError('invalid', 'Video link must start with http:// or https://')
@@ -222,6 +285,7 @@ export function buildMeta(input: BuildMetaInput): MarketplaceMeta {
     images,
     ...(dependencies.length ? { dependencies } : {}),
     ...(attachments.length ? { attachments } : {}),
+    ...(secrets.length ? { secrets } : {}),
     ...(videoUrl ? { videoUrl } : {}),
     createdAt: stamp,
     updatedAt: stamp,
@@ -288,6 +352,50 @@ function parseAttachments(raw: unknown): MarketplaceAttachment[] {
 }
 
 /**
+ * Reads the credential list. Credentials decide whether a `get-secret` step can
+ * run after apply, but a malformed one must not hide the whole card: bad
+ * entries are dropped, exactly like attachments.
+ */
+function parseSecrets(raw: unknown): MarketplaceSecret[] {
+  if (!Array.isArray(raw)) return []
+  const secrets: MarketplaceSecret[] = []
+  let fieldCount = 0
+  for (const item of raw) {
+    if (secrets.length >= MAX_LISTING_SECRETS || fieldCount >= MAX_LISTING_SECRET_FIELDS) break
+    if (!isRecord(item)) continue
+    const id = typeof item['id'] === 'string' ? item['id'].trim() : ''
+    if (!id || id.length > MAX_SECRET_ID_CHARS) continue
+    if (secrets.some((secret) => secret.id === id)) continue
+    const rawLabel = item['label']
+    const label =
+      typeof rawLabel === 'string' && rawLabel.trim()
+        ? rawLabel.trim().slice(0, MAX_SECRET_LABEL_CHARS)
+        : id
+    const rawUrl = item['url']
+    const url = typeof rawUrl === 'string' && rawUrl.trim() ? rawUrl.trim() : undefined
+    const fields: MarketplaceSecretField[] = []
+    const rawFields = Array.isArray(item['fields']) ? item['fields'] : []
+    for (const entry of rawFields) {
+      if (fieldCount >= MAX_LISTING_SECRET_FIELDS) break
+      if (!isRecord(entry)) continue
+      const key = typeof entry['key'] === 'string' ? entry['key'].trim() : ''
+      if (!key || key.length > MAX_SECRET_KEY_CHARS) continue
+      if (fields.some((field) => field.key.toLowerCase() === key.toLowerCase())) continue
+      const value = typeof entry['value'] === 'string' ? entry['value'] : ''
+      fields.push({
+        key,
+        value: value.slice(0, MAX_SECRET_VALUE_CHARS),
+        ...(entry['secret'] === true ? { secret: true } : {}),
+      })
+      fieldCount += 1
+    }
+    if (fields.length === 0) continue
+    secrets.push({ id, label, ...(url ? { url } : {}), fields })
+  }
+  return secrets
+}
+
+/**
  * Parses a remote `meta.json`. Returns `null` when identity fields cannot be
  * trusted; the caller marks the card unavailable instead of guessing.
  */
@@ -332,6 +440,7 @@ export function parseMeta(value: unknown): MarketplaceMeta | null {
   const dependencies = parseDependencies(value['dependencies'])
   if (dependencies === null) return null
   const attachments = parseAttachments(value['attachments'])
+  const secrets = parseSecrets(value['secrets'])
 
   return {
     schema: MARKETPLACE_SCHEMA_VERSION,
@@ -346,6 +455,7 @@ export function parseMeta(value: unknown): MarketplaceMeta | null {
     images,
     ...(dependencies.length ? { dependencies } : {}),
     ...(attachments.length ? { attachments } : {}),
+    ...(secrets.length ? { secrets } : {}),
     ...(videoUrl ? { videoUrl } : {}),
     createdAt,
     updatedAt,

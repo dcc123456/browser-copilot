@@ -312,6 +312,80 @@ describe('planApplyBundle', () => {
 
     expect(plan.status).toBe('up-to-date')
     expect(plan.dependencies).toEqual([])
+    expect(plan.credentials).toEqual([])
+  })
+
+  it('imports the listing credentials and points the graph at the local ids', () => {
+    const secret = {
+      id: 'gh',
+      label: 'GitHub',
+      fields: [
+        { key: 'token', value: 'ghp_live' },
+        { key: 'password', value: '', secret: true },
+      ],
+    }
+    const card: MarketplaceCard = {
+      ...bundleCard(2),
+      meta: { ...bundleCard(2).meta, secrets: [secret] },
+    }
+    const secretGraph = (name: string, credential: string): unknown => ({
+      ...(callGraph(name, []) as Record<string, unknown>),
+      drawflow: {
+        nodes: [
+          {
+            id: 's1',
+            label: 'Get secret',
+            position: { x: 0, y: 0 },
+            data: {
+              blockId: 'get-secret',
+              values: { credential, variableName: 'value' },
+            },
+          },
+        ],
+        edges: [],
+      },
+    })
+    const localEntry = {
+      id: 'mkt-scrape-orders-abcdef-gh',
+      label: 'GitHub',
+      fields: [{ key: 'password', value: 'typed-before', secret: true }],
+      createdAt: 1,
+      updatedAt: 1,
+      useCount: 3,
+    }
+
+    const plan = planApplyBundle(
+      card,
+      secretGraph('Scrape orders', 'gh::token'),
+      [
+        {
+          entry: dependency('child-1', 'Collect numbers'),
+          published: secretGraph('Collect numbers', 'gh::password'),
+        },
+      ],
+      [],
+      undefined,
+      NOW,
+      [localEntry],
+    )
+
+    expect(plan.credentials).toEqual([
+      {
+        ...localEntry,
+        fields: [
+          { key: 'password', value: 'typed-before', secret: true },
+          { key: 'token', value: 'ghp_live' },
+        ],
+        updatedAt: NOW,
+      },
+    ])
+    expect(plan.workflow.drawflow.nodes[0]!.data).toMatchObject({
+      credential: 'mkt-scrape-orders-abcdef-gh::token',
+    })
+    // The bundled sub-workflow resolves the same credential without asking.
+    expect(plan.dependencies[0]!.drawflow.nodes[0]!.data).toMatchObject({
+      credential: 'mkt-scrape-orders-abcdef-gh::password',
+    })
   })
 
   it('rejects a bundle that does not match meta.json', () => {
