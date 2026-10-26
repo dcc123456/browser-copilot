@@ -920,9 +920,14 @@ export default function WorkflowsTab() {
     }
   }, [moveMenuFor])
 
-  const editorUrl = (id?: string): string =>
+  const editorUrl = (id?: string, folderId?: string): string =>
     chrome.runtime.getURL(
-      'src/workflow-editor/index.html' + (id ? `?edit=${encodeURIComponent(id)}` : ''),
+      'src/workflow-editor/index.html' +
+        (id
+          ? `?edit=${encodeURIComponent(id)}`
+          : folderId
+            ? `?folder=${encodeURIComponent(folderId)}`
+            : ''),
     )
   /**
    * Whether a tab URL is the editor page of the given workflow, matching the
@@ -976,14 +981,14 @@ export default function WorkflowsTab() {
    * chrome-extension window), so it carries THIS panel's window and every
    * run/record/pick it performs is pinned to that window.
    */
-  const openEditor = (id?: string): void => {
+  const openEditor = (id?: string, folderId?: string): void => {
     void (async () => {
       if (id !== undefined && (await focusOpenEditor(id))) return
       const hostId = await chrome.windows
         .getCurrent()
         .then((win) => (typeof win?.id === 'number' ? win.id : undefined))
         .catch(() => undefined)
-      const base = editorUrl(id)
+      const base = editorUrl(id, folderId)
       const url =
         hostId !== undefined ? `${base}${base.includes('?') ? '&' : '?'}hostWindow=${hostId}` : base
       void chrome.windows
@@ -1313,7 +1318,7 @@ export default function WorkflowsTab() {
         </div>
       </div>
 
-      {workflows.length === 0 ? (
+      {workflows.length === 0 && groups.length === 0 ? (
         <div className="empty-state">
           <p>{t.workflowsEmpty}</p>
         </div>
@@ -1426,6 +1431,16 @@ export default function WorkflowsTab() {
                 </div>
                 {group && !isRenaming && (
                   <div className="flex items-center gap-1">
+                    <button
+                      aria-label={t.workflowsGroupNewWorkflow}
+                      className="flex! h-6! w-6! items-center! justify-center! rounded-md! border! border-border! bg-transparent! p-0! text-muted! hover:bg-hover! hover:text-ink!"
+                      disabled={busy}
+                      onClick={() => openEditor(undefined, group.id)}
+                      title={t.workflowsGroupNewWorkflow}
+                      type="button"
+                    >
+                      <Plus size={13} aria-hidden="true" />
+                    </button>
                     <button
                       aria-label={t.workflowsGroupExport}
                       className="flex! h-6! w-6! items-center! justify-center! rounded-md! border! border-border! bg-transparent! p-0! text-muted! hover:bg-hover! hover:text-ink!"

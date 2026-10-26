@@ -49,6 +49,8 @@ const secondGroup: WorkflowGroup = { id: 'g2', name: 'Weekly', createdAt: 2, upd
 let workflows: Workflow[] = []
 let groups: WorkflowGroup[] = []
 const seen: Command[] = []
+/** Editor popup creations, so a group's "new workflow" target can be asserted. */
+const windowsCreate = vi.fn()
 /** The JSON handed to the download helper, captured from the created blob. */
 let downloaded: unknown = null
 const mountedRoots: Root[] = []
@@ -58,6 +60,7 @@ beforeEach(() => {
   groups = [group]
   seen.length = 0
   downloaded = null
+  windowsCreate.mockReset()
   mocks.sendCommand.mockReset()
   mocks.sendCommand.mockImplementation(async (command: Command): Promise<unknown> => {
     seen.push(command)
@@ -88,7 +91,7 @@ beforeEach(() => {
   vi.stubGlobal('chrome', {
     runtime: { getURL: (path: string) => path },
     storage: { onChanged: { addListener: () => {}, removeListener: () => {} } },
-    windows: { create: vi.fn(), getCurrent: vi.fn(async () => ({ id: 1 })) },
+    windows: { create: windowsCreate, getCurrent: vi.fn(async () => ({ id: 1 })) },
     tabs: { create: vi.fn() },
   })
   vi.stubGlobal('URL', {
@@ -205,6 +208,33 @@ describe('workflow groups', () => {
     await flush()
     expect(container.textContent).not.toContain('Send report')
     expect(toggles[0]?.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('opens a new workflow from the group header, filed into that group', async () => {
+    const container = await render()
+    const daily = sectionTitled(container, 'Daily')
+    await click(daily.querySelector(`[aria-label="${t.workflowsGroupNewWorkflow}"]`))
+    await flush()
+
+    expect(windowsCreate).toHaveBeenCalledTimes(1)
+    const created = windowsCreate.mock.calls[0]?.[0] as { url: string; type: string }
+    expect(created.type).toBe('popup')
+    // No `edit`: the editor assigns the id, and takes the group from `folder`.
+    expect(created.url).toBe('src/workflow-editor/index.html?folder=g1&hostWindow=1')
+  })
+
+  it('keeps a group visible before it holds any workflow', async () => {
+    workflows = []
+    groups = [group]
+    const container = await render()
+
+    expect(container.textContent).not.toContain(t.workflowsEmpty)
+    const daily = sectionTitled(container, 'Daily')
+    expect(daily.querySelector(`[aria-label="${t.workflowsGroupNewWorkflow}"]`)).not.toBeNull()
+    await click(daily.querySelector(`[aria-label="${t.workflowsGroupNewWorkflow}"]`))
+    await flush()
+    const created = windowsCreate.mock.calls[0]?.[0] as { url: string }
+    expect(created.url).toContain('folder=g1')
   })
 
   it('folds a group when its name is clicked and renames only from the pencil', async () => {

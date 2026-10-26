@@ -426,6 +426,8 @@ export interface Messages {
   workflowsGroupNew: string
   /** Per-group action: export the group together with its workflows. */
   workflowsGroupExport: string
+  /** Per-group action: open a new workflow that is filed into this group on save. */
+  workflowsGroupNewWorkflow: string
   /** Per-group action: rename the group in place. */
   workflowsGroupRename: string
   /** Per-group action: delete the group (its workflows fall back to ungrouped). */
@@ -2087,6 +2089,7 @@ const en: Messages = {
   workflowsUngrouped: 'Ungrouped',
   workflowsGroupNew: 'New group',
   workflowsGroupExport: 'Export group',
+  workflowsGroupNewWorkflow: 'New workflow in this group',
   workflowsGroupRename: 'Rename group',
   workflowsGroupDelete: 'Delete group',
   workflowsGroupReorder: 'Drag to reorder groups',
@@ -3650,6 +3653,7 @@ const zhCN: Messages = {
   workflowsUngrouped: '未分组',
   workflowsGroupNew: '新建分组',
   workflowsGroupExport: '导出分组',
+  workflowsGroupNewWorkflow: '在此分组中新建工作流',
   workflowsGroupRename: '重命名分组',
   workflowsGroupDelete: '删除分组',
   workflowsGroupReorder: '拖动可调整分组顺序',

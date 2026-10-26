@@ -287,6 +287,13 @@ export default function EditorApp() {
   const loadedRef = useRef(false)
   /** Content fingerprint of the last loaded/saved graph; see `contentSignature`. */
   const savedSignatureRef = useRef<string | null>(null)
+  /**
+   * Group a brand-new workflow is filed into, taken from the `folder` URL param
+   * the list adds when one is created inside a group. One-shot: cleared after the
+   * first successful save, so a later move in the panel still wins over this
+   * window's original target.
+   */
+  const newWorkflowFolderRef = useRef<string | null>(null)
 
   // --- undo -------------------------------------------------------------------
   // Ctrl+Z walks back the canvas STRUCTURE (design §D8): a mutation that adds,
@@ -485,6 +492,8 @@ export default function EditorApp() {
       })()
     } else {
       const id = newId()
+      const folderId = params.get('folder')
+      if (folderId) newWorkflowFolderRef.current = folderId
       setWorkflowId(id)
       // Seed every new workflow with a Trigger block (Automa always does): it is
       // where the workflow name, trigger type and run settings are edited.
@@ -823,6 +832,7 @@ export default function EditorApp() {
       // and background listeners see the current launch type right on save.
       trigger: triggerFromNodes(wfNodes) ?? meta.trigger,
       settings: meta.settings,
+      ...(newWorkflowFolderRef.current ? { folderId: newWorkflowFolderRef.current } : {}),
     }
   }, [workflowId, nodes, edges, meta, reactFlow, t])
 
@@ -833,6 +843,7 @@ export default function EditorApp() {
     setError(null)
     try {
       await sendCommand({ type: 'workflows.save', workflow: wf })
+      newWorkflowFolderRef.current = null
       savedSignatureRef.current = JSON.stringify({
         nodes: wf.drawflow.nodes,
         edges: wf.drawflow.edges,
