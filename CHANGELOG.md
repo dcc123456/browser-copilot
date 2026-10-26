@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+_To be released._
+
+## [0.6.11] - 2026-10-26
+
 ### Fixed — The marketplace says why a refresh failed, and asks GitHub less often
 
 A failed marketplace refresh used to fall back to the cached cards under a

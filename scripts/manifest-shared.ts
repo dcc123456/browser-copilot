@@ -12,7 +12,7 @@
  */
 
 /** Release version — single source for both variant manifests. */
-export const VERSION = '0.6.10'
+export const VERSION = '0.6.11'
 
 export const NAME = 'Browser Copilot'
 export const SHORT_NAME = 'BCopilot'
