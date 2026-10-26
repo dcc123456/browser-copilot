@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed — Marketplace card actions are icons
+
+The marketplace card now carries the GitHub link as an icon beside the workflow
+name, and shows like and comments as icon buttons with their counts side by
+side in the action row. The like control left the discussion panel, which is
+now comments only, and the owner action is labelled 下架 (delist).
+
 _To be released._
 
 ## [0.6.11] - 2026-10-26

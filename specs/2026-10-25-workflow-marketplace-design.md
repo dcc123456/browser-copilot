@@ -137,7 +137,9 @@ workflows/<slug>/
 
 ### 6.2 卡片
 
-封面（第一张截图）、标题、描述、作者、分类/标签、👍/💬 计数、来源链接、按钮状态：`应用` / `已添加` / `可更新`。
+封面（第一张截图）、标题、描述、作者、分类/标签、按钮状态：`应用` / `已添加` / `可更新`。
+
+卡片操作以图标表达，避免侧边栏里一排文字挤在一起：标题右侧是 GitHub 图标（`aria-label` 用“在 GitHub 查看”，点击打开仓库里的工作流目录）；动作行里点赞（👍）与评论（💬）两个图标按钮紧挨着并排，图标后跟对应计数，点赞按钮不再出现在评论面板里，面板只负责评论。点赞/评论图标在未连接 GitHub 时也照常显示，点击点赞会提示先连接账号；没有已合并 PR 的卡片不显示这两个图标。自己的卡片最后一个动作是“下架”。
 
 三种 chip 必须是三种不同的视觉，不只靠文字区分：作者是中性灰胶囊；分类是强调色填充胶囊（`bg-accent-soft` + `text-accent`）；标签是带描边、方角、`#` 前缀、保持原文大小写的小标签。样式全部走 Tailwind 语义 token（`.task-chip` 的基础字号/内边距保留，颜色与圆角用工具类覆盖），不新增手写 class。
 
@@ -163,7 +165,7 @@ workflows/<slug>/
 
 - 发布成功后把 `{repo, slug, version, hash, author, appliedAt}` 记到本地工作流的 `marketplace` 上（`workflows.marketplace` 命令，只改元数据、不产生 revision，也不改 `updatedAt`——工作流列表按该字段排序，回写不能把它当作一次内容修改）。下次发布读这个引用，沿用同一 slug 并 `version + 1`，PR 标题变 `Update workflow: …`。没有该引用的“从本地直接发布”的工作流，改完再发布会因内容 hash 变化生成新 slug → 广场重复卡片，因此回写是重新编辑的前提。
 - 重新编辑时发布弹窗先用 `raw.githubusercontent.com` 的 `meta.json` 预填标题/描述/分类/标签/视频，并把已发布图片下载回表单（最多 3 张，已压缩）；用户在预填返回前动过任何字段则整段预填放弃，避免覆盖输入。
-- 下架入口在广场卡片上：当 `card.meta.author` 与已连接账号一致（忽略大小写）时显示“取消发布”。确认后 `GET git/trees` 取出 `workflows/<slug>/` 下全部 blob，新建 `submit/<slug>-<stamp>` 分支逐个 `DELETE /contents/...`（带 sha），再开 PR `Remove workflow: <title> [wf:<slug>]`。维护者合并后目录消失，目录刷新（或 2 小时过期）后卡片消失。
+- 下架入口在广场卡片上：当 `card.meta.author` 与已连接账号一致（忽略大小写）时显示“下架”。确认后 `GET git/trees` 取出 `workflows/<slug>/` 下全部 blob，新建 `submit/<slug>-<stamp>` 分支逐个 `DELETE /contents/...`（带 sha），再开 PR `Remove workflow: <title> [wf:<slug>]`。维护者合并后目录消失，目录刷新（或 2 小时过期）后卡片消失。
 - 只有“完整且非 stale”的目录读取才能证明某个 slug 不存在：此时本地 `marketplace.slug` 不在目录中的工作流显示“来源已删除”，不再提示更新；本地副本、触发器和历史都不受影响。截断或回退缓存时不做该判断，避免把仍在架上的工作流误标为删除。
 
 ### 6.6 被调用的工作流（bundle）
@@ -195,7 +197,7 @@ workflows/<slug>/
 - 目标对象是该工作流已合并 PR 的 issue 通道。
 - **点赞**：`POST /repos/{o}/{r}/issues/{n}/reactions`，`content: "+1"`；取消 = `DELETE .../reactions/{id}`。自己点过的 reaction id 存本地 `marketplaceReactions`，避免每次重查。
 - **评论**：打开卡片详情时 `GET .../issues/{n}/comments?per_page=50`；发送 `POST .../issues/{n}/comments`。
-- 没有 token 的用户：只读计数，按钮变为“在 GitHub 参与”，打开 PR 页手动点赞/评论。
+- 没有 token 的用户：计数只读；点赞图标照常显示，点击提示先连接 GitHub。评论面板里改为一个“去 GitHub 评论”的链接，打开 PR 页。
 - 所有写操作都需要 token；读操作匿名即可。
 
 ## 8. token 与隐私

@@ -361,8 +361,6 @@ export interface Messages {
   marketplaceCardBundle: (params: { count: number }) => string
   /** Label in front of a card's attachment links. */
   marketplaceCardAttachments: string
-  marketplaceLikeCount: (params: { count: number }) => string
-  marketplaceCommentCount: (params: { count: number }) => string
   marketplaceLikeAction: string
   marketplaceUnlikeAction: string
   marketplaceCommentsTitle: string
@@ -2015,8 +2013,6 @@ const en: Messages = {
   marketplaceCardBundle: ({ count }) =>
     `Includes ${count} called workflow${count === 1 ? '' : 's'}`,
   marketplaceCardAttachments: 'Attachments',
-  marketplaceLikeCount: ({ count }) => `${count} like${count === 1 ? '' : 's'}`,
-  marketplaceCommentCount: ({ count }) => `${count} comment${count === 1 ? '' : 's'}`,
   marketplaceLikeAction: 'Like',
   marketplaceUnlikeAction: 'Unlike',
   marketplaceCommentsTitle: 'Comments',
@@ -2025,7 +2021,7 @@ const en: Messages = {
   marketplaceCommentPlaceholder: 'Write a comment…',
   marketplaceCommentSend: 'Post comment',
   marketplaceCommentPosted: 'Comment posted.',
-  marketplaceEngageGithub: 'Like or comment on GitHub',
+  marketplaceEngageGithub: 'Comment on GitHub',
   marketplaceTrustTitle: 'Apply this workflow?',
   marketplaceTrustMessage: ({ title, author }) =>
     `"${title}" by @${author} can perform actions on pages you open. It will not run automatically; start it yourself after reviewing its steps.`,
@@ -3565,8 +3561,6 @@ const zhCN: Messages = {
   marketplaceByAuthor: ({ author }) => `作者 @${author}`,
   marketplaceCardBundle: ({ count }) => `含 ${count} 个子工作流`,
   marketplaceCardAttachments: '附件',
-  marketplaceLikeCount: ({ count }) => `${count} 个赞`,
-  marketplaceCommentCount: ({ count }) => `${count} 条评论`,
   marketplaceLikeAction: '点赞',
   marketplaceUnlikeAction: '取消点赞',
   marketplaceCommentsTitle: '评论',
@@ -3575,7 +3569,7 @@ const zhCN: Messages = {
   marketplaceCommentPlaceholder: '写下你的评论…',
   marketplaceCommentSend: '发送评论',
   marketplaceCommentPosted: '评论已发布。',
-  marketplaceEngageGithub: '去 GitHub 点赞或评论',
+  marketplaceEngageGithub: '去 GitHub 评论',
   marketplaceTrustTitle: '应用这个工作流？',
   marketplaceTrustMessage: ({ title, author }) =>
     `@${author} 的「${title}」会在你打开的页面上执行操作。它不会自动运行；查看步骤后请自行启动。`,
@@ -3585,8 +3579,8 @@ const zhCN: Messages = {
   marketplaceUpdateMessage: ({ title }) =>
     `应用「${title}」的新版本会替换它的步骤、触发器和设置，本地修改将会丢失。`,
   marketplaceUpdateBundled: ({ names }) => `它调用的工作流也会一并替换：${names}。`,
-  marketplaceUnpublish: '取消发布',
-  marketplaceUnpublishTitle: '取消发布这个工作流？',
+  marketplaceUnpublish: '下架',
+  marketplaceUnpublishTitle: '下架这个工作流？',
   marketplaceUnpublishMessage: ({ title }) =>
     `会提交一个 PR 把「${title}」从广场删除，维护者合并后生效；已经「应用」到你本地的副本不受影响，仍可继续使用。`,
   marketplaceUnpublishConfirm: '提交下架 PR',

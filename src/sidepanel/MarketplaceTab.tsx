@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { MessageSquare, RefreshCw, ThumbsUp } from 'lucide-react'
 import { sendCommand } from '../lib/messages'
 import { onStoreChanged } from '../lib/store-events'
 import type { Workflow } from '../lib/workflow/types'
@@ -74,10 +74,41 @@ interface ThreadState {
   error?: string
 }
 
-/** `liked: null` = the local reaction id is still being read. */
+/**
+ * Local like state per merged PR. `liked` comes from the stored reaction id
+ * (the catalog cannot tell whether THIS device reacted); `likes: null` means
+ * "nothing clicked here yet", so the count keeps following the catalog.
+ */
 interface LikeState {
-  liked: boolean | null
-  likes: number
+  liked: boolean
+  likes: number | null
+}
+
+/**
+ * Shared look for the icon actions on a card. Icons carry the meaning so the
+ * row fits a narrow side panel; the number beside each icon is its count.
+ * The `!` modifiers are required: `styles.css` styles bare `button`s with
+ * unlayered rules, which beat Tailwind's layered utilities. `inline-flex`
+ * keeps Chrome from collapsing the inline <svg> to zero width.
+ */
+const CARD_ACTION_BASE =
+  'inline-flex h-6! flex-none items-center gap-1 rounded-md border px-2! py-0! text-[11px] transition-colors duration-150'
+const CARD_ACTION_IDLE =
+  'border-border! bg-transparent! text-muted! hover:border-accent! hover:text-accent!'
+const CARD_ACTION_ACTIVE = 'border-accent! bg-accent-soft! text-accent!'
+
+/** GitHub's mark, which lucide dropped from its brand icons. */
+function GitHubMark(): React.ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-3.5 w-3.5 flex-none"
+      fill="currentColor"
+      viewBox="0 0 16 16"
+    >
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+    </svg>
+  )
 }
 
 export default function MarketplaceTab({ active }: Props): React.ReactElement {
@@ -107,10 +138,10 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   const [draft, setDraft] = useState('')
   const [engaging, setEngaging] = useState(false)
   const reactionCacheRef = useRef<ReactionCache | null>(null)
-  const reactionCache = (): ReactionCache => {
+  const reactionCache = useCallback((): ReactionCache => {
     reactionCacheRef.current ??= chromeReactionCache()
     return reactionCacheRef.current
-  }
+  }, [])
 
   const loadedRef = useRef(false)
 
@@ -166,6 +197,32 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
     void getAuth().then(setAuth)
   }, [active])
 
+  // The catalog knows the public counts, not whether this device reacted; the
+  // stored reaction id is the only record, so the like icon would otherwise
+  // always start out unliked. Entries already toggled in this session win.
+  useEffect(() => {
+    const numbers = (snapshot?.cards ?? [])
+      .map((card) => card.prNumber)
+      .filter((issueNumber): issueNumber is number => issueNumber !== null)
+    if (numbers.length === 0) return
+    let cancelled = false
+    const cache = reactionCache()
+    void Promise.all(numbers.map((issueNumber) => cache.get(issueNumber))).then((reactionIds) => {
+      if (cancelled) return
+      setLikeStates((prev) => {
+        const next = { ...prev }
+        numbers.forEach((issueNumber, index) => {
+          if (next[issueNumber]) return
+          next[issueNumber] = { liked: reactionIds[index] !== null, likes: null }
+        })
+        return next
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [snapshot, reactionCache])
+
   /** GitHub's own page for the discussion: the read-only path without a token. */
   const issueUrl = (issueNumber: number): string =>
     `https://github.com/${MARKETPLACE_REPO_FULL}/pull/${issueNumber}`
@@ -210,27 +267,20 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
     }
     setOpenSlug(card.meta.slug)
     setDraft('')
-    setLikeStates((prev) =>
-      prev[issueNumber] ? prev : { ...prev, [issueNumber]: { liked: null, likes: card.likes } },
-    )
-    if (!likeStates[issueNumber]) {
-      void reactionCache()
-        .get(issueNumber)
-        .then((reactionId) =>
-          setLikeStates((prev) => ({
-            ...prev,
-            [issueNumber]: {
-              liked: reactionId !== null,
-              likes: prev[issueNumber]?.likes ?? card.likes,
-            },
-          })),
-        )
-    }
     if (!threads[issueNumber]) void loadThread(issueNumber)
   }
 
   const like = async (card: MarketplaceCard, issueNumber: number): Promise<void> => {
-    if (!auth) return
+    if (!auth) {
+      setBanner({
+        kind: 'error',
+        text: marketplaceErrorMessage(
+          t,
+          new MarketplaceError('auth-required', 'Connect GitHub first'),
+        ),
+      })
+      return
+    }
     setEngaging(true)
     try {
       const result = await toggleLike({
@@ -240,12 +290,12 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
         onUnauthorized: forgetRejectedToken,
       })
       setLikeStates((prev) => {
-        const current = prev[issueNumber] ?? { liked: false, likes: card.likes }
+        const currentLikes = likeStates[issueNumber]?.likes ?? card.likes
         return {
           ...prev,
           [issueNumber]: {
             liked: result.liked,
-            likes: Math.max(0, current.likes + (result.liked ? 1 : -1)),
+            likes: Math.max(0, currentLikes + (result.liked ? 1 : -1)),
           },
         }
       })
@@ -494,6 +544,7 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
             const sourceUrl = `https://github.com/${MARKETPLACE_REPO_FULL}/tree/${MARKETPLACE_BRANCH}/${workflowDir(meta.slug)}`
             const issueNumber = card.prNumber
             const likeState = issueNumber === null ? undefined : likeStates[issueNumber]
+            const liked = likeState?.liked ?? false
             const thread = issueNumber === null ? undefined : threads[issueNumber]
             const isOpen = openSlug === meta.slug
             const bundleCount = meta.dependencies?.length ?? 0
@@ -508,7 +559,19 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                   />
                 )}
                 <div className="task-item-head">
-                  <strong className="task-item-name">{meta.title}</strong>
+                  <div className="task-item-lead">
+                    <strong className="task-item-name">{meta.title}</strong>
+                    <a
+                      aria-label={t.marketplaceViewOnGithub}
+                      className="inline-flex flex-none items-center text-muted hover:text-accent"
+                      href={sourceUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                      title={t.marketplaceViewOnGithub}
+                    >
+                      <GitHubMark />
+                    </a>
+                  </div>
                   {isUnavailable ? (
                     <span className="task-status task-status-failed">
                       {t.marketplaceUnavailable}
@@ -562,11 +625,40 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                     ))}
                   </div>
                 )}
-                <div className="mt-1 flex items-center gap-3 text-[11.5px] text-muted">
-                  <span>{t.marketplaceLikeCount({ count: likeState?.likes ?? card.likes })}</span>
-                  <span>{t.marketplaceCommentCount({ count: card.comments })}</span>
-                </div>
                 <div className="actions task-actions">
+                  {issueNumber !== null && (
+                    <>
+                      <button
+                        aria-label={liked ? t.marketplaceUnlikeAction : t.marketplaceLikeAction}
+                        aria-pressed={liked}
+                        className={[
+                          CARD_ACTION_BASE,
+                          liked ? CARD_ACTION_ACTIVE : CARD_ACTION_IDLE,
+                        ].join(' ')}
+                        disabled={engaging}
+                        onClick={() => void like(card, issueNumber)}
+                        title={liked ? t.marketplaceUnlikeAction : t.marketplaceLikeAction}
+                        type="button"
+                      >
+                        <ThumbsUp aria-hidden="true" className="h-3.5 w-3.5 flex-none" />
+                        <span>{likeState?.likes ?? card.likes}</span>
+                      </button>
+                      <button
+                        aria-expanded={isOpen}
+                        aria-label={t.marketplaceCommentsTitle}
+                        className={[
+                          CARD_ACTION_BASE,
+                          isOpen ? CARD_ACTION_ACTIVE : CARD_ACTION_IDLE,
+                        ].join(' ')}
+                        onClick={() => openDetail(card)}
+                        title={isOpen ? t.marketplaceClose : t.marketplaceCommentsTitle}
+                        type="button"
+                      >
+                        <MessageSquare aria-hidden="true" className="h-3.5 w-3.5 flex-none" />
+                        <span>{card.comments}</span>
+                      </button>
+                    </>
+                  )}
                   <button
                     className="task-action-run"
                     disabled={busySlug !== null || isUnavailable || (!!existing && !hasUpdate)}
@@ -581,16 +673,6 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                           ? t.marketplaceApplied
                           : t.marketplaceApply}
                   </button>
-                  {issueNumber !== null && (
-                    <button disabled={engaging} onClick={() => openDetail(card)} type="button">
-                      {isOpen
-                        ? t.marketplaceClose
-                        : `${t.marketplaceCommentsTitle} (${card.comments})`}
-                    </button>
-                  )}
-                  <a className="text-accent" href={sourceUrl} rel="noreferrer" target="_blank">
-                    {t.marketplaceViewOnGithub}
-                  </a>
                   {isMine && (
                     <button
                       disabled={busySlug !== null || removingSlug !== null}
@@ -603,16 +685,7 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                 </div>
                 {isOpen && issueNumber !== null && (
                   <section className="mt-2 border-t border-border pt-2">
-                    {auth ? (
-                      <button
-                        className="task-action-run"
-                        disabled={engaging || likeState?.liked === null}
-                        onClick={() => void like(card, issueNumber)}
-                        type="button"
-                      >
-                        {likeState?.liked ? t.marketplaceUnlikeAction : t.marketplaceLikeAction}
-                      </button>
-                    ) : (
+                    {!auth && (
                       <a
                         className="text-[11.5px] text-accent"
                         href={issueUrl(issueNumber)}
