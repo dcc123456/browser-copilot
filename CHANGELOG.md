@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed — The marketplace says why a refresh failed, and asks GitHub less often
+
+A failed marketplace refresh used to fall back to the cached cards under a
+generic "could not reach GitHub" message, so a shared anonymous rate limit
+looked like a network outage. The stale banner now names the real cause, and
+for a rate limit it shows the reset time. The catalog freshness window moved
+from 30 minutes to 2 hours (`MARKETPLACE_CACHE_TTL_MS`) because the updater and
+the marketplace spend the same 60-request/hour budget; manual refresh still
+bypasses the window.
+
 ### Fixed — Update checks no longer drain the GitHub API quota
 
 The updater and the workflow marketplace share the anonymous 60-request/hour

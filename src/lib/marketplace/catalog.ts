@@ -86,6 +86,8 @@ export interface LoadCatalogResult extends CatalogSnapshot {
   fromCache: boolean
   /** Cached result served because the refresh failed. */
   stale: boolean
+  /** Why the refresh failed while the cached result was served. */
+  staleError?: MarketplaceError
 }
 
 /** Slugs from `workflows/<slug>/meta.json` blobs, in tree order. */
@@ -326,7 +328,20 @@ export async function loadCatalog(options: LoadCatalogOptions): Promise<LoadCata
     await options.cache?.save(fresh)
     return { ...fresh, fromCache: false, stale: false }
   } catch (error) {
-    if (cached) return { ...cached, fromCache: true, stale: true }
+    if (cached) {
+      return {
+        ...cached,
+        fromCache: true,
+        stale: true,
+        staleError:
+          error instanceof MarketplaceError
+            ? error
+            : new MarketplaceError(
+                'network',
+                error instanceof Error ? error.message : String(error),
+              ),
+      }
+    }
     throw error
   }
 }

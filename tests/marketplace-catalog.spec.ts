@@ -11,7 +11,11 @@ import {
   type CatalogSnapshot,
 } from '../src/lib/marketplace/catalog'
 import { buildMeta } from '../src/lib/marketplace/meta'
-import { MarketplaceError, type MarketplaceMeta } from '../src/lib/marketplace/types'
+import {
+  MarketplaceError,
+  MARKETPLACE_CACHE_TTL_MS,
+  type MarketplaceMeta,
+} from '../src/lib/marketplace/types'
 
 const NOW = new Date('2026-10-25T09:00:00.000Z')
 
@@ -249,7 +253,7 @@ describe('loadCatalog', () => {
       client: api,
       cache,
       fetchMeta: metaReader(),
-      now: () => 1000 + 31 * 60_000,
+      now: () => 1000 + MARKETPLACE_CACHE_TTL_MS + 1,
     })
     expect(result.fromCache).toBe(false)
     expect(cache.saved).toHaveLength(1)
@@ -277,6 +281,25 @@ describe('loadCatalog', () => {
       now: () => 1000 + 2 * 60 * 60 * 1000,
     })
     expect(result).toMatchObject({ fromCache: true, stale: true, fetchedAt: 1000 })
+    expect(result.staleError?.code).toBe('network')
+  })
+
+  it('passes the rate-limit reset time through with the cached list', async () => {
+    const cached: CatalogSnapshot = { fetchedAt: 1000, cards: [], truncated: false }
+    const resetAt = 1_700_000_000_000
+    const { api } = client({
+      async listTree() {
+        throw new MarketplaceError('rate-limited', 'limited', 403, resetAt)
+      },
+    })
+    const result = await loadCatalog({
+      client: api,
+      cache: memoryCache(cached),
+      force: true,
+    })
+
+    expect(result).toMatchObject({ fromCache: true, stale: true })
+    expect(result.staleError).toMatchObject({ code: 'rate-limited', resetAt })
   })
 
   it('never caches an empty catalog when every metadata read misses', async () => {

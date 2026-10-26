@@ -21,11 +21,12 @@ export const MARKETPLACE_BRANCH = 'main'
 export const MARKETPLACE_SCHEMA_VERSION = 1
 
 /**
- * How long a catalog read stays fresh. Two API calls per refresh against an
- * anonymous 60/hour budget allows ~20 refreshes/hour; 30 minutes keeps the
- * panel responsive without ever approaching that ceiling.
+ * How long a catalog read stays fresh. One refresh costs three anonymous API
+ * calls, and that 60/hour budget is shared with update checks (and anything
+ * else on the same egress IP), so two hours keeps the page useful without
+ * spending it. The header's refresh button always bypasses this window.
  */
-export const MARKETPLACE_CACHE_TTL_MS = 30 * 60 * 1000
+export const MARKETPLACE_CACHE_TTL_MS = 2 * 60 * 60 * 1000
 
 /** Browser branch prefix; the rest of the name is `<slug>-<stamp>`. */
 export const MARKETPLACE_PR_BRANCH_PREFIX = 'submit/'

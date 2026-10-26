@@ -347,6 +347,8 @@ export interface Messages {
   marketplaceEmptyHint: string
   marketplaceEmptyFiltered: string
   marketplaceStale: string
+  marketplaceStaleReason: (params: { reason: string }) => string
+  marketplaceStaleRateLimited: (params: { time?: string }) => string
   marketplaceTruncated: string
   marketplaceLoadFailed: string
   marketplaceApply: string
@@ -1999,6 +2001,9 @@ const en: Messages = {
     'Publish one from the Workflows tab to start the collection. Just merged a pull request? Use refresh above.',
   marketplaceEmptyFiltered: 'No workflows match these filters.',
   marketplaceStale: 'Showing the last loaded list; GitHub could not be reached.',
+  marketplaceStaleReason: ({ reason }) => `Showing the last loaded list; refresh failed: ${reason}`,
+  marketplaceStaleRateLimited: ({ time }) =>
+    `Showing the last loaded list; GitHub is limiting requests${time ? ` until ${time}` : ''}.`,
   marketplaceTruncated: 'Showing the newest 300 workflows.',
   marketplaceLoadFailed: 'Could not load the marketplace.',
   marketplaceApply: 'Apply',
@@ -3547,6 +3552,9 @@ const zhCN: Messages = {
   marketplaceEmptyHint: '在「工作流」面板发布一个，成为第一个分享者。刚合并了 PR？点右上角的刷新。',
   marketplaceEmptyFiltered: '没有符合筛选条件的工作流。',
   marketplaceStale: '正在显示上次加载的列表，暂时无法连接 GitHub。',
+  marketplaceStaleReason: ({ reason }) => `正在显示上次加载的列表；刷新失败：${reason}`,
+  marketplaceStaleRateLimited: ({ time }) =>
+    `正在显示上次加载的列表；GitHub 限流${time ? `，预计 ${time} 恢复` : ''}。`,
   marketplaceTruncated: '仅显示最新的 300 个工作流。',
   marketplaceLoadFailed: '无法加载工作流广场。',
   marketplaceApply: '应用',

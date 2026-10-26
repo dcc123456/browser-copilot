@@ -42,7 +42,7 @@
 - **PR 就是 issue**：`GET /repos/{owner}/{repo}/issues?state=all&per_page=100` 返回的条目同时包含 PR（带 `pull_request` 键）、`reactions` 汇总（`+1` 等）和 `comments` 计数。用 `microsoft/vscode` 实测确认三个字段都存在。→ 一次调用拿到所有卡片的赞/评论数。
 - **raw 不计 API 额度**：`raw.githubusercontent.com` 返回 `access-control-allow-origin: *` 与 `cache-control: max-age=300`，正文和图片走它，不消耗 REST 限额。
 - **304 也扣额度**：条件请求返回 304 时 `x-ratelimit-remaining` 从 52 降到 51。所以不能把“轮询”寄托在 304 免费上，只能控制请求数（每次刷新 3 次 API 调用）。
-- **匿名限额 60 次/小时/IP**：3 次/刷新 → 每小时最多 20 次刷新；配合 30 分钟节流足够。
+- **匿名限额 60 次/小时/IP**：3 次/刷新 → 每小时最多 20 次刷新。扩展自身的更新检查与广场共用同一份额度（同一个出口 IP），持续自检时两者会互相饿死，因此目录新鲜窗口取 2 小时而不是 30 分钟。
 - **扩展已有跨域能力**：`manifest.config.ts:87` 已声明 `<all_urls>`，扩展页面可直接 `fetch api.github.com` 与 `raw.githubusercontent.com`，无需改 manifest。
 - **目标仓库存在且为空**：`https://github.com/dcc123456/BC-workflow` 显示 “This repository is empty.”，需要先补 README、目录约定与 PR 模板（单独授权后执行）。
 - **可复用的现有能力**：工作流单条/批量导出（`src/sidepanel/WorkflowsTab.tsx:941`、`:945`）、批量导入（`:967`）、`asWorkflow` 归一化（`src/lib/workflow/storage.ts:44`）、`migrateWorkflow`、`FormDialog`（`src/ui/FormDialog.tsx`）、`OffscreenCanvas` 图片处理（`src/background/element-capture.ts:271`）。
@@ -95,7 +95,7 @@ workflows/<slug>/
 | `categories.ts`                           | 内置分类与自定义标签：规范化、大小写不敏感比较、标签翻译、筛选选项                               |
 | `github-client.ts`                        | 带 token 的 REST 封装：401/403/404/422/限流映射为稳定错误码；只发本文档列出的端点                |
 | `publish.ts`                              | `publishWorkflow`：确保 fork → 建分支 → 逐个 PUT 文件 → 开 PR                                    |
-| `catalog.ts`                              | `loadCatalog`：tree + pulls + issues 三路合并；raw 拉 meta/图片；30 分钟节流与内存缓存           |
+| `catalog.ts`                              | `loadCatalog`：tree + pulls + issues 三路合并；raw 拉 meta/图片；2 小时新鲜窗口与内存缓存        |
 | `engagement.ts`                           | 点赞（reaction 增删）与评论（列/发）                                                             |
 | `token.ts`                                | `getToken` / `setToken` / `clearToken`，存 `chrome.storage.local` 的 `marketplaceAuth`           |
 | `src/sidepanel/MarketplaceTab.tsx`        | 广场页：卡片流、筛选、应用/更新、点赞、评论                                                      |
@@ -131,9 +131,9 @@ workflows/<slug>/
 3. `GET /repos/dcc123456/BC-workflow/issues?state=all&per_page=100` → 用 PR number 取 `reactions['+1']` 与 `comments`。
 4. meta 与图片走 `https://raw.githubusercontent.com/dcc123456/BC-workflow/main/workflows/...`。
 5. raw 的每个响应（404 也算）带 `cache-control: max-age=300`。发布流程在合并**前**会读一次 `main` 上的 `meta.json` 算版本号，那次多半是 404；合并后立刻刷新，目录读取会命中这份 5 分钟缓存，工作流就会“消失”。因此第 4 步的 `meta.json` 请求追加 `?v=<时间戳>` 绕开缓存（GitHub 忽略查询串，raw 不计 API 额度）。
-6. 反向保护：tree 已经列出工作流、却一张卡都解析不出来时按“读取失败”处理（回退旧快照并提示），绝不把空目录写进 30 分钟缓存。
+6. 反向保护：tree 已经列出工作流、却一张卡都解析不出来时按“读取失败”处理（回退旧快照并提示），绝不把空目录写进 2 小时缓存。
 
-结果在内存缓存，并在 `chrome.storage.local` 记 `marketplaceLastCheck`；30 分钟内重复打开不重新请求。超过 100 个条目时分页（最多 3 页），超过上限时只显示“最新 300 个”。
+结果在内存缓存，并在 `chrome.storage.local` 记 `marketplaceLastCheck`；`MARKETPLACE_CACHE_TTL_MS`（2 小时）内重复打开不重新请求，手动刷新始终绕过节流。超过 100 个条目时分页（最多 3 页），超过上限时只显示“最新 300 个”。
 
 ### 6.2 卡片
 
@@ -154,16 +154,16 @@ workflows/<slug>/
 - 判定“可更新”只看已发布侧：`meta.version > marketplace.version`，或版本相同但 `meta.hash !== marketplace.hash` → 卡片与本地工作流列表显示“可更新”。
   - 版本是发布者的契约，但同一个 slug 可以“下架 → 重新发布”并复用旧版本号；只比版本会让这次内容更新永远推不到已安装用户，因此同版本必须再比内容 hash。
   - 本地修改不会改 `marketplace.hash`（它记录的是当初应用下来的发布内容），所以本地编辑本身不会触发更新提示——它正是更新要覆盖的对象。
-  - 已发布的版本**低于**本地记录时永不提示更新，避免 30 分钟目录快照回退时把用户“降级”。
+  - 已发布的版本**低于**本地记录时永不提示更新，避免 2 小时目录快照回退时把用户“降级”。
 - 执行更新：保留本地 `id`、`folderId`、`createdAt`，替换 `drawflow/trigger/settings/description/name`，刷新 `marketplace.version/hash`，追加 revision（`source = 'marketplace-update'`）。
 - 更新是覆盖式操作，必须二次确认，并在确认文案里写明“本地修改会丢失”。
-- 已安装工作流的检测节流复用目录 TTL（30 分钟）；离线失败后 10 分钟再试，避免 5 秒一轮的工作流列表反复打 GitHub。
+- 已安装工作流的检测节流复用目录 TTL（2 小时）；离线失败后 10 分钟再试，避免 5 秒一轮的工作流列表反复打 GitHub。
 
 ### 6.5 重新编辑与下架
 
 - 发布成功后把 `{repo, slug, version, hash, author, appliedAt}` 记到本地工作流的 `marketplace` 上（`workflows.marketplace` 命令，只改元数据、不产生 revision，也不改 `updatedAt`——工作流列表按该字段排序，回写不能把它当作一次内容修改）。下次发布读这个引用，沿用同一 slug 并 `version + 1`，PR 标题变 `Update workflow: …`。没有该引用的“从本地直接发布”的工作流，改完再发布会因内容 hash 变化生成新 slug → 广场重复卡片，因此回写是重新编辑的前提。
 - 重新编辑时发布弹窗先用 `raw.githubusercontent.com` 的 `meta.json` 预填标题/描述/分类/标签/视频，并把已发布图片下载回表单（最多 3 张，已压缩）；用户在预填返回前动过任何字段则整段预填放弃，避免覆盖输入。
-- 下架入口在广场卡片上：当 `card.meta.author` 与已连接账号一致（忽略大小写）时显示“取消发布”。确认后 `GET git/trees` 取出 `workflows/<slug>/` 下全部 blob，新建 `submit/<slug>-<stamp>` 分支逐个 `DELETE /contents/...`（带 sha），再开 PR `Remove workflow: <title> [wf:<slug>]`。维护者合并后目录消失，目录刷新（或 30 分钟过期）后卡片消失。
+- 下架入口在广场卡片上：当 `card.meta.author` 与已连接账号一致（忽略大小写）时显示“取消发布”。确认后 `GET git/trees` 取出 `workflows/<slug>/` 下全部 blob，新建 `submit/<slug>-<stamp>` 分支逐个 `DELETE /contents/...`（带 sha），再开 PR `Remove workflow: <title> [wf:<slug>]`。维护者合并后目录消失，目录刷新（或 2 小时过期）后卡片消失。
 - 只有“完整且非 stale”的目录读取才能证明某个 slug 不存在：此时本地 `marketplace.slug` 不在目录中的工作流显示“来源已删除”，不再提示更新；本地副本、触发器和历史都不受影响。截断或回退缓存时不做该判断，避免把仍在架上的工作流误标为删除。
 
 ### 6.6 被调用的工作流（bundle）
@@ -229,22 +229,22 @@ workflows/<slug>/
 
 ## 9. 错误与边界
 
-| 场景                               | 行为                                                        |
-| ---------------------------------- | ----------------------------------------------------------- |
-| 401 / token 失效                   | 清空 token，提示重新粘贴                                    |
-| 403 且 `x-ratelimit-remaining: 0`  | 显示重置时间；保留缓存内容                                  |
-| fork 未就绪                        | 轮询最多 30 s，超时提示稍后重试（发布内容不丢，可再次点击） |
-| 422（分支/PR 已存在）              | 换时间戳重试一次，仍失败则提示同名 PR 已在等待合并          |
-| slug 冲突且作者不同                | 阻断并建议改名，不发 PR                                     |
-| `meta.json` 解析失败               | 该卡片标记为“不可用”，不阻断其它卡片                        |
-| 工作流在远端被删除                 | 本地保留，标记“来源已删除”，不再提示更新                    |
-| 被调用的工作流本地已删除           | 阻断发布，列出无法满足的 id/节点名                          |
-| 打包数量超过 20                    | 阻断发布并提示拆分                                          |
-| `deps/*.json` 缺失或与 `meta` 不符 | 整包拒绝应用，不写入任何副本                                |
-| 附件超过 200 KB 或超过 3 个        | 弹窗内阻断，不发 PR                                         |
-| `meta.attachments` 条目非法        | 丢弃该条，卡片与其余附件正常显示                            |
-| 图片超限                           | 前端压缩后仍 >1 MB → 阻断并要求换图                         |
-| 离线                               | 展示上次缓存的卡片，发布按钮禁用                            |
+| 场景                               | 行为                                                                               |
+| ---------------------------------- | ---------------------------------------------------------------------------------- |
+| 401 / token 失效                   | 清空 token，提示重新粘贴                                                           |
+| 403 且 `x-ratelimit-remaining: 0`  | 回退缓存并显示重置时间（“正在显示上次加载的列表；GitHub 限流，预计 HH:MM 恢复。”） |
+| fork 未就绪                        | 轮询最多 30 s，超时提示稍后重试（发布内容不丢，可再次点击）                        |
+| 422（分支/PR 已存在）              | 换时间戳重试一次，仍失败则提示同名 PR 已在等待合并                                 |
+| slug 冲突且作者不同                | 阻断并建议改名，不发 PR                                                            |
+| `meta.json` 解析失败               | 该卡片标记为“不可用”，不阻断其它卡片                                               |
+| 工作流在远端被删除                 | 本地保留，标记“来源已删除”，不再提示更新                                           |
+| 被调用的工作流本地已删除           | 阻断发布，列出无法满足的 id/节点名                                                 |
+| 打包数量超过 20                    | 阻断发布并提示拆分                                                                 |
+| `deps/*.json` 缺失或与 `meta` 不符 | 整包拒绝应用，不写入任何副本                                                       |
+| 附件超过 200 KB 或超过 3 个        | 弹窗内阻断，不发 PR                                                                |
+| `meta.attachments` 条目非法        | 丢弃该条，卡片与其余附件正常显示                                                   |
+| 图片超限                           | 前端压缩后仍 >1 MB → 阻断并要求换图                                                |
+| 离线                               | 回退缓存并说明真实原因（不可达 / 超时），不把限流说成“无法连接”                    |
 
 ## 10. 安全
 

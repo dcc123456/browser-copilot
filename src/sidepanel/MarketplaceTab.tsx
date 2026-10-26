@@ -38,7 +38,7 @@ import {
   type MarketplaceCard,
 } from '../lib/marketplace/types'
 import { confirmDialog } from '../ui/confirm'
-import { useT } from './i18n'
+import { useI18n, useT } from './i18n'
 import { installFromCard } from './marketplace-install'
 import { marketplaceErrorMessage } from './marketplace-errors'
 
@@ -82,6 +82,7 @@ interface LikeState {
 
 export default function MarketplaceTab({ active }: Props): React.ReactElement {
   const t = useT()
+  const { locale } = useI18n()
   const [snapshot, setSnapshot] = useState<LoadCatalogResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -139,7 +140,7 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
     if (!active) return
     // The panel stays mounted for its whole lifetime, so a one-shot load would
     // freeze the catalog until a manual refresh. Re-checking on every
-    // activation lets the 30-minute window in `loadCatalog` actually expire;
+    // activation lets the freshness window in `loadCatalog` actually expire;
     // cached hits return without touching the spinner.
     void refresh(false, loadedRef.current)
     loadedRef.current = true
@@ -301,6 +302,24 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
 
   const filterCategories = useMemo(() => categoryOptions(snapshot?.cards ?? []), [snapshot])
 
+  // The banner used to say "GitHub could not be reached" for every failure,
+  // including a quota rejection that resolves by itself. Name the real cause.
+  const staleError = snapshot?.staleError
+  const staleText = !snapshot?.stale
+    ? null
+    : !staleError
+      ? t.marketplaceStale
+      : staleError.code === 'rate-limited'
+        ? t.marketplaceStaleRateLimited({
+            time: staleError.resetAt
+              ? new Date(staleError.resetAt).toLocaleTimeString(
+                  locale === 'zh-CN' ? 'zh-CN' : 'en-US',
+                  { hour: '2-digit', minute: '2-digit' },
+                )
+              : undefined,
+          })
+        : t.marketplaceStaleReason({ reason: marketplaceErrorMessage(t, staleError) })
+
   const apply = async (card: MarketplaceCard): Promise<void> => {
     const existing = findInstalled(installed, card.meta.slug)
     const isUpdate = !!existing && needsUpdate(card.meta, existing.marketplace)
@@ -438,9 +457,9 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
         </select>
       </div>
 
-      {snapshot?.stale && (
+      {staleText && (
         <div className="banner" data-kind="error" role="status">
-          {t.marketplaceStale}
+          {staleText}
         </div>
       )}
       {snapshot?.truncated && (
