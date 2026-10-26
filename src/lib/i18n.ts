@@ -1667,6 +1667,8 @@ export interface Messages {
   updateErrorTitle: string
   updateErrorNetwork: string
   updateErrorRateLimited: string
+  /** Shown under a failed check when an automatic retry is already scheduled. */
+  updateRetryScheduled: (params: { time: string }) => string
   updateErrorHttp: string
   updateErrorInvalidRelease: string
   updateErrorAssetMissing: string
@@ -3212,7 +3214,9 @@ Keep the whole report dense and within the message size cap.`,
   updateProgressDone: 'Done',
   updateErrorTitle: 'Update failed',
   updateErrorNetwork: 'Could not reach GitHub. Check your network and try again.',
-  updateErrorRateLimited: 'GitHub is rate-limiting update checks. Try again later.',
+  updateErrorRateLimited:
+    'GitHub is temporarily limiting update checks; a retry is scheduled automatically.',
+  updateRetryScheduled: ({ time }) => `Automatic retry at ${time}.`,
   updateErrorHttp: 'GitHub returned an unexpected response. Try again later.',
   updateErrorInvalidRelease: 'The latest release could not be read.',
   updateErrorAssetMissing: 'The release has no package for this build.',
@@ -3235,7 +3239,7 @@ Keep the whole report dense and within the message size cap.`,
   updateErrorGeneric: ({ detail }) => `Something went wrong: ${detail}`,
   updateSettingsTitle: 'Updates',
   updateSettingsHint:
-    'Checks GitHub Releases every 12 hours. An in-place update writes the release into the unpacked install folder; reload the extension to switch versions.',
+    'Checks GitHub Releases every 12 hours; a failed check retries automatically with backoff. An in-place update writes the release into the unpacked install folder; reload the extension to switch versions.',
   updateCheckNow: 'Check for updates',
   updateChecking: 'Checking…',
   updateUpToDate: 'You are on the latest version.',
@@ -4644,7 +4648,8 @@ const zhCN: Messages = {
   updateProgressDone: '完成',
   updateErrorTitle: '更新失败',
   updateErrorNetwork: '无法连接 GitHub，请检查网络后重试。',
-  updateErrorRateLimited: 'GitHub 正在限制更新检查频率，请稍后重试。',
+  updateErrorRateLimited: 'GitHub 暂时限制了更新检查频率，扩展会自动重试。',
+  updateRetryScheduled: ({ time }) => `将在 ${time} 自动重试。`,
   updateErrorHttp: 'GitHub 返回了异常响应，请稍后重试。',
   updateErrorInvalidRelease: '无法读取最新版本信息。',
   updateErrorAssetMissing: '该版本没有适用于当前构建的安装包。',
@@ -4664,7 +4669,7 @@ const zhCN: Messages = {
   updateErrorGeneric: ({ detail }) => `出现错误：${detail}`,
   updateSettingsTitle: '更新',
   updateSettingsHint:
-    '每 12 小时检查一次 GitHub Releases。直接更新会把发布文件写入未打包扩展的安装目录；重新加载扩展后切换版本。',
+    '每 12 小时检查一次 GitHub Releases；检查失败会按退避自动重试。直接更新会把发布文件写入未打包扩展的安装目录；重新加载扩展后切换版本。',
   updateCheckNow: '检查更新',
   updateChecking: '正在检查……',
   updateUpToDate: '当前已是最新版本。',

@@ -297,7 +297,7 @@ import { initLastTabTracker } from './last-tab'
 import { rescheduleAll, scheduleTask, triggerNow, onAlarm } from './scheduler'
 import { FeishuBot, FEISHU_WATCHDOG_ALARM } from './feishu-bot'
 import { checkForUpdates, ensureUpdateAlarm } from './update-checker'
-import { UPDATE_CHECK_ALARM } from '../lib/update/types'
+import { UPDATE_CHECK_ALARM, UPDATE_RETRY_ALARM } from '../lib/update/types'
 import { isWebhookUrl, sendWebhookText } from '../lib/feishu'
 import { agentClient } from './agent-client'
 import { trimOutboxToBudget } from '../lib/fs-outbox'
@@ -476,8 +476,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       feishuBot.onWatchdog()
       return
     }
-    if (alarm.name === UPDATE_CHECK_ALARM) {
-      void checkForUpdates().catch((error: unknown) =>
+    if (alarm.name === UPDATE_CHECK_ALARM || alarm.name === UPDATE_RETRY_ALARM) {
+      // The retry alarm already waited out the backoff, so force past the guard.
+      const force = alarm.name === UPDATE_RETRY_ALARM
+      void checkForUpdates({ force }).catch((error: unknown) =>
         console.error('[Browser Copilot] update check failed', error),
       )
       return

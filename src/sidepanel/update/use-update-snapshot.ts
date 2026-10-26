@@ -144,7 +144,12 @@ export function useUpdateSnapshot(options: { autoCheck?: boolean } = {}): Update
   useEffect(() => {
     if (!options.autoCheck || !loaded || didAutoCheck.current) return
     didAutoCheck.current = true
-    if (!state) void checkNow(false)
+    const retryDue =
+      state !== null &&
+      state.error !== null &&
+      typeof state.retryAt === 'number' &&
+      state.retryAt <= Date.now()
+    if (!state || retryDue) void checkNow(false)
   }, [options.autoCheck, loaded, state, checkNow])
 
   const dismiss = useCallback(async (version: string) => {

@@ -14,6 +14,7 @@ import {
   UPDATE_CHECK_ALARM,
   UPDATE_CHECK_INTERVAL_MINUTES,
   UPDATE_LATEST_API_URL,
+  UPDATE_RETRY_ALARM,
   UPDATE_STATE_KEY,
   UpdateFailure,
   type UpdateState,
@@ -56,7 +57,20 @@ async function runCheck(force: boolean): Promise<UpdateState> {
     fetchPayload: fetchLatestReleasePayload,
   })
   await chrome.storage.local.set({ [UPDATE_STATE_KEY]: state })
+  await scheduleRetryAlarm(state)
   return state
+}
+
+/**
+ * A failed transient check schedules one retry before the 12h tick; success
+ * clears it. The alarm is one-shot, so a stuck GitHub cannot pile up retries.
+ */
+async function scheduleRetryAlarm(state: UpdateState): Promise<void> {
+  if (state.error && typeof state.retryAt === 'number') {
+    await chrome.alarms.create(UPDATE_RETRY_ALARM, { when: state.retryAt })
+  } else {
+    await chrome.alarms.clear(UPDATE_RETRY_ALARM)
+  }
 }
 
 async function fetchLatestReleasePayload(): Promise<unknown> {
@@ -75,7 +89,21 @@ async function fetchLatestReleasePayload(): Promise<unknown> {
       response.status === 429 ||
       (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
     if (rateLimited) {
-      throw new UpdateFailure('rate-limited', 'GitHub API rate limit reached; try again later.')
+      // GitHub publishes when the shared IP quota resets; a retry at that
+      // instant is what turns a transient 403 back into a working update.
+      const reset = Number(response.headers.get('x-ratelimit-reset'))
+      const retryAfter = Number(response.headers.get('retry-after'))
+      const retryAt =
+        Number.isFinite(reset) && reset > 0
+          ? reset * 1000
+          : Number.isFinite(retryAfter) && retryAfter > 0
+            ? Date.now() + retryAfter * 1000
+            : undefined
+      throw new UpdateFailure(
+        'rate-limited',
+        'GitHub API rate limit reached; retrying automatically.',
+        retryAt,
+      )
     }
     if (!response.ok) {
       throw new UpdateFailure('http', `GitHub returned HTTP ${response.status}.`)

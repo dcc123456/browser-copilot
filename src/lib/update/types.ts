@@ -18,6 +18,8 @@ export const UPDATE_DISMISSED_KEY = 'update.dismissedVersion'
 export const UPDATE_PENDING_KEY = 'update.pendingReloadVersion'
 export const UPDATE_CHECK_ALARM = 'update-check'
 export const UPDATE_CHECK_INTERVAL_MINUTES = 12 * 60
+/** One-shot alarm used to retry a transient failure before the next 12h tick. */
+export const UPDATE_RETRY_ALARM = 'update-retry'
 
 /** Which build produced this extension; decides the release asset. */
 export type UpdateVariant = 'ocr' | 'no-ocr' | 'firefox'
@@ -56,6 +58,10 @@ export interface UpdateState {
   asset: UpdateAssetInfo | null
   available: boolean
   error: UpdateCheckError | null
+  /** Consecutive transient failures; absent on states written before retries existed. */
+  failures?: number
+  /** Epoch ms of the next automatic retry, or `null` when nothing is scheduled. */
+  retryAt?: number | null
 }
 
 export type UpdateStage =
@@ -75,11 +81,14 @@ export interface UpdateProgress {
 /** Error code surfaced to the UI when a check or an apply step fails. */
 export class UpdateFailure extends Error {
   readonly code: UpdateCheckErrorCode
+  /** Epoch ms GitHub said the quota resets, when it told us. */
+  readonly retryAt?: number
 
-  constructor(code: UpdateCheckErrorCode, message: string) {
+  constructor(code: UpdateCheckErrorCode, message: string, retryAt?: number) {
     super(message)
     this.name = 'UpdateFailure'
     this.code = code
+    this.retryAt = retryAt
   }
 }
 

@@ -6,7 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-_To be released._
+### Fixed — Rate-limited update checks retry themselves
+
+A GitHub quota rejection used to leave the updater showing an error until the
+next 12-hour alarm, so a released build could sit unfound for most of a day.
+A rate-limited or offline check now schedules a one-shot retry — at the reset
+time GitHub reports when it sends one, otherwise with exponential backoff from
+15 minutes up to 6 hours. Startup checks and panel mounts leave the stored
+state alone until that retry is due, a successful check clears the failure
+counter, and the update card states when the retry will run.
 
 ## [0.6.10] - 2026-10-26
 

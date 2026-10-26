@@ -260,4 +260,37 @@ describe('the settings card', () => {
     expect(container.textContent).toContain('You are on the latest version.')
     expect(buttonByText(container, 'Update now')).toBeUndefined()
   })
+
+  it('states the scheduled retry and leaves a pending one alone', async () => {
+    const state: UpdateState = {
+      ...availableState(),
+      available: false,
+      latest: null,
+      asset: null,
+      error: { code: 'rate-limited', message: 'limited' },
+      failures: 1,
+      retryAt: Date.now() + 60 * 60_000,
+    }
+    const { sendMessageSpy } = installChrome({ state })
+    const container = await render(createElement(UpdateSettingsCard))
+
+    expect(container.textContent).toContain('Automatic retry at')
+    expect(sendMessageSpy).not.toHaveBeenCalled()
+  })
+
+  it('re-checks once the scheduled retry has come due', async () => {
+    const state: UpdateState = {
+      ...availableState(),
+      available: false,
+      latest: null,
+      asset: null,
+      error: { code: 'network', message: 'offline' },
+      failures: 2,
+      retryAt: Date.now() - 1_000,
+    }
+    const { sendMessageSpy } = installChrome({ state })
+    await render(createElement(UpdateSettingsCard))
+
+    expect(sendMessageSpy).toHaveBeenCalledWith({ type: 'update.check', force: false })
+  })
 })

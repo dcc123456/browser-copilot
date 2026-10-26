@@ -22,15 +22,15 @@ const SECONDARY_BUTTON =
 export default function UpdateSettingsCard(): ReactElement {
   const t = useT()
   const { locale } = useI18n()
-  const snapshot = useUpdateSnapshot()
+  const snapshot = useUpdateSnapshot({ autoCheck: true })
   const [dialogOpen, setDialogOpen] = useState(false)
 
   const state = snapshot.state
   const latest = state?.available ? state.latest : null
   const errorText = state?.error ? describeCheckError(t, state.error) : null
-  const checkedAt = state?.checkedAt
-    ? new Date(state.checkedAt).toLocaleString(locale === 'zh-CN' ? 'zh-CN' : 'en-US')
-    : null
+  const dateLocale = locale === 'zh-CN' ? 'zh-CN' : 'en-US'
+  const checkedAt = state?.checkedAt ? new Date(state.checkedAt).toLocaleString(dateLocale) : null
+  const retryAt = state?.retryAt ? new Date(state.retryAt).toLocaleString(dateLocale) : null
 
   let status: string
   let statusClass: string
@@ -64,6 +64,11 @@ export default function UpdateSettingsCard(): ReactElement {
       {latest && errorText && (
         <p className="mt-1 mb-0 text-[11px] leading-relaxed text-warn">
           {t.updateCheckFailed({ detail: errorText })}
+        </p>
+      )}
+      {state?.error && retryAt && (
+        <p className="mt-1 mb-0 text-[11px] leading-relaxed text-warn">
+          {t.updateRetryScheduled({ time: retryAt })}
         </p>
       )}
       {latest && !snapshot.canApply && (

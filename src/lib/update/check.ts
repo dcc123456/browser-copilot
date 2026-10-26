@@ -9,10 +9,30 @@
  */
 
 import { parseLatestRelease } from './release'
-import { UpdateFailure, type UpdateCheckError, type UpdateState, type UpdateVariant } from './types'
+import {
+  UpdateFailure,
+  type UpdateCheckError,
+  type UpdateCheckErrorCode,
+  type UpdateState,
+  type UpdateVariant,
+} from './types'
 
 /** Avoid hammering GitHub when several startup events fire close together. */
 export const UPDATE_MIN_CHECK_INTERVAL_MS = 5 * 60_000
+
+/** First retry after a transient failure; doubles per consecutive failure. */
+export const UPDATE_RETRY_BASE_MS = 15 * 60_000
+/** Retries stop growing here; the 12h periodic alarm takes over. */
+export const UPDATE_RETRY_MAX_MS = 6 * 60 * 60_000
+const UPDATE_RETRY_FLOOR_MS = 30_000
+
+const RETRYABLE_CODES: ReadonlySet<UpdateCheckErrorCode> = new Set(['network', 'rate-limited'])
+
+/** Exponential backoff for the Nth consecutive transient failure (1-based). */
+export function updateRetryDelayMs(failures: number): number {
+  const exponent = Math.max(0, failures - 1)
+  return Math.min(UPDATE_RETRY_BASE_MS * 2 ** exponent, UPDATE_RETRY_MAX_MS)
+}
 
 export interface UpdateCheckInput {
   currentVersion: string
@@ -26,15 +46,20 @@ export interface UpdateCheckInput {
 
 export async function performUpdateCheck(input: UpdateCheckInput): Promise<UpdateState> {
   const { previous } = input
-  if (
-    !input.force &&
-    previous &&
-    !previous.error &&
-    previous.currentVersion === input.currentVersion &&
-    input.now - previous.checkedAt >= 0 &&
-    input.now - previous.checkedAt < UPDATE_MIN_CHECK_INTERVAL_MS
-  ) {
-    return previous
+  if (!input.force && previous) {
+    // A scheduled retry is a promise to the user: do not let a startup or a
+    // second panel mount spend the shared IP quota before it is due.
+    if (previous.error && typeof previous.retryAt === 'number' && input.now < previous.retryAt) {
+      return previous
+    }
+    if (
+      !previous.error &&
+      previous.currentVersion === input.currentVersion &&
+      input.now - previous.checkedAt >= 0 &&
+      input.now - previous.checkedAt < UPDATE_MIN_CHECK_INTERVAL_MS
+    ) {
+      return previous
+    }
   }
 
   try {
@@ -50,9 +75,17 @@ export async function performUpdateCheck(input: UpdateCheckInput): Promise<Updat
       asset: parsed.asset,
       available: parsed.available,
       error: null,
+      failures: 0,
+      retryAt: null,
     }
   } catch (error) {
     const failure = toCheckError(error)
+    const failures = (previous?.failures ?? 0) + 1
+    const retryable = RETRYABLE_CODES.has(failure.code)
+    const requestedAt =
+      retryable && error instanceof UpdateFailure
+        ? (error.retryAt ?? input.now + updateRetryDelayMs(failures))
+        : null
     return {
       // Keep the last successful timestamp so the UI can say when we last
       // reached GitHub; the error explains why this attempt failed.
@@ -62,8 +95,15 @@ export async function performUpdateCheck(input: UpdateCheckInput): Promise<Updat
       asset: previous?.asset ?? null,
       available: previous?.available ?? false,
       error: failure,
+      failures,
+      retryAt: requestedAt === null ? null : clampRetryAt(requestedAt, input.now),
     }
   }
+}
+
+/** Keep a server-provided reset inside a sane window (clock skew, bad headers). */
+function clampRetryAt(candidate: number, now: number): number {
+  return Math.min(Math.max(candidate, now + UPDATE_RETRY_FLOOR_MS), now + UPDATE_RETRY_MAX_MS)
 }
 
 function toCheckError(error: unknown): UpdateCheckError {

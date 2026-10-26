@@ -125,10 +125,15 @@ interface UpdateState {
   asset: UpdateAssetInfo | null
   available: boolean
   error: UpdateCheckError | null
+  /** 连续瞬时失败次数；旧状态里可能不存在。 */
+  failures?: number
+  /** 下一次自动重试的时间戳；`null` 表示没有安排重试。 */
+  retryAt?: number | null
 }
 ```
 
 - 后台 `src/background/update-checker.ts`：`update-check` alarm（12h，安装/启动时立即检查一次）、`checkForUpdates({force})`、写入 `chrome.storage.local` key `update.state`。
+- 瞬时失败（`network` / `rate-limited`）安排一次性 `update-retry` alarm：优先用 GitHub 响应头里的 `x-ratelimit-reset` 或 `Retry-After`，否则按 15 分钟起步、逐次翻倍、上限 6 小时的退避；重试时间被夹在「当前 +30s」到「当前 +6h」之间。成功检查清除 `failures` / `retryAt` 与重试 alarm。`update-retry` 触发时强制绕过新鲜度守卫；重试到期前，启动检查与面板挂载都复用已存状态，不再消耗共享 IP 配额。
 - 侧边栏通过 `chrome.storage.onChanged` 读取状态；手动检查发 `{ type: 'update.check', force: true }`，返回 `{ type: 'update.state', state }`。
 - 免责/关闭：`update.dismissedVersion` 存 `chrome.storage.local`；新版本出现时自然重新显示。
 - 已写入待重载：`update.pendingReloadVersion`；banner 显示 “已下载，Reload 生效”，重载后新版本发现 `pending <= current` 时清除。
@@ -160,6 +165,7 @@ interface UpdateState {
 
 ## 6. 失败与恢复
 
+- GitHub 限流（403 + `x-ratelimit-remaining: 0` / 429）：保留上次成功结果，状态卡显示错误与「将在 … 自动重试」；到点由 `update-retry` alarm 自动复查，无需用户操作。
 - 下载/校验/解压失败：不写任何文件；对话框给出错误 + “打开 Release 页面”。
 - 目录选择取消：静默返回，不报错。
 - 目录校验失败：提示选择含 `manifest.json` 的安装文件夹；不下载。
