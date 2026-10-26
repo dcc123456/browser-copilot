@@ -8,6 +8,56 @@ All notable changes to this project are documented here. The format is based on
 
 _To be released._
 
+## [0.6.10] - 2026-10-26
+
+### Added — A workflow marketplace with no new server
+
+Workflows are now shared through the public GitHub repository that already
+backs the project. Publishing starts from the workflow card: category, tags,
+cover, video and up to three attachments of 200 KB each are written to
+`workflows/<slug>/` through a fork and a pull request, and the maintainer
+merges it by hand. 工作流广场 lists every published workflow with its author,
+category, tags and engagement; search, category filters and sorting narrow the
+list, and likes and comments ride the merged PR's reactions and thread. Applying
+a card asks for a trust confirmation first, installs a local copy with its
+triggers disabled (never auto-run), and reuses that copy on a later apply
+instead of stacking duplicates. Installed workflows show an update reminder when
+the publisher moved ahead — a newer version, or a changed content hash at the
+same version, so a listing that was removed and re-added under an old number
+still reaches its users; a published version below the installed one is never
+offered. Updating replaces the steps, trigger and settings while keeping the
+local id, folder and creation time. Authors can re-edit a published workflow
+(title, description, category, tags, video, images and attachments prefill) and
+unpublish it through a deletion PR. A workflow that calls other workflows
+bundles them into the same publication, and applying the bundle rewrites those
+calls to deterministic local copies. Categories gained more built-ins and
+publisher-defined entries. The marketplace card renders author, category and
+tags as three distinct chips (neutral, filled accent, bordered `#`).
+
+### Fixed — Storage reliability and lost folders
+
+Switching the storage folder now carries the departing folder's data first:
+collections merge per record, transcripts and checkpoints travel whole, skills
+and agents land per entity file unless the adopted folder holds a newer copy,
+and config never moves. A permission still pending is re-granted in the same
+click, and a switch that cannot be completed is refused with a reconnect hint
+instead of dropping the only copy. Directory changes are announced to every
+context and the background's cached handle is dropped, so writes stop landing in
+the old folder. A permission downgraded to `prompt` by an extension update is
+re-tried when the panel becomes visible or the window regains focus. Editing a
+workflow that is already open focuses its editor window instead of opening a
+second copy, and a newly created workflow records its editor URL as soon as the
+graph loads.
+
+### Fixed — Marketplace reads
+
+A raw-host response is cached for five minutes, 404s included, so the refresh
+right after a merge could miss the new listing; metadata reads now bypass that
+cache with a unique query while the API reads stay the same. A tree that lists
+workflows but yields no readable metadata is treated as a failed read instead of
+caching an empty catalog, an empty repository reads as an empty catalog, and a
+failed GitHub connection reports its real cause.
+
 ## [0.6.9] - 2026-10-24
 
 ### Added — Automa-aligned control flow and operators
