@@ -131,6 +131,60 @@ select the generated **`dist/`** folder. After pulling new changes, re-run
 `pnpm run build` and press **Reload** on the extension card — a rebuild alone
 does not refresh an already-loaded service worker.
 
+#### Updating an existing install
+
+Your data belongs to the extension ID, not to the version: settings, workflows,
+chats, tasks and permission grants stay as long as the extension keeps the same
+ID. Chrome derives an unpacked extension's ID from its **absolute folder path**
+(this manifest has no fixed `key`), so replacing files **inside the folder you
+already loaded** is safe, while loading the new zip from a **different folder**
+creates a second, empty extension.
+
+**On 0.6.8 and later — automatic:**
+
+1. The extension checks GitHub Releases every 12 hours and heals a stale check
+   when you open the panel. When a newer version exists, a banner appears in the
+   side panel — click **Update** — or use **Settings → Updates → Check for
+   updates**.
+2. The first update asks for the folder you originally loaded (the one directly
+   containing `manifest.json`) and for write permission once. Later updates
+   reuse it and ask nothing.
+3. It downloads the matching variant, verifies the release's SHA-256 digest,
+   backs up the files it replaces into
+   `browser-copilot-backup-<old-version>-<timestamp>/` inside the install folder
+   (the backup's manifest is `manifest.json.bak`, so the folder cannot be loaded
+   as a second extension), then writes the new build. Chrome keeps running the
+   old version until you choose **Reload now**; **Later** leaves the files in
+   place and the banner reminds you.
+4. Delete the backup folder once the new version works. The updater keeps your
+   variant (ocr or no-ocr) and never touches stored data.
+
+**From 0.6.7 or earlier — one manual swap, then automatic:** builds before
+0.6.8 have no updater, so replace the files in place once:
+
+1. Locate the folder the extension was loaded from — the folder you unzipped at
+   install time, the one that directly contains `manifest.json`.
+2. Download the release zip of the **same variant** and unzip it into a
+   temporary folder.
+3. Close the side panel. Replace the **contents** of the old folder with the new
+   build's contents: delete the old files first, or copy over them choosing
+   "replace". Keep the folder itself and its path — do not rename or move it.
+4. Open `chrome://extensions` and press **Reload** on the Browser Copilot card.
+   Do **not** press **Remove**: removing an extension deletes its stored data.
+5. Open the side panel and confirm the version under **Settings → Updates**.
+   From this point on the automatic updater handles later versions.
+
+Never load the new zip from a new folder while the old one is installed, and
+never move or rename the loaded folder: either changes the derived ID, so
+Chrome treats it as a different extension and your old data stays hidden under
+the old ID. If you configured a storage location (**Settings → Storage
+location**), your workflows and chats are real files in that folder and are
+unaffected either way; you may need to re-grant access to it after the swap.
+
+To switch between the ocr and no-ocr variants, use the manual swap above — the
+automatic updater only follows the variant you have installed. Firefox builds do
+not self-update; repeat the install-from-file flow from the release notes.
+
 ### 2. Add a model
 
 Open the side panel → **Settings → Add a provider**.
