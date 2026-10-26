@@ -11,8 +11,9 @@
  *   - an SPA route change (pushState/replace)  -> `open-url`
  * The initial page load of tabs open at start is ignored; reloads and the
  * navigation implied by a recorded anchor click are de-duped. On stop, the
- * flows are converted into a saved workflow via flowsToWorkflow and the editor
- * opens it.
+ * flows are converted into a workflow: the workflows list persists it and
+ * opens the editor, while the editor itself asks for the graph only and
+ * appends the steps to the canvas it already has.
  *
  * @module background/record-controller
  */
@@ -20,6 +21,7 @@
 import { startRecorder } from '../inpage/record'
 import { isInjectablePage } from '../lib/pages'
 import { flowsToWorkflow, type RecordedFlow } from '../lib/workflow/record-convert'
+import type { Workflow } from '../lib/workflow/types'
 import { newId } from '../lib/storage'
 import { saveWorkflow, getWorkflow } from '../lib/workflow/storage'
 
@@ -100,14 +102,16 @@ export async function startRecording(windowId?: number): Promise<void> {
   await injectIntoAllTabs(windowId)
 }
 
-export async function stopRecording(): Promise<string | undefined> {
-  if (!state) return undefined
+export async function stopRecording(
+  save = true,
+): Promise<{ workflowId?: string; workflow?: Workflow }> {
+  if (!state) return {}
   // The recorder's own scope (set at start) decides which tabs to clean up —
   // not the stop command's, so a scope change mid-recording cannot leak.
   const scopedWindowId = state.windowId
   const flows = state.flows
   const wf = flowsToWorkflow(flows)
-  await saveWorkflow(wf)
+  if (save) await saveWorkflow(wf)
   const finished = state
   state = null
   setBadge(false)
@@ -129,7 +133,7 @@ export async function stopRecording(): Promise<string | undefined> {
     ),
   )
   void finished
-  return wf.id
+  return { workflow: wf, ...(save ? { workflowId: wf.id } : {}) }
 }
 
 export function isRecording(): boolean {

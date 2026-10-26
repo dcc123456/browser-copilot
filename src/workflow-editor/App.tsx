@@ -21,6 +21,7 @@ import {
   useReactFlow,
   applyNodeChanges,
   applyEdgeChanges,
+  getNodesBounds,
   type Node,
   type Edge,
   type Connection,
@@ -62,8 +63,9 @@ import {
 import type { SecretFieldRef } from '../lib/workflow/secret-params'
 import { withoutNodeAddedByAi } from '../lib/workflow/node-goal-contract'
 import { nodeRunIssuesOf } from '../lib/workflow/validation'
+import { appendRecordedWorkflow } from '../lib/workflow/record-append'
 import { sendCommand } from '../lib/messages'
-import { editorUrl, hostWindowId, rememberEditedWorkflow } from './host-window'
+import { hostWindowId, rememberEditedWorkflow } from './host-window'
 import { autoReconnectStorage } from '../lib/fs-reconnect'
 import { getSettings } from '../lib/storage'
 import { newId } from '../lib/storage'
@@ -102,6 +104,8 @@ import {
   nodeDragStep,
   pushCanvasSnapshot,
   removesAnything,
+  takeRedo,
+  takeUndo,
   type CanvasSnapshot,
 } from './graph-history'
 import { SlashMenuProvider } from './blocks/shared/SlashVariableMenu'
@@ -115,6 +119,7 @@ import WorkflowGoalModal from './sidebar/WorkflowGoalModal'
 import type { VerificationReport } from '../background/workflow-engine/goal-verification'
 import type { WorkflowGoalSpec } from '../lib/workflow/reliability'
 import CanvasControls from './toolbar/CanvasControls'
+import BottomToolbar from './toolbar/BottomToolbar'
 import OperatorChatDock, {
   type OperatorApplyRequest,
   type OperatorChatContext,
@@ -129,7 +134,9 @@ import {
   makeEditorLocale,
   type EditorLocale as EditorLocaleValue,
 } from './locale-context'
-import { autoLayout } from './auto-layout'
+import { autoLayout, viewportForBounds } from './auto-layout'
+import DataTablePanel from './ui/DataTablePanel'
+import { dataTableUsage } from './data-table-usage'
 import './editor.css'
 
 const DEFAULT_SETTINGS: WorkflowSettings = {
@@ -226,6 +233,8 @@ export default function EditorApp() {
   const [logsOpen, setLogsOpen] = useState(false)
   /** Whether the workflow-goal modal is open. */
   const [goalOpen, setGoalOpen] = useState(false)
+  /** Whether the data-table explanation panel is open. */
+  const [dataTableOpen, setDataTableOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [paletteWidth, setPaletteWidth] = useState(() => loadWidth('left'))
   /** Node id being edited in the LEFT overlay (Automa: double-click opens the
@@ -276,6 +285,8 @@ export default function EditorApp() {
 
   const reactFlow = useReactFlow()
   const loadedRef = useRef(false)
+  /** Content fingerprint of the last loaded/saved graph; see `contentSignature`. */
+  const savedSignatureRef = useRef<string | null>(null)
 
   // --- undo -------------------------------------------------------------------
   // Ctrl+Z walks back the canvas STRUCTURE (design §D8): a mutation that adds,
@@ -286,17 +297,32 @@ export default function EditorApp() {
   const canvasRef = useRef({ nodes, edges })
   canvasRef.current = { nodes, edges }
   const historyRef = useRef<CanvasSnapshot[]>([])
+  const redoRef = useRef<CanvasSnapshot[]>([])
+  /** Stack sizes for the bottom bar's disabled states. */
+  const [historyCounts, setHistoryCounts] = useState({ undo: 0, redo: 0 })
   /** One node drag is one step, not one step per animation frame. */
   const dragStepOpen = useRef(false)
 
-  const pushHistory = useCallback(() => {
+  const syncHistoryCounts = useCallback(() => {
+    setHistoryCounts({ undo: historyRef.current.length, redo: redoRef.current.length })
+  }, [])
+
+  const canvasSnapshot = useCallback((): CanvasSnapshot => {
     const { nodes: drawn, edges: wired } = canvasRef.current
-    pushCanvasSnapshot(historyRef.current, {
+    return {
       nodes: structuredClone(drawn.map(toWorkflowNode)),
       edges: structuredClone(wired.map(workflowEdgeOf)),
       selectedIds: drawn.filter((node) => node.selected).map((node) => node.id),
-    })
+    }
   }, [])
+
+  const pushHistory = useCallback(() => {
+    pushCanvasSnapshot(historyRef.current, canvasSnapshot())
+    // A fresh edit invalidates the forward path: redo only ever replays the
+    // branch the user was on before they typed/moved/deleted something else.
+    redoRef.current = []
+    syncHistoryCounts()
+  }, [canvasSnapshot, syncHistoryCounts])
 
   /**
    * Put one patched node back onto the canvas without disturbing what React Flow
@@ -344,26 +370,46 @@ export default function EditorApp() {
     [installPatchedNode],
   )
 
+  /** Paint a whole-canvas snapshot back, including what the panels were showing. */
+  const applySnapshot = useCallback(
+    (snapshot: CanvasSnapshot) => {
+      const selected = new Set(snapshot.selectedIds)
+      setNodes(
+        snapshot.nodes.map((node) => ({ ...toFlowNode(node), selected: selected.has(node.id) })),
+      )
+      setEdges(snapshot.edges.map((edge) => ({ ...edge, type: 'custom' })))
+      // A step that removed the node being edited or inspected would otherwise leave
+      // those panels open on a node that no longer exists.
+      const keepPanelFor = (id: string | null) =>
+        id && !snapshot.nodes.some((node) => node.id === id) ? null : id
+      setEditingId(keepPanelFor)
+      setSettingsForId(keepPanelFor)
+      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+    },
+    [setNodes, setEdges],
+  )
+
   const undoCanvasChange = useCallback(() => {
-    const snapshot = historyRef.current.pop()
+    const snapshot = takeUndo(historyRef.current, redoRef.current, canvasSnapshot())
     if (!snapshot) {
       toast.show(t('editorUndoEmpty'), 'info')
       return
     }
-    const selected = new Set(snapshot.selectedIds)
-    setNodes(
-      snapshot.nodes.map((node) => ({ ...toFlowNode(node), selected: selected.has(node.id) })),
-    )
-    setEdges(snapshot.edges.map((edge) => ({ ...edge, type: 'custom' })))
-    // A step that removed the node being edited or inspected would otherwise leave
-    // those panels open on a node that no longer exists.
-    const keepPanelFor = (id: string | null) =>
-      id && !snapshot.nodes.some((node) => node.id === id) ? null : id
-    setEditingId(keepPanelFor)
-    setSettingsForId(keepPanelFor)
-    setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+    applySnapshot(snapshot)
+    syncHistoryCounts()
     toast.show(t('editorUndone'), 'info')
-  }, [setNodes, setEdges, toast, t])
+  }, [applySnapshot, canvasSnapshot, syncHistoryCounts, toast, t])
+
+  const redoCanvasChange = useCallback(() => {
+    const snapshot = takeRedo(historyRef.current, redoRef.current, canvasSnapshot())
+    if (!snapshot) {
+      toast.show(t('editorRedoEmpty'), 'info')
+      return
+    }
+    applySnapshot(snapshot)
+    syncHistoryCounts()
+    toast.show(t('editorRedone'), 'info')
+  }, [applySnapshot, canvasSnapshot, syncHistoryCounts, toast, t])
 
   // The editor is where workflow saves happen, so it must be able to re-grant
   // the storage folder too: after an update, the first click here supplies the
@@ -386,6 +432,7 @@ export default function EditorApp() {
     // Undo is per-workflow, and the stack holds nothing but unsaved canvas steps:
     // loading a graph starts it empty.
     historyRef.current = []
+    savedSignatureRef.current = null
     const params = new URLSearchParams(window.location.search)
     const editId = params.get('edit')
     if (editId) {
@@ -457,9 +504,27 @@ export default function EditorApp() {
     if (workflowId) rememberEditedWorkflow(workflowId)
   }, [workflowId])
 
+  /** What would be persisted right now; measurement and selection churn do not change it. */
+  const contentSignature = useMemo(
+    () =>
+      JSON.stringify({
+        nodes: nodes.map(toWorkflowNode),
+        edges: edges.map(workflowEdgeOf),
+        meta,
+      }),
+    [nodes, edges, meta],
+  )
+
   useEffect(() => {
-    if (loadedRef.current) setDirty(true)
-  }, [nodes, edges, meta])
+    if (!loadedRef.current) return
+    // The first signature after loading is the baseline; a freshly opened
+    // workflow is not an edit, no matter how many measurement renders follow.
+    if (savedSignatureRef.current === null) {
+      savedSignatureRef.current = contentSignature
+      return
+    }
+    setDirty(contentSignature !== savedSignatureRef.current)
+  }, [contentSignature])
 
   // Holding Space box-selects on the canvas. React Flow cannot be asked to watch
   // the key itself here (a trusted Space never reaches its window-level handler,
@@ -768,6 +833,11 @@ export default function EditorApp() {
     setError(null)
     try {
       await sendCommand({ type: 'workflows.save', workflow: wf })
+      savedSignatureRef.current = JSON.stringify({
+        nodes: wf.drawflow.nodes,
+        edges: wf.drawflow.edges,
+        meta,
+      })
       setDirty(false)
       toast.show(t('saved'), 'ok')
       return true
@@ -779,7 +849,7 @@ export default function EditorApp() {
     } finally {
       setSaving(false)
     }
-  }, [buildWorkflow, toast, t])
+  }, [buildWorkflow, meta, toast, t])
 
   const handleRun = useCallback(
     async (startNodeId?: string) => {
@@ -1105,15 +1175,46 @@ export default function EditorApp() {
       const windowId = hostWindowId()
       const windowField = windowId !== undefined ? { windowId } : {}
       if (recording) {
-        const r = await sendCommand({ type: 'record.stop', ...windowField })
+        // `save: false`: the steps belong to the workflow already on screen, so
+        // the recorder must not leave a second copy in the workflows list.
+        const r = await sendCommand({ type: 'record.stop', ...windowField, save: false })
         setRecording(false)
-        toast.show(t('recordingStopped'), 'ok')
-        if (r.type === 'record.stop' && r.workflowId) {
-          // editorUrl() re-appends hostWindow so the reopened editor stays
-          // bound to the same window after the reload.
-          window.location.search = editorUrl(`?edit=${encodeURIComponent(r.workflowId)}`, windowId)
-          window.location.reload()
+        if (r.type === 'record.stop' && r.workflow) {
+          const appended = appendRecordedWorkflow(
+            { nodes: nodes.map(toWorkflowNode), edges: edges.map(workflowEdgeOf) },
+            r.workflow,
+          )
+          if (appended.addedNodeIds.length === 0) {
+            toast.show(t('recordingEmpty'), 'info')
+            return
+          }
+          pushHistory()
+          const added = new Set(appended.addedNodeIds)
+          setNodes(
+            appended.nodes.map((node) => ({
+              ...toFlowNode(node),
+              selected: added.has(node.id),
+            })),
+          )
+          setEdges(appended.edges.map((edge) => ({ ...edge, type: 'custom' })))
+          toast.show(
+            t('recordingAppended').replace('{count}', String(appended.addedNodeIds.length)),
+            'ok',
+          )
+          // Bring the new row into view; without this the steps land outside the
+          // current viewport and stopping the recording looks like a no-op.
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              void reactFlow.fitView({
+                nodes: appended.addedNodeIds.map((id) => ({ id })),
+                duration: 400,
+                padding: 0.4,
+              })
+            }),
+          )
+          return
         }
+        toast.show(t('recordingStopped'), 'info')
       } else {
         await sendCommand({ type: 'record.start', ...windowField })
         setRecording(true)
@@ -1124,13 +1225,16 @@ export default function EditorApp() {
       setError(msg)
       toast.show(`${t('recordStartFailed')}: ${msg}`, 'error')
     }
-  }, [recording, toast, t])
+  }, [recording, nodes, edges, pushHistory, reactFlow, toast, t])
 
   const handleAutoLayout = useCallback(() => {
-    // Pack Z-shaped rows to the live canvas width so that, once the editor
-    // fits the view, every node stays inside the viewport at a readable zoom.
+    // Pack Z-shaped rows to the canvas width the LEFT SIDEBAR leaves visible:
+    // the panel is an absolute overlay, so using the raw `.react-flow` width
+    // pushed the first column underneath it.
     const rect = document.querySelector('.react-flow')?.getBoundingClientRect()
-    const maxRowWidth = rect && rect.width > 320 ? rect.width - 24 : undefined
+    const leftInset = paletteOpen ? paletteWidth : 0
+    const maxRowWidth =
+      rect && rect.width - leftInset > 320 ? rect.width - leftInset - 48 : undefined
     pushHistory()
     setNodes((nds) => {
       const layoutNodes = nds.map((n) => ({
@@ -1147,16 +1251,25 @@ export default function EditorApp() {
         return p ? { ...n, position: p } : n
       })
     })
-    // Fit view once React Flow has rendered the moved nodes. A bare timeout
-    // can fire before the store picks up the new positions and leave nodes
-    // outside the viewport, so wait for two animation frames instead.
+    // Fit once React Flow has rendered the moved nodes. A bare timeout can fire
+    // before the store picks up the new positions and leave nodes outside the
+    // viewport, so wait for two animation frames instead. The viewport is
+    // computed for the visible area, not the overlaid full canvas.
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        void reactFlow.fitView({ duration: 400, padding: 0.2 })
+        if (!rect) {
+          void reactFlow.fitView({ duration: 400, padding: 0.2 })
+          return
+        }
+        const bounds = getNodesBounds(reactFlow.getNodes())
+        void reactFlow.setViewport(
+          viewportForBounds(bounds, { width: rect.width, height: rect.height }, leftInset, 48),
+          { duration: 400 },
+        )
       }),
     )
     toast.show(t('autoLayoutDone'), 'ok')
-  }, [edges, pushHistory, reactFlow, toast, t])
+  }, [edges, paletteOpen, paletteWidth, pushHistory, reactFlow, toast, t])
 
   // --- keyboard shortcuts ----------------------------------------------------
   useEffect(() => {
@@ -1171,6 +1284,14 @@ export default function EditorApp() {
       } else if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         document.querySelector<HTMLButtonElement>('.wf-search .wf-icon-btn')?.click()
+      } else if (
+        mod &&
+        (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))
+      ) {
+        // Ctrl+Y / Ctrl+Shift+Z / Cmd+Shift+Z: replay a step that undo took away.
+        if (isEditableTarget(e.target)) return
+        e.preventDefault()
+        redoCanvasChange()
       } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'z') {
         // Ctrl+Z / Cmd+Z: walk the canvas back one step. While the user is typing
         // IN a field the key belongs to that field (its own undo history), so the
@@ -1191,7 +1312,7 @@ export default function EditorApp() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleSave, handleRun, dirty, undoCanvasChange])
+  }, [handleSave, handleRun, dirty, undoCanvasChange, redoCanvasChange])
 
   // Save / Don't save / Cancel prompt for closing the popup window with
   // unsaved changes. Resolves the user's choice, then either saves and
@@ -1253,6 +1374,25 @@ export default function EditorApp() {
   const selectedIds = useMemo(
     () => new Set(nodes.filter((n) => n.selected).map((n) => n.id)),
     [nodes],
+  )
+
+  const tableUsage = useMemo(() => dataTableUsage(nodes.map(toWorkflowNode)), [nodes])
+
+  /** Pick and center one node from the data-table panel. */
+  const focusTableNode = useCallback(
+    (id: string) => {
+      const node = nodes.find((n) => n.id === id)
+      if (!node) return
+      setNodes((nds) => nds.map((n) => ({ ...n, selected: n.id === id })))
+      setDataTableOpen(false)
+      const width = node.measured?.width ?? 200
+      const height = node.measured?.height ?? 64
+      void reactFlow.setCenter(node.position.x + width / 2, node.position.y + height / 2, {
+        zoom: reactFlow.getZoom(),
+        duration: 300,
+      })
+    },
+    [nodes, reactFlow],
   )
 
   /**
@@ -1613,14 +1753,15 @@ export default function EditorApp() {
           testingMode={testingMode}
           onToggleTesting={() => setTestingMode((on) => !on)}
           saving={saving}
+          dirty={dirty}
           running={running}
           recording={recording}
           onSave={() => void handleSave()}
           onRun={() => void handleRun()}
           onOpenLogs={() => setLogsOpen(true)}
           onOpenGoal={() => setGoalOpen(true)}
+          onOpenDataTable={() => setDataTableOpen(true)}
           onToggleRecording={() => void toggleRecording()}
-          onAutoLayout={handleAutoLayout}
           selectedCount={selectedIds.size}
           onPackSelection={packSelection}
           repair={repairStatus}
@@ -1695,6 +1836,15 @@ export default function EditorApp() {
             <CanvasControls nodes={nodes} t={t} />
           </ReactFlow>
 
+          <BottomToolbar
+            canUndo={historyCounts.undo > 0}
+            canRedo={historyCounts.redo > 0}
+            onUndo={undoCanvasChange}
+            onRedo={redoCanvasChange}
+            onAutoLayout={handleAutoLayout}
+            t={t}
+          />
+
           {/* Left: block palette; the edit form OVERLAYS it while editing
           (Automa: double-click a node to edit, back arrow returns). */}
           <Sidebar
@@ -1705,6 +1855,7 @@ export default function EditorApp() {
           >
             <div className="flex h-full min-h-0 flex-col">
               <WorkflowSidebarHeader
+                workflowId={workflowId}
                 workflowName={meta.name}
                 workflowIcon={meta.icon}
                 dirty={dirty}
@@ -1806,6 +1957,12 @@ export default function EditorApp() {
             t={t}
           />
         )}
+        <DataTablePanel
+          open={dataTableOpen}
+          onClose={() => setDataTableOpen(false)}
+          usage={tableUsage}
+          onFocusNode={focusTableNode}
+        />
         <LogsModal
           open={logsOpen}
           onClose={() => setLogsOpen(false)}

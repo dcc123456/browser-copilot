@@ -1,9 +1,10 @@
 /**
  * Top toolbar — compact Automa-style controls in an in-flow row.
  *
- * Left group: palette toggle + Editor/Logs tabs. Right group: debug/testing,
- * auto-layout, group-pack (when a chain is selected), record, a labelled Save
- * and Run. The workflow name/rename live in the left sidebar header.
+ * Left group: palette toggle + Editor/Logs/Goal/Data-table tabs. Right group:
+ * debug/testing, group-pack (when a chain is selected), record, a labelled Save
+ * (with an unsaved-changes dot) and Run. Canvas history and auto-layout live in
+ * the bottom toolbar. The workflow name/rename live in the left sidebar header.
  *
  * @module workflow-editor/toolbar/TopToolbar
  */
@@ -21,9 +22,9 @@ import {
   Play,
   Save,
   SquareTerminal,
+  Table2,
   Target,
   TriangleAlert,
-  WandSparkles,
   X,
 } from 'lucide-react'
 import type { TranslateFn } from '../i18n'
@@ -37,14 +38,15 @@ export default function TopToolbar({
   testingMode,
   onToggleTesting,
   saving,
+  dirty,
   running,
   recording,
   onSave,
   onRun,
   onOpenLogs,
   onOpenGoal,
+  onOpenDataTable,
   onToggleRecording,
-  onAutoLayout,
   selectedCount,
   onPackSelection,
   repair,
@@ -60,6 +62,8 @@ export default function TopToolbar({
   testingMode: boolean
   onToggleTesting: () => void
   saving: boolean
+  /** Canvas differs from the saved workflow — drives the Save-button dot. */
+  dirty: boolean
   running: boolean
   recording: boolean
   onSave: () => void
@@ -68,8 +72,9 @@ export default function TopToolbar({
   onOpenLogs: () => void
   /** Open the workflow-goal modal. */
   onOpenGoal: () => void
+  /** Open the data-table explanation panel. */
+  onOpenDataTable: () => void
   onToggleRecording: () => void
-  onAutoLayout: () => void
   /** How many canvas nodes are selected right now. */
   selectedCount: number
   /** Fold the selected chain into one group node. */
@@ -110,6 +115,15 @@ export default function TopToolbar({
         >
           <Target size={14} />
           {t('workflowGoalTab')}
+        </button>
+        <button
+          type="button"
+          className="wf-tab inline-flex items-center gap-1.5"
+          onClick={onOpenDataTable}
+          title={t('dataTableTitle')}
+        >
+          <Table2 size={14} />
+          {t('dataTable')}
         </button>
       </div>
 
@@ -174,14 +188,6 @@ export default function TopToolbar({
         >
           <Pause size={14} />
         </button>
-        <button
-          type="button"
-          className="wf-icon-btn"
-          title={t('autoLayout')}
-          onClick={onAutoLayout}
-        >
-          <WandSparkles size={14} />
-        </button>
         {/* Packing only ever makes sense for a chain, so the button waits for a
             real selection instead of turning a single click into a surprise. */}
         {selectedCount >= 2 && (
@@ -206,13 +212,20 @@ export default function TopToolbar({
         </button>
         <button
           type="button"
-          className="wf-btn-accent inline-flex h-8 items-center gap-1.5 rounded-lg border-none px-3 text-[13px] font-semibold disabled:cursor-default disabled:opacity-50"
+          className="wf-btn-accent relative inline-flex h-8 items-center gap-1.5 rounded-lg border-none px-3 text-[13px] font-semibold disabled:cursor-default disabled:opacity-50"
           title={`${t('save')} (Ctrl+S)`}
           onClick={onSave}
           disabled={saving}
         >
           {saving ? <LoaderCircle size={14} className="wf-spin" /> : <Save size={14} />}
           <span>{t('save')}</span>
+          {dirty && !saving && (
+            <span
+              className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-danger ring-2 ring-panel"
+              title={t('unsavedChanges')}
+              aria-label={t('unsavedChanges')}
+            />
+          )}
         </button>
         <button
           type="button"

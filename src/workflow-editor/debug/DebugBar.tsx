@@ -35,7 +35,7 @@ export default function DebugBar({
   const [dataOpen, setDataOpen] = useState(false)
   return (
     <>
-      <div className="absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-xl border border-border bg-panel px-3 py-2 shadow-lg">
+      <div className="absolute bottom-20 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-xl border border-border bg-panel px-3 py-2 shadow-lg">
         <span className="mr-1 h-2 w-2 shrink-0 rounded-full bg-err" aria-hidden />
         <span className="shrink-0 text-[11px] text-muted">{t('debugPausedAt')}</span>
         <span className="max-w-56 truncate text-xs font-semibold text-ink" title={pause.label}>

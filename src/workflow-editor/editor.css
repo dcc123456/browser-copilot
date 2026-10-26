@@ -420,7 +420,8 @@
   left: 16px;
 }
 .wf-canvas-bottom-right {
-  right: 16px;
+  /* Clear the 200px minimap (15px inset) so zoom controls sit left of it. */
+  right: 231px;
 }
 .wf-search,
 .wf-zoom {
@@ -902,7 +903,8 @@
 /* --- Toasts -------------------------------------------------------------- */
 .wf-toasts {
   position: absolute;
-  bottom: 20px;
+  /* Above the floating bottom toolbar (bottom-4 + button height). */
+  bottom: 76px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 40;

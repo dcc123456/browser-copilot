@@ -533,8 +533,16 @@ export type Command =
    * when given — the editor's host window), sets the rec badge.
    */
   | { type: 'record.start'; windowId?: number }
-  /** Stop recording and convert the captured blocks into a saved workflow. */
-  | { type: 'record.stop'; windowId?: number }
+  /** Stop recording and convert the captured blocks into a workflow. */
+  | {
+      type: 'record.stop'
+      windowId?: number
+      /**
+       * Persist the recorded workflow under its own id (default true). The
+       * editor sets false to append the steps to the workflow it already has.
+       */
+      save?: boolean
+    }
   /** Whether a recording session is currently active. */
   | { type: 'record.status' }
 
@@ -809,7 +817,12 @@ export type CommandResult =
   | { type: 'workflows.takeoverDiscard' }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
   | { type: 'record.start'; recording: boolean }
-  | { type: 'record.stop'; workflowId?: string }
+  | {
+      type: 'record.stop'
+      workflowId?: string
+      /** The converted graph, so the editor can append it without reloading. */
+      workflow?: Workflow
+    }
   | { type: 'record.status'; recording: boolean }
 
   // --- Local agent bridge ---

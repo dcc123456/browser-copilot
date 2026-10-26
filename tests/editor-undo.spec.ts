@@ -16,6 +16,8 @@ import {
   nodeDragStep,
   pushCanvasSnapshot,
   removesAnything,
+  takeRedo,
+  takeUndo,
   type CanvasSnapshot,
 } from '../src/workflow-editor/graph-history'
 import { isEditableTarget } from '../src/workflow-editor/use-space-select'
@@ -43,6 +45,42 @@ describe('pushCanvasSnapshot', () => {
     expect(history).toHaveLength(EDITOR_UNDO_LIMIT)
     expect(history[0]?.nodes[0]?.id).toBe('step-10')
     expect(history[history.length - 1]?.nodes[0]?.id).toBe(`step-${EDITOR_UNDO_LIMIT + 9}`)
+  })
+})
+
+describe('takeUndo / takeRedo', () => {
+  it('moves the undone graph onto the redo stack and back again', () => {
+    const history: CanvasSnapshot[] = [snapshot('a')]
+    const redo: CanvasSnapshot[] = []
+
+    const undone = takeUndo(history, redo, snapshot('b'))
+    expect(undone?.nodes[0]?.id).toBe('a')
+    expect(redo.map((s) => s.nodes[0]?.id)).toEqual(['b'])
+    expect(history).toEqual([])
+
+    const redone = takeRedo(history, redo, snapshot('a'))
+    expect(redone?.nodes[0]?.id).toBe('b')
+    expect(history.map((s) => s.nodes[0]?.id)).toEqual(['a'])
+    expect(redo).toEqual([])
+  })
+
+  it('returns undefined without touching the other stack when empty', () => {
+    const history: CanvasSnapshot[] = []
+    const redo: CanvasSnapshot[] = []
+    expect(takeUndo(history, redo, snapshot('b'))).toBeUndefined()
+    expect(takeRedo(history, redo, snapshot('b'))).toBeUndefined()
+    expect(redo).toEqual([])
+    expect(history).toEqual([])
+  })
+
+  it('a fresh edit clears the forward path', () => {
+    // Appending appends push; the editor calls pushCanvasSnapshot on a new edit.
+    const history: CanvasSnapshot[] = [snapshot('a'), snapshot('b')]
+    const redo: CanvasSnapshot[] = []
+    takeUndo(history, redo, snapshot('c'))
+    expect(redo).toHaveLength(1)
+    redo.length = 0
+    expect(takeRedo(history, redo, snapshot('b'))).toBeUndefined()
   })
 })
 

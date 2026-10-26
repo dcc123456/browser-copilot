@@ -205,3 +205,51 @@ export function autoLayout(
 
   return positions
 }
+
+export interface ViewportBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface ViewportSize {
+  width: number
+  height: number
+}
+
+export interface ViewportFit {
+  x: number
+  y: number
+  zoom: number
+}
+
+/**
+ * The viewport that centers `bounds` inside the part of the canvas the left
+ * sidebar does not cover.
+ *
+ * `fitView` fits to the whole `.react-flow` box, but the editor's left panel is
+ * an absolute overlay on top of it, so its nodes ended up hidden underneath.
+ * This computes the transform for the VISIBLE rectangle: `leftInset` is the
+ * overlaid width, `padding` is kept free on every side.
+ */
+export function viewportForBounds(
+  bounds: ViewportBounds,
+  size: ViewportSize,
+  leftInset: number,
+  padding = 48,
+  zoomRange: { min: number; max: number } = { min: 0.2, max: 1.5 },
+): ViewportFit {
+  const availableWidth = Math.max(1, size.width - leftInset - padding * 2)
+  const availableHeight = Math.max(1, size.height - padding * 2)
+  const rawZoom = Math.min(
+    availableWidth / Math.max(1, bounds.width),
+    availableHeight / Math.max(1, bounds.height),
+  )
+  const zoom = Math.min(zoomRange.max, Math.max(zoomRange.min, rawZoom))
+  return {
+    x: leftInset + padding + (availableWidth - bounds.width * zoom) / 2 - bounds.x * zoom,
+    y: padding + (availableHeight - bounds.height * zoom) / 2 - bounds.y * zoom,
+    zoom,
+  }
+}

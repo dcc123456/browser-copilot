@@ -37,6 +37,37 @@ export function pushCanvasSnapshot(history: CanvasSnapshot[], snapshot: CanvasSn
 }
 
 /**
+ * Take one undo step: the previous snapshot goes back to the caller and the
+ * current graph becomes the next redo step. Returns undefined when there is
+ * nothing to undo.
+ */
+export function takeUndo(
+  history: CanvasSnapshot[],
+  redo: CanvasSnapshot[],
+  current: CanvasSnapshot,
+): CanvasSnapshot | undefined {
+  const previous = history.pop()
+  if (!previous) return undefined
+  pushCanvasSnapshot(redo, current)
+  return previous
+}
+
+/**
+ * The mirror of {@link takeUndo}: the redone snapshot returns, and the graph it
+ * replaces becomes undoable again.
+ */
+export function takeRedo(
+  history: CanvasSnapshot[],
+  redo: CanvasSnapshot[],
+  current: CanvasSnapshot,
+): CanvasSnapshot | undefined {
+  const next = redo.pop()
+  if (!next) return undefined
+  pushCanvasSnapshot(history, current)
+  return next
+}
+
+/**
  * Whether a batch of React Flow changes removes something from the canvas. The
  * Delete key takes a picked node or edge this way — it never goes through the
  * editor's own delete handlers — so the history has to open a step here.

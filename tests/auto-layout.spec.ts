@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { autoLayout } from '../src/workflow-editor/auto-layout'
+import { autoLayout, viewportForBounds } from '../src/workflow-editor/auto-layout'
 
 describe('autoLayout', () => {
   it('places a linear chain in increasing-x layers', () => {
@@ -99,5 +99,37 @@ describe('autoLayout', () => {
     const pos = autoLayout(nodes, edges, { maxRowWidth: 300 })
     for (const n of nodes) expect(pos.get(n.id)).toBeDefined()
     expect(pos.get('b')!.x).toBe(pos.get('c')!.x)
+  })
+})
+
+describe('viewportForBounds', () => {
+  const size = { width: 1000, height: 600 }
+  const bounds = { x: 1000, y: 500, width: 800, height: 200 }
+
+  it('fits the graph inside the area the left panel leaves visible', () => {
+    const fit = viewportForBounds(bounds, size, 300, 48)
+    expect(fit.zoom).toBeCloseTo(0.755)
+    // The graph's left edge lands on the inset + padding, not under the panel.
+    expect(fit.x + bounds.x * fit.zoom).toBeCloseTo(348)
+  })
+
+  it('centers the graph vertically in the visible canvas', () => {
+    const fit = viewportForBounds(bounds, size, 300, 48)
+    const centerY = fit.y + (bounds.y + bounds.height / 2) * fit.zoom
+    expect(centerY).toBeCloseTo(size.height / 2)
+  })
+
+  it('clamps the zoom so huge graphs stay readable and tiny ones do not balloon', () => {
+    expect(viewportForBounds({ x: 0, y: 0, width: 100_000, height: 100_000 }, size, 0).zoom).toBe(
+      0.2,
+    )
+    expect(viewportForBounds({ x: 0, y: 0, width: 10, height: 10 }, size, 0).zoom).toBe(1.5)
+  })
+
+  it('survives a canvas narrower than the panel without dividing by zero', () => {
+    const fit = viewportForBounds({ x: 0, y: 0, width: 100, height: 100 }, size, 1200)
+    expect(Number.isFinite(fit.x)).toBe(true)
+    expect(Number.isFinite(fit.y)).toBe(true)
+    expect(fit.zoom).toBe(0.2)
   })
 })

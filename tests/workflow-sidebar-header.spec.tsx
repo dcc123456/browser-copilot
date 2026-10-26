@@ -9,6 +9,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import WorkflowSidebarHeader from '../src/workflow-editor/sidebar/WorkflowSidebarHeader'
 import { EDITOR_STRINGS } from '../src/workflow-editor/i18n'
 import { EditorLocaleContext, makeEditorLocale } from '../src/workflow-editor/locale-context'
+import { copyText } from '../src/lib/clipboard'
+
+vi.mock('../src/lib/clipboard', () => ({ copyText: vi.fn() }))
 
 beforeAll(() => {
   ;(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true
@@ -18,7 +21,7 @@ const roots: Root[] = []
 
 async function mount(
   onRename: (name: string) => void,
-  { dirty = false } = {},
+  { dirty = false, workflowId = 'wf-123' }: { dirty?: boolean; workflowId?: string | null } = {},
 ): Promise<HTMLDivElement> {
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -31,6 +34,7 @@ async function mount(
         EditorLocaleContext.Provider,
         { value: makeEditorLocale('en', t) },
         createElement(WorkflowSidebarHeader, {
+          workflowId,
           workflowName: 'My workflow',
           workflowIcon: '',
           dirty,
@@ -69,6 +73,7 @@ function saveRename(): void {
 }
 
 afterEach(() => {
+  vi.mocked(copyText).mockReset()
   for (const root of roots.splice(0)) act(() => root.unmount())
   document.body.innerHTML = ''
 })
@@ -77,6 +82,43 @@ describe('workflow sidebar header', () => {
   it('marks unsaved changes', async () => {
     const container = await mount(vi.fn(), { dirty: true })
     expect(container.querySelector('[title="Unsaved changes"]')).not.toBeNull()
+  })
+
+  it('copies the workflow id and confirms it', async () => {
+    vi.mocked(copyText).mockResolvedValue(undefined)
+    const container = await mount(vi.fn(), { workflowId: 'wf-copy-me' })
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Copy workflow ID"]',
+    )
+    expect(button).not.toBeNull()
+    await act(async () => {
+      button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(copyText).toHaveBeenCalledWith('wf-copy-me')
+    expect(button!.getAttribute('aria-label')).toBe('Workflow ID copied')
+  })
+
+  it('says so when the clipboard refuses', async () => {
+    vi.mocked(copyText).mockRejectedValue(new Error('refused'))
+    const container = await mount(vi.fn(), { workflowId: 'wf-copy-me' })
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Copy workflow ID"]',
+    )
+    await act(async () => {
+      button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.textContent).toContain('Copy failed')
+    expect(button!.getAttribute('aria-label')).toBe(
+      'Copy failed — select the ID and copy it manually',
+    )
+  })
+
+  it('disables the copy button until the id has loaded', async () => {
+    const container = await mount(vi.fn(), { workflowId: null })
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Copy workflow ID"]',
+    )
+    expect(button?.disabled).toBe(true)
   })
 
   it('renames through the dialog', async () => {

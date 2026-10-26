@@ -3247,8 +3247,7 @@ async function handleCommand(
     case 'record.stop': {
       // The recorder cleans up with the scope it STARTED with (state), so the
       // stop command carries no window.
-      const workflowId = await stopRecording()
-      return { type: 'record.stop', workflowId }
+      return { type: 'record.stop', ...(await stopRecording(command.save !== false)) }
     }
     case 'record.status':
       return { type: 'record.status', recording: isRecording() }
