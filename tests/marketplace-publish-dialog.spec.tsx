@@ -4,7 +4,7 @@
  * at the connection panel, and the form only exists once a token is stored.
  * Re-editing a published workflow starts from the listing on GitHub.
  */
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -471,5 +471,144 @@ describe('prefilling a published workflow', () => {
     ) as HTMLButtonElement
     await act(async () => publish.click())
     expect(container.textContent).toContain('Choose a category, or name your own.')
+  })
+})
+
+describe('publish drafts', () => {
+  let container: HTMLElement
+  let root: Root
+  let store: Map<string, unknown>
+  const originalCreateObjectURL = URL.createObjectURL
+  const originalRevokeObjectURL = URL.revokeObjectURL
+
+  beforeEach(() => {
+    store = new Map()
+    vi.stubGlobal('chrome', {
+      storage: {
+        local: {
+          get: vi.fn(async (key: string) => (store.has(key) ? { [key]: store.get(key) } : {})),
+          set: vi.fn(async (items: Record<string, unknown>) => {
+            for (const [key, value] of Object.entries(items)) store.set(key, value)
+          }),
+          remove: vi.fn(async (key: string | string[]) => {
+            for (const entry of Array.isArray(key) ? key : [key]) store.delete(entry)
+          }),
+        },
+      },
+    })
+    URL.createObjectURL = () => 'blob:draft'
+    URL.revokeObjectURL = () => {}
+  })
+
+  afterEach(() => {
+    act(() => root?.unmount())
+    vi.unstubAllGlobals()
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
+  })
+
+  function seedDraft(): void {
+    store.set('marketplaceDrafts', {
+      'local-1': {
+        schema: 1,
+        workflowId: 'local-1',
+        title: 'Draft title',
+        description: 'Draft body',
+        category: 'data',
+        customCategory: '',
+        tags: 'shop, export',
+        videoUrl: '',
+        images: [],
+        attachments: [],
+        savedAt: Date.now(),
+      },
+    })
+  }
+
+  function mount(): void {
+    const workflow = makeWorkflow()
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    act(() => {
+      root.render(
+        createElement(
+          I18nProvider,
+          { value: { locale: 'en', t: messagesFor('en') } },
+          createElement(PublishWorkflowDialog, {
+            workflow,
+            library: [workflow],
+            onClose: () => {},
+            initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
+          }),
+        ),
+      )
+    })
+  }
+
+  function titleInput(): HTMLInputElement {
+    return [...container.querySelectorAll('input')].find(
+      (input) => (input as HTMLInputElement).value === 'Scrape orders',
+    ) as HTMLInputElement
+  }
+
+  it('restores the saved draft when the same workflow reopens', async () => {
+    seedDraft()
+    mount()
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+
+    expect(
+      [...container.querySelectorAll('input')].some((input) => input.value === 'Draft title'),
+    ).toBe(true)
+    expect(container.querySelector('textarea')?.value).toBe('Draft body')
+    expect(container.querySelector('select')?.value).toBe('data')
+    expect(container.textContent).toContain('Draft restored from your last edit.')
+  })
+
+  it('saves an edited form when the dialog closes', async () => {
+    mount()
+    const title = titleInput()
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      setter?.call(title, 'Half-written title')
+      title.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    await act(async () => {
+      root.unmount()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+
+    const drafts = store.get('marketplaceDrafts') as Record<string, { title: string }>
+    expect(drafts['local-1']?.title).toBe('Half-written title')
+  })
+
+  it('writes nothing when the form was never touched', async () => {
+    mount()
+    await act(async () => {
+      root.unmount()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+
+    expect(store.has('marketplaceDrafts')).toBe(false)
+  })
+
+  it('discards the draft and restores the workflow copy', async () => {
+    seedDraft()
+    mount()
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+
+    const discard = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Discard draft',
+    ) as HTMLButtonElement
+    await act(async () => discard.click())
+
+    expect(store.has('marketplaceDrafts')).toBe(false)
+    expect(titleInput()?.value).toBe('Scrape orders')
+    expect(container.textContent).not.toContain('Draft restored from your last edit.')
   })
 })

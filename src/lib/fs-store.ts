@@ -121,6 +121,9 @@ export const CONFIG_KEYS: ReadonlySet<string> = new Set([
   // Device-local bookkeeping: syncing them would make another machine offer to
   // delete a reaction it does not own.
   'marketplaceReactions',
+  // Unfinished publish forms (screenshots as data URLs). Unpublished working
+  // state tied to this machine's dialog, never library content.
+  'marketplaceDrafts',
   // Written directly by `background/panel-minimize.ts` (never via the area);
   // listed so a legacy copy is never migrated into the directory.
   'floatingButtonPositions',

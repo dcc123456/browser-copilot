@@ -17,7 +17,7 @@
 
 **非目标**
 
-- 不做自动合并；PR 永远由维护者手动 review + merge。
+- 不做强制人工评审：发布后由客户端尝试自动合并（只有拥有仓库写权限的 token 能成功，当前即维护者本人）；第三方发布的 PR 仍留在原地等维护者合并。开关 `MARKETPLACE_AUTO_MERGE_PULLS` 一处可切回全员评审。
 - 不把视频存进 git（只存外链）；不托管图片在 git 之外。
 - 不自动运行从广场导入的工作流，不自动信任第三方工作流。
 - 不做即时推送通知；更新提醒在侧边栏打开时按节流检查。
@@ -84,22 +84,24 @@ workflows/<slug>/
 
 ## 4. 模块划分
 
-全部纯逻辑放 `src/lib/marketplace/**`（chrome-free，可单测）；网络调用注入 `fetch`；只有 token 存取与 UI 触达 `chrome.*`。
+全部纯逻辑放 `src/lib/marketplace/**`（chrome-free，可单测）；网络调用注入 `fetch`；只有 token 存取、发布草稿与 UI 触达 `chrome.*`。
 
-| 文件                                      | 职责                                                                                             |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `types.ts`                                | `MarketplaceMeta`、`MarketplaceCard`、`WorkflowMarketplaceRef`、`MarketplaceErrorCode`、仓库常量 |
-| `slug.ts`                                 | `slugify` / `buildSlug` / `isValidSlug`                                                          |
-| `sanitize.ts`                             | `toPublishableWorkflow`：剥离本地字段、运行时数据、data URL、日志；凭据疑似值的告警              |
-| `meta.ts`                                 | `buildMeta` / `parseMeta`（严格校验）/ `workflowHash` / `compareVersion`                         |
-| `categories.ts`                           | 内置分类与自定义标签：规范化、大小写不敏感比较、标签翻译、筛选选项                               |
-| `github-client.ts`                        | 带 token 的 REST 封装：401/403/404/422/限流映射为稳定错误码；只发本文档列出的端点                |
-| `publish.ts`                              | `publishWorkflow`：确保 fork → 建分支 → 逐个 PUT 文件 → 开 PR                                    |
-| `catalog.ts`                              | `loadCatalog`：tree + pulls + issues 三路合并；raw 拉 meta/图片；2 小时新鲜窗口与内存缓存        |
-| `engagement.ts`                           | 点赞（reaction 增删）与评论（列/发）                                                             |
-| `token.ts`                                | `getToken` / `setToken` / `clearToken`，存 `chrome.storage.local` 的 `marketplaceAuth`           |
-| `src/sidepanel/MarketplaceTab.tsx`        | 广场页：卡片流、筛选、应用/更新、点赞、评论                                                      |
-| `src/sidepanel/PublishWorkflowDialog.tsx` | 发布弹窗（`FormDialog` 外壳）                                                                    |
+| 文件                                      | 职责                                                                                                          |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `types.ts`                                | `MarketplaceMeta`、`MarketplaceCard`、`WorkflowMarketplaceRef`、`MarketplaceErrorCode`、仓库常量              |
+| `slug.ts`                                 | `slugify` / `buildSlug` / `isValidSlug`                                                                       |
+| `sanitize.ts`                             | `toPublishableWorkflow`：剥离本地字段、运行时数据、data URL、日志；凭据疑似值的告警                           |
+| `meta.ts`                                 | `buildMeta` / `parseMeta`（严格校验）/ `workflowHash` / `compareVersion`                                      |
+| `categories.ts`                           | 内置分类与自定义标签：规范化、大小写不敏感比较、标签翻译、筛选选项                                            |
+| `github-client.ts`                        | 带 token 的 REST 封装：401/403/404/422/限流映射为稳定错误码；只发本文档列出的端点                             |
+| `publish.ts`                              | `publishWorkflow`：确保 fork → 建分支 → 逐个 PUT 文件 → 开 PR → 尝试自动合并                                  |
+| `src/lib/base64.ts`                       | `bytesToBase64` / `base64ToBytes`：上传内容、发布草稿与飞书签名共用的字节编码（放在 marketplace 之外复用）    |
+| `draft.ts`                                | 发布草稿：按工作流 id 存 `chrome.storage.local` 的 `marketplaceDrafts`；文本 + data URL；30 天过期、最多 8 条 |
+| `catalog.ts`                              | `loadCatalog`：tree + pulls + issues 三路合并；raw 拉 meta/图片；2 小时新鲜窗口与内存缓存                     |
+| `engagement.ts`                           | 点赞（reaction 增删）与评论（列/发）                                                                          |
+| `token.ts`                                | `getToken` / `setToken` / `clearToken`，存 `chrome.storage.local` 的 `marketplaceAuth`                        |
+| `src/sidepanel/MarketplaceTab.tsx`        | 广场页：卡片流、筛选、应用/更新、点赞、评论                                                                   |
+| `src/sidepanel/PublishWorkflowDialog.tsx` | 发布弹窗（`FormDialog` 外壳）                                                                                 |
 
 ## 5. 发布流程
 
@@ -118,7 +120,9 @@ workflows/<slug>/
    4. `POST /repos/{login}/BC-workflow/git/refs` 建 `submit/<slug>-<stamp>`。
    5. `PUT /repos/{login}/BC-workflow/contents/workflows/<slug>/meta.json|workflow.json|assets/*`（base64，`branch` 指定分支）。
    6. `POST /repos/dcc123456/BC-workflow/pulls` 开 PR。
-6. 成功后在弹窗内展示 PR 链接；失败按错误码给出可操作提示（见 §9）。
+6. 自动合并：`PUT /repos/dcc123456/BC-workflow/pulls/{n}/merge`。拥有写权限的 token（当前即维护者本人）立即合并；GitHub 尚未算完可合并性时（405/409）等 1.5 s 重试一次；403（无权写入，即第三方发布）保留 PR 等维护者合并。开关 `MARKETPLACE_AUTO_MERGE_PULLS` 一处控制，改成 `false` 即恢复“所有发布都等人工评审”。
+7. 成功后在弹窗内展示 PR 链接；合并成功时提示“已上线”，并清掉广场快照缓存，下一次打开广场会重新读取；失败按错误码给出可操作提示（见 §9）。
+8. 草稿：弹窗内任意编辑后关闭（Esc/遮罩/取消/切走侧栏标签）自动保存到 `chrome.storage.local` 的 `marketplaceDrafts`（按工作流 id，文本 + 截图/附件的 data URL）。再次打开同一工作流的发布弹窗时优先生效，且不再让已发布 `meta.json` 的预填覆盖它；发布成功或点“清除草稿”后删除。草稿是设备本地的未发布工作状态，与 token/点赞记录同列 `CONFIG_KEYS`，不进入用户数据目录；30 天过期，最多保留 8 条。
 
 **为什么非目标仓库作者也要 fork**：统一路径，维护者始终通过 PR 审查；即使是 `dcc` 本人发布，也走同一流程，避免两条写路径。
 
@@ -253,13 +257,15 @@ workflows/<slug>/
 - 平台内容是不可信输入：`parseMeta`/`asWorkflow` 严格校验，任何额外字段丢弃。
 - 应用前必须经过信任确认；导入后不自动运行，不自动授予任何权限。
 - 发布侧脱敏是硬约束：测试必须覆盖“本地字段/运行时字段/日志/data URL/凭据字面量”全部被剥离。
-- 维护者的人工 review 仍是最终闸门；本设计不替代审核。
+- 维护者的人工 review 仍是最终闸门；本设计不替代审核。自动合并只对拥有仓库写权限的 token 生效（当前即维护者本人）；第三方发布拿不到写权限，PR 留在原地等人工合并，因此用户变多后把 `MARKETPLACE_AUTO_MERGE_PULLS` 改为 `false` 就能恢复全员强制评审。
 
 ## 11. 验收与测试
 
 - 纯逻辑单测：slug、sanitize、meta 解析/校验、hash、版本比较、PR→slug 映射、去重、更新判断。
 - bundle 单测：调用图遍历（直接/传递/共享/环/自调用/动态目标/同名文件）、`meta.dependencies` 往返与非法值、应用时的 id 映射与就地替换、缺件整包拒绝。
 - 附件单测：文件名净化（路径穿越/空格/中文/扩展名）、同名去重、路径白名单、大小显示；`buildMeta` 拒收超限，`parseMeta` 按条丢弃；发布文件与 PR 正文。
+- 草稿单测：文本 + 文件往返、按工作流隔离、过期清除、条数上限、坏数据丢弃；弹窗恢复与关闭保存。
+- 自动合并单测：成功 → `merged: true`；405 重试一次；403 → PR 保留、`merged: false`。
 - 网络层单测：注入 mock fetch，覆盖发布序列、fork 轮询、401/403/422、分页。
 - UI 测试：发布弹窗字段校验与图片压缩上限；卡片按钮状态（应用/已添加/可更新）；无 token 时的只读行为。
 - 真实端到端（需要用户提供 PAT 与目标仓库写入许可）：发布 → 合并 → 广场可见 → 应用 → 点赞/评论。未获得前标记 BLOCKED，不宣称通过。

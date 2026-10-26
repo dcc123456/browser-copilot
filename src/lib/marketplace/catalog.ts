@@ -15,6 +15,7 @@
  */
 
 import type { GitHubIssue, GitHubPull, GitHubTree, GitHubTreeEntry } from './github-client'
+import { hasChromeStorage } from '../fs-outbox'
 import { isValidSlug } from './slug'
 import { fetchPublishedMeta } from './raw'
 import { parseMeta } from './meta'
@@ -311,7 +312,18 @@ export function chromeCatalogCache(): CatalogCache {
 }
 
 /**
- * Cached catalog read with a 30-minute freshness window.
+ * Drops the cached snapshot so the next marketplace view re-reads GitHub.
+ *
+ * Used after an auto-merged publish: the workflow is live immediately, and a
+ * 2-hour-old snapshot would hide the card the publisher just created.
+ */
+export async function invalidateCatalogCache(): Promise<void> {
+  if (!hasChromeStorage()) return
+  await chrome.storage.local.remove(CATALOG_CACHE_KEY)
+}
+
+/**
+ * Cached catalog read with a {@link MARKETPLACE_CACHE_TTL_MS} freshness window.
  *
  * `force` bypasses the window (the explicit refresh button). A failed refresh
  * serves the previous snapshot with `stale: true`; without one it rethrows.

@@ -13,6 +13,7 @@
  */
 
 import type { WsEndpoint } from './feishu-proto'
+import { bytesToBase64 } from './base64'
 
 /**
  * Bound wrapper around the global `fetch`.
@@ -90,12 +91,6 @@ export async function signWebhook(secret: string, timestamp: number): Promise<st
   // message = empty). The empty message is what the zero-length buffer above
   // represents — not a typo.
   return bytesToBase64(new Uint8Array(sig))
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary)
 }
 
 export interface WebhookResult {

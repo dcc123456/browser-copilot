@@ -51,6 +51,12 @@ export interface GitHubPull {
   head: { ref: string }
 }
 
+export interface GitHubMergeResult {
+  merged: boolean
+  message: string
+  sha?: string
+}
+
 export interface GitHubIssue {
   number: number
   comments?: number
@@ -194,6 +200,22 @@ export class GitHubClient {
     return this.request<GitHubPull>(`/repos/${owner}/${repo}/pulls`, {
       method: 'POST',
       body: input,
+    })
+  }
+
+  /**
+   * Merges a pull request. GitHub returns 405 while it is still computing
+   * mergeability and 403 when the token has no write access to the repo.
+   */
+  mergePull(
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    input: { mergeMethod?: 'merge' | 'squash' | 'rebase' } = {},
+  ): Promise<GitHubMergeResult> {
+    return this.request<GitHubMergeResult>(`/repos/${owner}/${repo}/pulls/${pullNumber}/merge`, {
+      method: 'PUT',
+      body: { merge_method: input.mergeMethod ?? 'merge' },
     })
   }
 

@@ -243,6 +243,8 @@ export interface Messages {
   marketplacePublishRepoHint: (params: { repo: string }) => string
   /** Success banner after the pull request is opened. */
   marketplacePublishBanner: (params: { number: number }) => string
+  /** Success banner when the pull request was merged straight away. */
+  marketplacePublishBannerMerged: (params: { number: number }) => string
   marketplaceClose: string
   marketplaceConnectTitle: string
   marketplaceConnectLoading: string
@@ -314,7 +316,12 @@ export interface Messages {
     param: string
   }) => string
   marketplacePublishSuccess: (params: { slug: string; version: number }) => string
+  marketplacePublishMerged: (params: { slug: string; version: number }) => string
+  /** Shown when the PR stays open because the token cannot merge it. */
+  marketplacePublishMergePending: string
   marketplacePublishOpenPr: string
+  marketplaceDraftRestored: string
+  marketplaceDraftDiscard: string
   marketplaceFormTitleRequired: string
   marketplaceFormTitleTooLong: string
   marketplaceFormDescriptionTooLong: string
@@ -1886,8 +1893,10 @@ const en: Messages = {
   workflowsPublish: 'Publish',
   marketplacePublishTitle: 'Publish workflow',
   marketplacePublishRepoHint: ({ repo }) =>
-    `Opens a pull request against ${repo}. The maintainer merges it before it appears in the marketplace.`,
+    `Opens a pull request against ${repo}. It is merged automatically when your token can write to that repository; otherwise the maintainer merges it.`,
   marketplacePublishBanner: ({ number }) => `Pull request #${number} opened.`,
+  marketplacePublishBannerMerged: ({ number }) =>
+    `Merged pull request #${number}; the workflow is live.`,
   marketplaceClose: 'Close',
   marketplaceConnectTitle: 'GitHub connection',
   marketplaceConnectLoading: 'Checking GitHub connection…',
@@ -1965,7 +1974,13 @@ const en: Messages = {
     `In "${workflow}", node "${node}" contains embedded data in "${param}"; it was removed.`,
   marketplacePublishSuccess: ({ slug, version }) =>
     `Pull request opened for ${slug} (version ${version}).`,
+  marketplacePublishMerged: ({ slug, version }) =>
+    `Merged — ${slug} (version ${version}) is live in the marketplace.`,
+  marketplacePublishMergePending:
+    'The repository owner still needs to merge this pull request before it appears in the marketplace.',
   marketplacePublishOpenPr: 'View pull request',
+  marketplaceDraftRestored: 'Draft restored from your last edit.',
+  marketplaceDraftDiscard: 'Discard draft',
   marketplaceFormTitleRequired: 'A title is required.',
   marketplaceFormTitleTooLong: 'The title is too long.',
   marketplaceFormDescriptionTooLong: 'The description is too long.',
@@ -3438,8 +3453,9 @@ const zhCN: Messages = {
   workflowsPublish: '发布',
   marketplacePublishTitle: '发布工作流',
   marketplacePublishRepoHint: ({ repo }) =>
-    `将向 ${repo} 提交一个 PR，由维护者合并后才会出现在工作流广场中。`,
+    `将向 ${repo} 提交一个 PR；令牌对该仓库有写权限时会自动合并，否则由维护者合并后才会出现在工作流广场中。`,
   marketplacePublishBanner: ({ number }) => `已创建 PR #${number}。`,
+  marketplacePublishBannerMerged: ({ number }) => `已合并 PR #${number}，工作流已上线。`,
   marketplaceClose: '关闭',
   marketplaceConnectTitle: 'GitHub 连接',
   marketplaceConnectLoading: '正在检查 GitHub 连接…',
@@ -3515,7 +3531,12 @@ const zhCN: Messages = {
   marketplacePublishWarningBundledEmbeddedData: ({ workflow, node, param }) =>
     `工作流「${workflow}」的节点「${node}」中，「${param}」含有内嵌数据，已移除。`,
   marketplacePublishSuccess: ({ slug, version }) => `已为 ${slug}（版本 ${version}）创建 PR。`,
+  marketplacePublishMerged: ({ slug, version }) =>
+    `已合并 —— ${slug}（版本 ${version}）已上线到工作流广场。`,
+  marketplacePublishMergePending: '仍需仓库维护者合并这个 PR 后才会出现在工作流广场。',
   marketplacePublishOpenPr: '查看 PR',
+  marketplaceDraftRestored: '已恢复上次未发布时填写的草稿。',
+  marketplaceDraftDiscard: '清除草稿',
   marketplaceFormTitleRequired: '标题不能为空。',
   marketplaceFormTitleTooLong: '标题过长。',
   marketplaceFormDescriptionTooLong: '描述过长。',

@@ -73,6 +73,10 @@ interface ClientOptions {
   createRefConflicts?: number
   /** Repo tree the removal path reads. */
   tree?: GitHubTreeEntry[]
+  /** Merge attempts rejected with 405 before GitHub reports the PR mergeable. */
+  mergeRejects?: number
+  /** Merge refused outright, as GitHub does for a token without write access. */
+  mergeForbidden?: boolean
 }
 
 interface ClientCalls {
@@ -91,6 +95,12 @@ interface ClientCalls {
     base: string
     body: string
   }>
+  mergePull: Array<{
+    owner: string
+    repo: string
+    pullNumber: number
+    mergeMethod?: string
+  }>
 }
 
 function makeClient(options: ClientOptions = {}): {
@@ -99,6 +109,7 @@ function makeClient(options: ClientOptions = {}): {
 } {
   const forkReadyAfter = options.forkReadyAfter ?? 0
   let remainingRefConflicts = options.createRefConflicts ?? 0
+  let remainingMergeRejects = options.mergeRejects ?? 0
   let forkPolls = 0
 
   const calls: ClientCalls = {
@@ -110,6 +121,7 @@ function makeClient(options: ClientOptions = {}): {
     deleteFile: [],
     listTree: [],
     createPull: [],
+    mergePull: [],
   }
 
   const client: UnpublishClient = {
@@ -173,6 +185,17 @@ function makeClient(options: ClientOptions = {}): {
         merged_at: null,
         head: { ref: input.head },
       }
+    },
+    async mergePull(owner, repo, pullNumber, input) {
+      calls.mergePull.push({ owner, repo, pullNumber, mergeMethod: input?.mergeMethod })
+      if (options.mergeForbidden) {
+        throw new MarketplaceError('forbidden', 'GitHub refused the request', 403)
+      }
+      if (remainingMergeRejects > 0) {
+        remainingMergeRejects -= 1
+        throw new MarketplaceError('network', 'GitHub returned 405', 405)
+      }
+      return { merged: true, message: 'Pull Request successfully merged' }
     },
   }
 
@@ -518,11 +541,15 @@ describe('pushPublish', () => {
       },
     ])
     expect(sleeps).toEqual([])
+    expect(calls.mergePull).toEqual([
+      { owner: MARKETPLACE_OWNER, repo: MARKETPLACE_REPO, pullNumber: 42, mergeMethod: 'merge' },
+    ])
     expect(result).toMatchObject({
       prNumber: 42,
       prUrl: `https://github.com/${MARKETPLACE_OWNER}/${MARKETPLACE_REPO}/pull/42`,
       slug: prepared.slug,
       version: 1,
+      merged: true,
     })
   })
 
@@ -605,6 +632,41 @@ describe('pushPublish', () => {
     expect(calls.createRef.map((call) => call.branch)).toEqual([base, `${base}-1`])
     expect(calls.putFile.every((call) => call.branch === `${base}-1`)).toBe(true)
     expect(calls.createPull[0]!.head).toBe(`octocat:${base}-1`)
+  })
+
+  it('keeps the pull request open when the token cannot merge it', async () => {
+    const prepared = await prepare()
+    const { client, calls } = makeClient({ mergeForbidden: true })
+
+    const result = await pushPublish(prepared, {
+      client,
+      auth: AUTH,
+      now: NOW,
+      sleep: async () => {},
+    })
+
+    expect(calls.mergePull).toHaveLength(1)
+    expect(result.merged).toBe(false)
+    expect(result.prUrl).toContain('/pull/42')
+  })
+
+  it('retries the merge while GitHub is still computing mergeability', async () => {
+    const prepared = await prepare()
+    const { client, calls } = makeClient({ mergeRejects: 1 })
+    const sleeps: number[] = []
+
+    const result = await pushPublish(prepared, {
+      client,
+      auth: AUTH,
+      now: NOW,
+      sleep: async (ms) => {
+        sleeps.push(ms)
+      },
+    })
+
+    expect(calls.mergePull).toHaveLength(2)
+    expect(sleeps).toEqual([1500])
+    expect(result.merged).toBe(true)
   })
 
   it('requires a token', async () => {

@@ -1698,7 +1698,9 @@ export default function WorkflowsTab() {
             })()
             setBanner({
               kind: 'ok',
-              text: t.marketplacePublishBanner({ number: result.prNumber }),
+              text: result.merged
+                ? t.marketplacePublishBannerMerged({ number: result.prNumber })
+                : t.marketplacePublishBanner({ number: result.prNumber }),
             })
           }}
         />

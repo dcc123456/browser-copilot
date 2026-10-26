@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added — Publish drafts survive closing the dialog
+
+Closing the publish dialog halfway through now saves the form — title,
+description, category, tags, video link, screenshots and attachments — as a
+draft for that workflow. Opening the same workflow's publish dialog restores
+it, and the draft wins over the copy previously published on GitHub. A
+successful publish, the "Discard draft" link, or 30 days of inactivity clears
+it; at most 8 drafts are kept.
+
+### Changed — Publishing merges its own pull request
+
+A publish now merges the pull request right after opening it when the GitHub
+token may write to the marketplace repository, which today means the
+maintainer's own releases: the workflow is live immediately and the marketplace
+cache is dropped so the card shows up on the next visit. Third-party
+publishers keep an open PR for review, exactly as before. Setting
+`MARKETPLACE_AUTO_MERGE_PULLS` to `false` restores review for everyone.
+
 ### Changed — Marketplace card actions are icons
 
 The marketplace card now carries the GitHub link as an icon beside the workflow

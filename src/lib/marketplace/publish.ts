@@ -23,8 +23,15 @@ import {
   formatAttachmentSize,
   uniqueAttachmentFile,
 } from './attachments'
+import { bytesToBase64 } from '../base64'
 import { collectDependencies } from './dependencies'
-import type { GitHubPull, GitHubRef, GitHubRepo, GitHubTree } from './github-client'
+import type {
+  GitHubMergeResult,
+  GitHubPull,
+  GitHubRef,
+  GitHubRepo,
+  GitHubTree,
+} from './github-client'
 import {
   assetPath,
   assetRepoPath,
@@ -38,6 +45,7 @@ import {
 import { toPublishableWorkflow, type PublishWarning, type PublishableWorkflow } from './sanitize'
 import { buildSlug } from './slug'
 import {
+  MARKETPLACE_AUTO_MERGE_PULLS,
   MARKETPLACE_BRANCH,
   MARKETPLACE_OWNER,
   MARKETPLACE_PR_BRANCH_PREFIX,
@@ -72,6 +80,12 @@ export interface PublishClient {
     repo: string,
     input: { title: string; head: string; base: string; body: string },
   ): Promise<GitHubPull>
+  mergePull(
+    owner: string,
+    repo: string,
+    pullNumber: number,
+    input?: { mergeMethod?: 'merge' | 'squash' | 'rebase' },
+  ): Promise<GitHubMergeResult>
 }
 
 export interface PreparedFile {
@@ -129,6 +143,8 @@ export interface PublishResult {
   version: number
   hash: string
   meta: MarketplaceMeta
+  /** True when the pull request was merged right after it opened. */
+  merged: boolean
 }
 
 /** Everything an unpublish needs beyond the publish client. */
@@ -155,15 +171,6 @@ export interface UnpublishResult {
   slug: string
   /** Files the removal PR deletes: both JSON files plus every asset. */
   files: number
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ''
-  const chunkSize = 0x8000
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
-  }
-  return btoa(binary)
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -408,6 +415,36 @@ async function writableOwner(
   throw new MarketplaceError('fork-pending', 'GitHub is still creating the fork; try again shortly')
 }
 
+/**
+ * Merges the just-opened pull request when the token may write to the repo.
+ *
+ * GitHub answers 405/409 in the seconds after a PR opens, while mergeability is
+ * still being computed, so those retry once. A 403 means the publisher has no
+ * write access — every third-party submission — and the PR stays open for the
+ * maintainer, which is the review path this falls back to. Nothing here may
+ * fail a publish: the PR already exists.
+ */
+async function tryMergePublish(
+  client: PublishClient,
+  prNumber: number,
+  sleep: (ms: number) => Promise<void>,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const outcome = await client.mergePull(MARKETPLACE_OWNER, MARKETPLACE_REPO, prNumber, {
+        mergeMethod: 'merge',
+      })
+      return outcome.merged === true
+    } catch (error) {
+      const stillComputing =
+        error instanceof MarketplaceError && (error.status === 405 || error.status === 409)
+      if (!stillComputing || attempt === 1) return false
+      await sleep(1500)
+    }
+  }
+  return false
+}
+
 /** Pushes the prepared files to a branch and opens the PR. */
 export async function pushPublish(
   prepared: PreparedPublish,
@@ -450,6 +487,9 @@ export async function pushPublish(
         base,
         body: pullBody(prepared.meta),
       })
+      const merged = MARKETPLACE_AUTO_MERGE_PULLS
+        ? await tryMergePublish(deps.client, pull.number, sleep)
+        : false
       return {
         prUrl: pull.html_url,
         prNumber: pull.number,
@@ -457,6 +497,7 @@ export async function pushPublish(
         version: prepared.version,
         hash: prepared.hash,
         meta: prepared.meta,
+        merged,
       }
     } catch (error) {
       if (isConflict(error) && attempt === 0) continue

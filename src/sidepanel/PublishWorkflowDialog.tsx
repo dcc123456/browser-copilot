@@ -28,6 +28,15 @@ import {
 } from '../lib/marketplace/publish'
 import type { PublishWarning } from '../lib/marketplace/sanitize'
 import { fetchPublishedAsset, fetchPublishedMeta } from '../lib/marketplace/raw'
+import { invalidateCatalogCache } from '../lib/marketplace/catalog'
+import {
+  blobToDraftFile,
+  clearDraft,
+  DRAFT_SCHEMA_VERSION,
+  draftFileToBlob,
+  loadDraft,
+  saveDraft,
+} from '../lib/marketplace/draft'
 import { isClassicToken, setAuth, clearAuth, getAuth } from '../lib/marketplace/token'
 import {
   MARKETPLACE_CATEGORIES,
@@ -171,6 +180,8 @@ export default function PublishWorkflowDialog({
   const [images, setImages] = useState<SelectedImage[]>([])
   const [imageBusy, setImageBusy] = useState(false)
   const [attachments, setAttachments] = useState<SelectedAttachment[]>([])
+  /** The form was filled from a saved draft rather than the published copy. */
+  const [restoredDraft, setRestoredDraft] = useState(false)
 
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState<PublishFormError | null>(null)
@@ -185,6 +196,29 @@ export default function PublishWorkflowDialog({
   imagesRef.current = images
   const attachmentsRef = useRef<SelectedAttachment[]>([])
   attachmentsRef.current = attachments
+  // Unmount cleanup reads the latest form without re-subscribing every render.
+  const formRef = useRef({
+    title,
+    description,
+    category,
+    customCategory,
+    tagInput,
+    videoUrl,
+    images,
+    attachments,
+  })
+  formRef.current = {
+    title,
+    description,
+    category,
+    customCategory,
+    tagInput,
+    videoUrl,
+    images,
+    attachments,
+  }
+  const resultRef = useRef<PublishResult | null>(null)
+  resultRef.current = result
   useEffect(() => {
     return () => {
       for (const image of imagesRef.current) URL.revokeObjectURL(image.url)
@@ -199,13 +233,118 @@ export default function PublishWorkflowDialog({
 
   /**
    * Any edit invalidates the prepared bytes; a stale preview would publish the
-   * old title/screenshots without the user noticing. The first edit also marks
-   * the draft as author-owned so the async prefill cannot overwrite it.
+   * old title/screenshots without the user noticing.
    */
-  const editedRef = useRef(false)
+  // The form holds content the user owns; the async prefill must not repaint it.
+  const formOwnedRef = useRef(false)
+  // Something changed since the dialog opened; closing must keep a draft.
+  const draftDirtyRef = useRef(false)
   const edit = (): void => {
-    editedRef.current = true
+    formOwnedRef.current = true
+    draftDirtyRef.current = true
     setPrepared(null)
+    setPublishError(null)
+  }
+
+  /**
+   * A saved draft outranks the published listing: it is the user's newer,
+   * unfinished copy. Marking the form author-owned up front also stops the
+   * async `meta.json` prefill from overwriting it field by field.
+   */
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const draft = await loadDraft(workflow.id)
+      if (!draft || cancelled || formOwnedRef.current) return
+      formOwnedRef.current = true
+      setTitle(draft.title)
+      setDescription(draft.description)
+      setCategory(draft.category)
+      setCustomCategory(draft.customCategory)
+      setTagInput(draft.tags)
+      setVideoUrl(draft.videoUrl)
+      const restoredImages = draft.images.flatMap((file) => {
+        const blob = draftFileToBlob(file)
+        return blob ? [{ blob, url: URL.createObjectURL(blob) }] : []
+      })
+      setImages((current) => {
+        for (const image of current) URL.revokeObjectURL(image.url)
+        return restoredImages
+      })
+      const restoredAttachments = draft.attachments.flatMap((file) => {
+        const blob = draftFileToBlob(file)
+        return blob && file.name ? [{ name: file.name, blob, url: URL.createObjectURL(blob) }] : []
+      })
+      setAttachments((current) => {
+        for (const file of current) URL.revokeObjectURL(file.url)
+        return restoredAttachments
+      })
+      setRestoredDraft(true)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [workflow.id])
+
+  /**
+   * Every close path unmounts the dialog (Escape, backdrop, cancel, switching
+   * the side panel's tab), so one cleanup covers them all. A successful
+   * publish has already cleared the draft, and an untouched form writes
+   * nothing.
+   */
+  useEffect(() => {
+    return () => {
+      const snapshot = formRef.current
+      if (!draftDirtyRef.current || resultRef.current) return
+      void (async () => {
+        const draftImages = await Promise.all(
+          snapshot.images.map((image) => blobToDraftFile(image.blob)),
+        )
+        const draftAttachments = await Promise.all(
+          snapshot.attachments.map((file) => blobToDraftFile(file.blob, file.name)),
+        )
+        await saveDraft({
+          schema: DRAFT_SCHEMA_VERSION,
+          workflowId: workflow.id,
+          title: snapshot.title,
+          description: snapshot.description,
+          category: snapshot.category,
+          customCategory: snapshot.customCategory,
+          tags: snapshot.tagInput,
+          videoUrl: snapshot.videoUrl,
+          images: draftImages,
+          attachments: draftAttachments,
+          savedAt: Date.now(),
+        })
+      })().catch(() => {
+        // Losing a draft must never be what breaks closing the dialog.
+      })
+    }
+  }, [workflow.id])
+
+  const discardDraft = (): void => {
+    void clearDraft(workflow.id)
+    setRestoredDraft(false)
+    // Keep the form author-owned so an in-flight prefill cannot repaint it,
+    // but closing now must not write the discarded draft back.
+    formOwnedRef.current = true
+    draftDirtyRef.current = false
+    setTitle(workflow.name)
+    setDescription(workflow.description ?? '')
+    setCategory('other')
+    setCustomCategory('')
+    setTagInput('')
+    setVideoUrl('')
+    setImages((current) => {
+      for (const image of current) URL.revokeObjectURL(image.url)
+      return []
+    })
+    setAttachments((current) => {
+      for (const file of current) URL.revokeObjectURL(file.url)
+      return []
+    })
+    setPrepared(null)
+    setFormError(null)
     setPublishError(null)
   }
 
@@ -215,7 +354,7 @@ export default function PublishWorkflowDialog({
     let cancelled = false
     void (async () => {
       const meta = await fetchPublishedMeta(publishedSlug).catch(() => null)
-      if (!meta || cancelled || editedRef.current) return
+      if (!meta || cancelled || formOwnedRef.current) return
       setTitle(meta.title)
       setDescription(meta.description)
       setCategory(isBuiltinCategory(meta.category) ? meta.category : CUSTOM_CATEGORY)
@@ -227,7 +366,7 @@ export default function PublishWorkflowDialog({
           .slice(0, MAX_PUBLISH_IMAGES)
           .map((asset) => fetchPublishedAsset(publishedSlug, asset)),
       )
-      if (cancelled || editedRef.current) return
+      if (cancelled || formOwnedRef.current) return
       const restored = blobs
         .filter((blob): blob is Blob => blob !== null)
         .map((blob) => ({ blob, url: URL.createObjectURL(blob) }))
@@ -236,7 +375,7 @@ export default function PublishWorkflowDialog({
       const attachmentBlobs = await Promise.all(
         publishedAttachments.map((file) => fetchPublishedAsset(publishedSlug, file.path)),
       )
-      if (cancelled || editedRef.current) return
+      if (cancelled || formOwnedRef.current) return
       const restoredAttachments = publishedAttachments.flatMap((file, index) => {
         const blob = attachmentBlobs[index]
         return blob ? [{ name: file.name, blob, url: URL.createObjectURL(blob) }] : []
@@ -368,6 +507,9 @@ export default function PublishWorkflowDialog({
         auth,
       })
       setResult(pushed)
+      resultRef.current = pushed
+      void clearDraft(workflow.id).catch(() => {})
+      if (pushed.merged) void invalidateCatalogCache().catch(() => {})
       onPublished?.(pushed)
     } catch (error) {
       setPublishError(marketplaceErrorMessage(t, error))
@@ -421,8 +563,13 @@ export default function PublishWorkflowDialog({
       {result ? (
         <div className="rounded-lg border border-border bg-panel-2 p-3">
           <p className="m-0 text-[13px] text-ink">
-            {t.marketplacePublishSuccess({ slug: result.slug, version: result.version })}
+            {result.merged
+              ? t.marketplacePublishMerged({ slug: result.slug, version: result.version })
+              : t.marketplacePublishSuccess({ slug: result.slug, version: result.version })}
           </p>
+          {!result.merged && (
+            <p className="mt-1 mb-0 text-[12px] text-muted">{t.marketplacePublishMergePending}</p>
+          )}
           <p className="mt-1 mb-0 text-[12px] text-muted">{result.prUrl}</p>
         </div>
       ) : auth === undefined ? (
@@ -491,6 +638,19 @@ export default function PublishWorkflowDialog({
 
           {auth && (
             <>
+              {restoredDraft && (
+                <p className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11.5px] leading-snug text-muted">
+                  <span>{t.marketplaceDraftRestored}</span>
+                  <button
+                    className="border-0! bg-transparent! p-0! text-[11.5px]! text-accent!"
+                    disabled={busy}
+                    onClick={discardDraft}
+                    type="button"
+                  >
+                    {t.marketplaceDraftDiscard}
+                  </button>
+                </p>
+              )}
               {(bundle.dependencies.length > 0 || missingRefs.length > 0) && (
                 <section className="mb-4 rounded-lg border border-border bg-panel-2 p-3">
                   <h3 className="m-0 text-[12.5px] font-semibold text-ink">

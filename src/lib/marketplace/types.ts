@@ -31,6 +31,16 @@ export const MARKETPLACE_CACHE_TTL_MS = 2 * 60 * 60 * 1000
 /** Browser branch prefix; the rest of the name is `<slug>-<stamp>`. */
 export const MARKETPLACE_PR_BRANCH_PREFIX = 'submit/'
 
+/**
+ * Merge a submission as soon as its pull request opens.
+ *
+ * Only a token with write access to the repository can merge, which today means
+ * the maintainer; every third-party submission keeps its open PR for review.
+ * Set this to `false` to require the maintainer's review for everyone again —
+ * nothing else in the publish path has to change.
+ */
+export const MARKETPLACE_AUTO_MERGE_PULLS = true
+
 export const MAX_PUBLISH_IMAGES = 3
 export const MAX_PUBLISH_IMAGE_BYTES = 1024 * 1024
 /** Files a listing may carry for download; each stays small enough to diff. */
