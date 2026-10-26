@@ -60,6 +60,9 @@ describe('presets', () => {
     const ids = PROVIDER_PRESETS.map((preset) => preset.id)
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids).toContain('custom')
+    // The free-form option is the last resort, so it sits at the bottom of the
+    // add-provider menu rather than mid-list.
+    expect(ids.at(-1)).toBe('custom')
   })
 
   it('builds an editable profile with no key and no model prefilled', () => {

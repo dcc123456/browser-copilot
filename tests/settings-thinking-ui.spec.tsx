@@ -11,7 +11,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import SettingsTab from '../src/sidepanel/SettingsTab'
+import ModelsTab from '../src/sidepanel/ModelsTab'
 import { I18nProvider } from '../src/sidepanel/i18n'
 import { messagesFor } from '../src/lib/i18n'
 import type { Settings } from '../src/lib/types'
@@ -108,7 +108,7 @@ async function openProviderEditor(settings: Settings): Promise<HTMLElement> {
       createElement(
         I18nProvider,
         { value: { locale: 'en', t: messagesFor('en') } },
-        createElement(SettingsTab, { onLocaleChange: noop }),
+        createElement(ModelsTab),
       ),
     )
   })

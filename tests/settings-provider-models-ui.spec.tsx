@@ -10,7 +10,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import SettingsTab from '../src/sidepanel/SettingsTab'
+import ModelsTab from '../src/sidepanel/ModelsTab'
 import { I18nProvider } from '../src/sidepanel/i18n'
 import { messagesFor } from '../src/lib/i18n'
 import type { Settings } from '../src/lib/types'
@@ -62,11 +62,15 @@ function settingsWith(provider: Partial<ProviderProfile>): Settings {
 }
 
 beforeEach(() => {
+  fetchedModels = []
   vi.stubGlobal('chrome', {
     runtime: {
       sendMessage: vi.fn(async (command: { type: string }) => {
         if (command.type === 'settings.get') {
           return { ok: true, data: { type: 'settings', settings: currentSettings } }
+        }
+        if (command.type === 'provider.models') {
+          return { ok: true, data: { type: 'provider.models', models: fetchedModels } }
         }
         if (command.type === 'agent.status.get') {
           return { ok: true, data: { type: 'agent.status', status: null } }
@@ -94,6 +98,7 @@ afterEach(() => {
 })
 
 let currentSettings: Settings = settingsWith({})
+let fetchedModels: string[] = []
 
 async function openProviderEditor(settings: Settings): Promise<HTMLElement> {
   currentSettings = settings
@@ -107,7 +112,7 @@ async function openProviderEditor(settings: Settings): Promise<HTMLElement> {
       createElement(
         I18nProvider,
         { value: { locale: 'en', t: messagesFor('en') } },
-        createElement(SettingsTab, { onLocaleChange: noop }),
+        createElement(ModelsTab),
       ),
     )
   })
@@ -150,6 +155,19 @@ function addedModels(container: HTMLElement): string[] {
   return [...container.querySelectorAll('input[name="p-model-in-use"]')].map(
     (radio) => radio.closest('li')?.querySelector('span')?.textContent?.trim() ?? '',
   )
+}
+
+/** Ticks one of the fetched models in the multi-select list. */
+async function checkFetchedModel(container: HTMLElement, name: string): Promise<void> {
+  const label = [...container.querySelectorAll('label')].find(
+    (candidate) =>
+      candidate.textContent?.trim() === name && candidate.querySelector('input[type="checkbox"]'),
+  )
+  expect(label).toBeDefined()
+  const checkbox = label?.querySelector('input[type="checkbox"]') as HTMLInputElement | null
+  await act(async () => {
+    checkbox?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
 }
 
 describe('the provider model list', () => {
@@ -218,5 +236,24 @@ describe('the provider model list', () => {
       (radio) => (radio as HTMLInputElement).checked,
     )
     expect(checked).toEqual([true])
+  })
+
+  it('adds several fetched models by ticking them, without a round trip per model', async () => {
+    fetchedModels = ['deepseek-chat', 'deepseek-reasoner', 'deepseek-coder']
+    const container = await openProviderEditor(settingsWith({ model: '', models: [] }))
+
+    await clickButton(container, 'Fetch models')
+    await checkFetchedModel(container, 'deepseek-chat')
+    await checkFetchedModel(container, 'deepseek-reasoner')
+
+    expect(addedModels(container)).toEqual(['deepseek-chat', 'deepseek-reasoner'])
+    const checked = [...container.querySelectorAll('input[name="p-model-in-use"]')].map(
+      (radio) => (radio as HTMLInputElement).checked,
+    )
+    expect(checked).toEqual([true, false])
+
+    // Unticking the model in use hands the selection to the next remaining one.
+    await checkFetchedModel(container, 'deepseek-chat')
+    expect(addedModels(container)).toEqual(['deepseek-reasoner'])
   })
 })

@@ -11,6 +11,7 @@ import DataTab from './DataTab'
 import HistoryTab from './HistoryTab'
 import { I18nProvider } from './i18n'
 import MarketplaceTab from './MarketplaceTab'
+import ModelsTab from './ModelsTab'
 import SettingsTab from './SettingsTab'
 import SkillsTab from './SkillsTab'
 import TasksTab from './TasksTab'
@@ -31,12 +32,21 @@ type TabId =
   | 'marketplace'
   | 'tokens'
   | 'data'
+  | 'models'
   | 'settings'
 
 /** Always shown in the top bar. */
 const PINNED_TABS: TabId[] = ['chat', 'workflows', 'history', 'tasks']
 /** Collected under the fixed "More" dropdown. Agents sits right after skills. */
-const MORE_TABS: TabId[] = ['skills', 'agents', 'marketplace', 'tokens', 'data', 'settings']
+const MORE_TABS: TabId[] = [
+  'skills',
+  'agents',
+  'marketplace',
+  'tokens',
+  'data',
+  'models',
+  'settings',
+]
 
 const TAB_LABEL: Record<TabId, keyof Messages> = {
   chat: 'tabChat',
@@ -48,6 +58,7 @@ const TAB_LABEL: Record<TabId, keyof Messages> = {
   marketplace: 'tabMarketplace',
   tokens: 'tabTokens',
   data: 'tabData',
+  models: 'tabModels',
   settings: 'tabSettings',
 }
 
@@ -369,6 +380,9 @@ export default function App() {
       </div>
       <div style={{ display: active === 'data' ? 'contents' : 'none' }}>
         <DataTab />
+      </div>
+      <div style={{ display: active === 'models' ? 'contents' : 'none' }}>
+        <ModelsTab />
       </div>
       <div style={{ display: active === 'settings' ? 'contents' : 'none' }}>
         <SettingsTab onLocaleChange={setLocaleSetting} />

@@ -189,13 +189,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     hint: 'Start the local server in LM Studio first; any non-empty key works.',
   },
   {
-    id: 'custom',
-    label: 'Custom OpenAI-compatible',
-    baseUrl: '',
-    suggestedModel: '',
-    hint: 'Any endpoint exposing POST {baseUrl}/chat/completions with Bearer auth. Enter the base URL up to but not including /chat/completions.',
-  },
-  {
     id: 'zhipu',
     label: '智谱 GLM',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
@@ -283,6 +276,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     suggestedModel: 'meta/llama-3.1-8b-instruct',
     hint: 'Model IDs are namespaced, e.g. meta/llama-3.1-8b-instruct.',
     docsUrl: 'https://integrate.api.nvidia.com/',
+  },
+  // The free-form escape hatch stays last: every named vendor above gets first
+  // pick, and "custom" is the deliberate last resort rather than mid-list.
+  {
+    id: 'custom',
+    label: 'Custom OpenAI-compatible',
+    baseUrl: '',
+    suggestedModel: '',
+    hint: 'Any endpoint exposing POST {baseUrl}/chat/completions with Bearer auth. Enter the base URL up to but not including /chat/completions.',
   },
 ]
 

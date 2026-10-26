@@ -53,6 +53,7 @@ export interface Messages {
   tabSettings: string
   tabHistory: string
   tabTokens: string
+  tabModels: string
   tabMore: string
 
   // Panel minimize (floating page button)
@@ -1717,6 +1718,7 @@ const en: Messages = {
   tabSettings: 'Settings',
   tabHistory: 'History',
   tabTokens: 'Tokens',
+  tabModels: 'Model settings',
   tabMore: 'More',
   panelMinimize: 'Minimize to a floating button',
   uploadFileWaiting: 'The workflow is waiting for you to choose a file.',
@@ -2527,7 +2529,7 @@ const en: Messages = {
   settingsModelsAvailable: ({ count }) =>
     `${count} model(s) available — pick one from the dropdown.`,
   settingsModelsAvailableToAdd: ({ count }) =>
-    `${count} model(s) available — add the ones you need.`,
+    `${count} model(s) available — check the ones you need.`,
   settingsModelAdd: 'Add model',
   settingsModelAddPlaceholder: ({ model }) => `Add a model, e.g. ${model}`,
   settingsModelRemove: 'Remove',
@@ -3284,6 +3286,7 @@ const zhCN: Messages = {
   tabSettings: '设置',
   tabHistory: '历史',
   tabTokens: 'token 用量',
+  tabModels: '模型设置',
   tabMore: '更多',
   panelMinimize: '最小化为悬浮按钮',
   uploadFileWaiting: '工作流正在等待你选择文件。',
@@ -4040,7 +4043,7 @@ const zhCN: Messages = {
   settingsShowKey: '显示密钥',
   settingsModel: '模型',
   settingsModelsAvailable: ({ count }) => `共 ${count} 个可用模型，请从下拉列表中选择。`,
-  settingsModelsAvailableToAdd: ({ count }) => `共 ${count} 个可用模型，请添加需要的模型。`,
+  settingsModelsAvailableToAdd: ({ count }) => `共 ${count} 个可用模型，勾选要添加的模型。`,
   settingsModelAdd: '添加模型',
   settingsModelAddPlaceholder: ({ model }) => `添加模型，例如 ${model}`,
   settingsModelRemove: '移除',
