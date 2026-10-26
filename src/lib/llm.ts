@@ -367,10 +367,22 @@ export function extractUsage(parsed: unknown): TokenUsage | null {
     num('cachedTokens') ??
     num('cache_read_input_tokens') ??
     num('cacheReadInputTokens')
+  // Reasoning tokens are billed as part of the completion, and OpenAI /
+  // DeepSeek report them under completion_tokens_details — not the prompt
+  // details this used to read, which left the chat token bar at 0.
+  const detailNum = (
+    holder: Record<string, unknown> | undefined,
+    key: string,
+  ): number | undefined => {
+    const value = holder?.[key]
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  }
+  const completionDetails = u.completion_tokens_details as Record<string, unknown> | undefined
+  const outputDetails = u.output_tokens_details as Record<string, unknown> | undefined
   const reasoningTokens =
-    (details && typeof details.reasoning_tokens === 'number'
-      ? details.reasoning_tokens
-      : undefined) ??
+    detailNum(completionDetails, 'reasoning_tokens') ??
+    detailNum(outputDetails, 'reasoning_tokens') ??
+    detailNum(details, 'reasoning_tokens') ??
     num('reasoning_tokens') ??
     num('reasoningTokens')
   const totalTokens =

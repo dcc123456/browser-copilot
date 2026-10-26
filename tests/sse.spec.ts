@@ -191,7 +191,8 @@ describe('SseAccumulator · usage', () => {
           prompt_tokens: 100,
           completion_tokens: 20,
           total_tokens: 120,
-          prompt_tokens_details: { cached_tokens: 40, reasoning_tokens: 5 },
+          prompt_tokens_details: { cached_tokens: 40 },
+          completion_tokens_details: { reasoning_tokens: 5 },
         },
       }),
     )
@@ -204,6 +205,21 @@ describe('SseAccumulator · usage', () => {
       totalTokens: 120,
     })
     expect(received).toEqual(result.usage)
+  })
+
+  it('still reads reasoning tokens from prompt details for older gateways', () => {
+    const accumulator = new SseAccumulator()
+    accumulator.push(
+      frame({
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 20,
+          total_tokens: 120,
+          prompt_tokens_details: { reasoning_tokens: 7 },
+        },
+      }),
+    )
+    expect(accumulator.finish().usage).toMatchObject({ reasoningTokens: 7 })
   })
 
   it('accepts gateway aliases for token fields', () => {
