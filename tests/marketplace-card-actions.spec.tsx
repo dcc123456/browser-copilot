@@ -48,7 +48,18 @@ const { buildMeta } = await import('../src/lib/marketplace/meta')
 
 const zh = messagesFor('zh-CN')
 
-function card(slug: string, title: string, prNumber: number, likes: number, comments: number) {
+/**
+ * Two cards built milliseconds apart could sort either way, so the timestamp
+ * is explicit: the list is newest-first and the first test asserts on order.
+ */
+function card(
+  slug: string,
+  title: string,
+  prNumber: number,
+  likes: number,
+  comments: number,
+  updatedAt = Date.now(),
+) {
   return {
     meta: buildMeta({
       slug,
@@ -59,6 +70,7 @@ function card(slug: string, title: string, prNumber: number, likes: number, comm
       author: 'octocat',
       version: 1,
       hash: 'a'.repeat(64),
+      now: new Date(updatedAt),
     }),
     prNumber,
     likes,
@@ -103,8 +115,8 @@ describe('marketplace card actions', () => {
   it('puts the GitHub link beside the title and both icon actions in the row', async () => {
     mocked.likedIssues.add(6)
     cards.push(
-      card('scrape-orders-abcdef', 'Scrape orders', 6, 2, 3),
-      card('sync-stock-fedcba', 'Sync stock', 7, 0, 0),
+      card('scrape-orders-abcdef', 'Scrape orders', 6, 2, 3, 2_000),
+      card('sync-stock-fedcba', 'Sync stock', 7, 0, 0, 1_000),
     )
     await render()
 
