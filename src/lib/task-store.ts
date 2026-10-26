@@ -23,7 +23,7 @@ import {
   type TaskRunOutcome,
   type TaskRunStep,
 } from './scheduler-types'
-import { normalizeSchedule } from './schedule'
+import { normalizeSchedule, normalizeScheduleList } from './schedule'
 
 /** Clamps a per-task tool-round budget to a sane positive range. Exported so
  * the agent's `create_scheduled_task` tool applies the same clamp as storage. */
@@ -113,11 +113,16 @@ function asTask(value: unknown): ScheduledTask | null {
         : 'agent-prompt'
   const variables = asTaskVariables(v.variables)
   const outputs = asOutputNames(v.outputs)
+  // A record may carry only the legacy single `schedule`; one that carries the
+  // list is normalized on read so a hand-edited entry cannot reach the scheduler
+  // half-written, and its first entry is what the mirror reports.
+  const schedules = Array.isArray(v.schedules) ? normalizeScheduleList(v.schedules) : undefined
   return {
     id: v.id,
     name: v.name || 'Task',
     enabled: v.enabled !== false,
-    schedule: normalizeSchedule(v.schedule),
+    schedule: schedules ? (schedules[0] ?? { kind: 'none' }) : normalizeSchedule(v.schedule),
+    ...(schedules ? { schedules } : {}),
     kind,
     prompt: typeof v.prompt === 'string' ? v.prompt : undefined,
     workflowId: typeof v.workflowId === 'string' ? v.workflowId : undefined,
@@ -168,11 +173,15 @@ export async function saveTask(task: ScheduledTask): Promise<void> {
 
 export function createDraft(partial?: Partial<ScheduledTask>): ScheduledTask {
   const now = Date.now()
+  const schedules = partial?.schedules ? normalizeScheduleList(partial.schedules) : undefined
   return {
     id: newId(),
     name: partial?.name ?? '',
     enabled: partial?.enabled ?? true,
-    schedule: partial?.schedule ?? { kind: 'daily', hour: 9, minute: 0 },
+    schedule: schedules
+      ? (schedules[0] ?? { kind: 'none' })
+      : (partial?.schedule ?? { kind: 'daily', hour: 9, minute: 0 }),
+    ...(schedules ? { schedules } : {}),
     kind: partial?.kind ?? 'agent-prompt',
     prompt: partial?.prompt ?? '',
     ...(partial?.variables ? { variables: partial.variables } : {}),

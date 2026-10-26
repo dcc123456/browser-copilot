@@ -33,7 +33,8 @@ beforeAll(() => {
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Command } from '../src/lib/messages'
-import { EMPTY_FEISHU_CONFIG, type ScheduledTask } from '../src/lib/scheduler-types'
+import { describeSchedule } from '../src/lib/schedule'
+import { EMPTY_FEISHU_CONFIG, type Schedule, type ScheduledTask } from '../src/lib/scheduler-types'
 import type { Workflow } from '../src/lib/workflow/types'
 import { messagesFor } from '../src/lib/i18n'
 import { I18nProvider } from '../src/sidepanel/i18n'
@@ -150,17 +151,20 @@ const click = async (root: ParentNode, label: string): Promise<void> => {
   await flush()
 }
 
-/** The "new task" button carries a leading `+`, so it matches by suffix. */
-const clickCreating = async (container: HTMLElement): Promise<void> => {
-  const button = [...container.querySelectorAll('button')].find((candidate) =>
-    candidate.textContent?.trim().endsWith(t.taskNew),
+/** Clicks a button whose label carries a leading marker (`+ New task`). */
+const clickEnding = async (root: ParentNode, label: string): Promise<void> => {
+  const button = [...root.querySelectorAll('button')].find((candidate) =>
+    candidate.textContent?.trim().endsWith(label),
   )
-  if (!button) throw new Error(`no create button`)
+  if (!button) throw new Error(`no button ending in ${label}`)
   await act(async () => {
     button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
   })
   await flush()
 }
+
+/** The "new task" button carries a leading `+`, so it matches by suffix. */
+const clickCreating = (container: HTMLElement): Promise<void> => clickEnding(container, t.taskNew)
 
 /** The open modal, if any — `FormDialog` renders in place, not through a portal. */
 const dialog = (): HTMLElement | null => document.querySelector<HTMLElement>('[role="dialog"]')
@@ -254,5 +258,75 @@ describe('tasks tab · editing opens a dialog', () => {
 
     const run = container.querySelector<HTMLButtonElement>('button.task-action-run')
     expect(run?.hasAttribute('disabled')).toBe(true)
+  })
+})
+
+describe('tasks tab · multiple trigger methods', () => {
+  const weekly: Schedule = { kind: 'weekly', days: [1, 2, 3, 4, 5], hour: 9, minute: 0 }
+
+  const savedTask = (): ScheduledTask => {
+    const save = commands('tasks.save')[0]
+    if (!save || save.type !== 'tasks.save') throw new Error('no tasks.save command')
+    return save.task
+  }
+
+  it('shows one chip per trigger method', async () => {
+    tasks = [
+      {
+        ...task('t-multi', 'Two cadences'),
+        schedule: weekly,
+        schedules: [weekly, { kind: 'interval', minutes: 30 }],
+      },
+    ]
+    const { container } = await render()
+
+    const chips = [...container.querySelectorAll('.task-meta .task-chip')].map((chip) =>
+      chip.textContent?.trim(),
+    )
+    expect(chips).toContain(describeSchedule(weekly, 'en'))
+    expect(chips).toContain(describeSchedule({ kind: 'interval', minutes: 30 }, 'en'))
+  })
+
+  it('adds a method card and saves the whole list', async () => {
+    const { container } = await render()
+    await click(container, t.edit)
+    const panel = dialog()!
+    expect(panel.querySelectorAll('[data-schedule-index]')).toHaveLength(1)
+
+    await clickEnding(panel, t.taskScheduleAdd)
+
+    expect(panel.querySelectorAll('[data-schedule-index]')).toHaveLength(2)
+    const added = panel.querySelector<HTMLSelectElement>('[data-schedule-index="1"] select')
+    expect(added?.value).toBe('interval')
+
+    await click(panel, t.taskSave)
+
+    const saved = savedTask()
+    expect(saved.schedules).toEqual([weekly, { kind: 'interval', minutes: 60 }])
+    // The legacy mirror follows the first method, not the one just added.
+    expect(saved.schedule).toEqual(weekly)
+  })
+
+  it('removes a method card and saves the shortened list', async () => {
+    tasks = [
+      {
+        ...task('t-multi', 'Two cadences'),
+        schedule: weekly,
+        schedules: [weekly, { kind: 'interval', minutes: 30 }],
+      },
+    ]
+    const { container } = await render()
+    await click(container, t.edit)
+    const panel = dialog()!
+    expect(panel.querySelectorAll('[data-schedule-index]')).toHaveLength(2)
+
+    await click(panel, t.taskScheduleRemove)
+
+    expect(panel.querySelectorAll('[data-schedule-index]')).toHaveLength(1)
+    await click(panel, t.taskSave)
+
+    const saved = savedTask()
+    expect(saved.schedules).toEqual([{ kind: 'interval', minutes: 30 }])
+    expect(saved.schedule).toEqual({ kind: 'interval', minutes: 30 })
   })
 })

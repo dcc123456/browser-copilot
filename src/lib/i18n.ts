@@ -116,19 +116,17 @@ export interface Messages {
   taskWorkflowPlaceholder: string
   taskWorkflowHint: string
   taskSchedule: string
-  taskSchedDaily: string
-  taskSchedWeekdays: string
-  taskSchedWeekly: string
-  taskSchedInterval: string
+  taskScheduleHint: string
+  taskScheduleAdd: string
+  taskScheduleRemove: string
+  taskSchedModeWeekly: string
+  taskSchedModeInterval: string
   taskSchedOnce: string
   taskOnceHint: string
   taskFollows: string
   taskChain: string
   taskOutputs: string
-  taskSchedManual: string
   taskManualHint: string
-  taskManualChip: string
-  taskEvery: string
   taskMinutes: string
   taskMaxRounds: string
   taskMaxRoundsHint: string
@@ -1781,22 +1779,21 @@ const en: Messages = {
   taskWorkflow: 'Workflow',
   taskWorkflowPlaceholder: 'Select a workflow',
   taskWorkflowHint: 'This schedule runs the selected workflow unattended.',
-  taskSchedule: 'When',
-  taskSchedDaily: 'Daily at',
-  taskSchedWeekdays: 'Weekdays (Mon–Fri) at',
-  taskSchedWeekly: 'On weekdays',
-  taskSchedInterval: 'Every',
+  taskSchedule: 'Trigger methods',
+  taskScheduleHint:
+    'Each trigger method fires this task once, like a separate schedule. Add several to run it on different cadences.',
+  taskScheduleAdd: 'Add trigger method',
+  taskScheduleRemove: 'Remove',
+  taskSchedModeWeekly: 'Weekly',
+  taskSchedModeInterval: 'Interval',
   taskSchedOnce: 'Once',
   taskOnceHint:
-    'Runs one time at this instant, then switches itself off. Edit the time to run it again.',
+    'Runs one time at this instant, then this trigger method is used up. Edit the time to run it again.',
   taskFollows: 'Follows',
   taskChain: 'Chain',
   taskOutputs: 'Hands on',
-  taskSchedManual: 'Manual',
   taskManualHint:
     'No automatic schedule — run it yourself with "Run now" or trigger it from Feishu.',
-  taskManualChip: 'Manual',
-  taskEvery: 'every',
   taskMinutes: 'minutes',
   taskMaxRounds: 'Max tool rounds',
   taskMaxRoundsHint:
@@ -3358,20 +3355,19 @@ const zhCN: Messages = {
   taskWorkflow: '工作流',
   taskWorkflowPlaceholder: '选择工作流',
   taskWorkflowHint: '此计划将无人值守运行所选工作流。',
-  taskSchedule: '时间',
-  taskSchedDaily: '每天',
-  taskSchedWeekdays: '工作日（周一至周五）',
-  taskSchedWeekly: '每周指定日',
-  taskSchedInterval: '每隔',
+  taskSchedule: '触发方式',
+  taskScheduleHint:
+    '每个触发方式都会独立触发一次运行，相当于一条独立的定时任务；可添加多个不同节奏。',
+  taskScheduleAdd: '添加触发方式',
+  taskScheduleRemove: '移除',
+  taskSchedModeWeekly: '每周',
+  taskSchedModeInterval: '间隔',
   taskSchedOnce: '一次性',
-  taskOnceHint: '只在该时刻运行一次，运行后自动停用；要再跑请改时间。',
+  taskOnceHint: '只在该时刻运行一次，之后该触发方式失效；要再跑请改时间。',
   taskFollows: '依赖',
   taskChain: '链条',
   taskOutputs: '交接字段',
-  taskSchedManual: '手动',
   taskManualHint: '不自动运行，通过「立即运行」按钮或飞书指令手动触发。',
-  taskManualChip: '手动任务',
-  taskEvery: '每隔',
   taskMinutes: '分钟',
   taskMaxRounds: '最大调用轮数',
   taskMaxRoundsHint: '该任务无人值守时最多进行多少轮"模型↔工具"往返。独立于全局设置，默认 50。',

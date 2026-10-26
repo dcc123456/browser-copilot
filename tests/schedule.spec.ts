@@ -6,7 +6,11 @@ import {
   isWeekend,
   nextRunAt,
   normalizeSchedule,
+  normalizeScheduleList,
+  schedulesOf,
+  withSchedules,
 } from '../src/lib/schedule'
+import type { Schedule, ScheduledTask } from '../src/lib/scheduler-types'
 
 describe('nextRunAt · daily', () => {
   it('picks today when the time is still ahead', () => {
@@ -276,5 +280,41 @@ describe('describeSchedule · once', () => {
     expect(describeSchedule({ kind: 'once', at }, 'en', at + 1)).toContain('(passed)')
     expect(describeSchedule({ kind: 'once', at }, 'zh-CN', at + 1)).toContain('已过期')
     expect(describeSchedule({ kind: 'once', at }, 'en', at - 1)).not.toContain('passed')
+  })
+})
+
+describe('trigger method lists', () => {
+  const weekly: Schedule = { kind: 'weekly', days: [1], hour: 9, minute: 0 }
+  const interval: Schedule = { kind: 'interval', minutes: 30 }
+
+  it('reads a legacy single-schedule record as a one-entry list', () => {
+    expect(schedulesOf({ schedule: { kind: 'daily', hour: 8, minute: 0 } })).toEqual([
+      { kind: 'daily', hour: 8, minute: 0 },
+    ])
+  })
+
+  it('drops manual entries, so an empty list is the manual task', () => {
+    expect(
+      schedulesOf({ schedule: { kind: 'none' }, schedules: [{ kind: 'none' }, weekly] }),
+    ).toEqual([weekly])
+    expect(schedulesOf({ schedule: weekly, schedules: [] })).toEqual([])
+  })
+
+  it('keeps duplicate entries: each method is an independent run', () => {
+    expect(normalizeScheduleList([weekly, weekly, interval])).toEqual([weekly, weekly, interval])
+  })
+
+  it('mirrors the first entry into the legacy schedule field', () => {
+    const task: Pick<ScheduledTask, 'schedule' | 'schedules'> = { schedule: { kind: 'none' } }
+    const next = withSchedules(task, [weekly, interval])
+    expect(next.schedule).toEqual(weekly)
+    expect(next.schedules).toEqual([weekly, interval])
+  })
+
+  it('mirrors manual when normalization leaves nothing to arm', () => {
+    const task: Pick<ScheduledTask, 'schedule' | 'schedules'> = { schedule: weekly }
+    const next = withSchedules(task, [{ kind: 'none' }])
+    expect(next.schedule).toEqual({ kind: 'none' })
+    expect(next.schedules).toEqual([])
   })
 })

@@ -16,7 +16,7 @@ import { sendCommand } from '../lib/messages'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { onStoreChanged } from '../lib/store-events'
 import { createDraft } from '../lib/task-store'
-import { describeSchedule, isManualSchedule } from '../lib/schedule'
+import { describeSchedule, schedulesOf } from '../lib/schedule'
 import type { FeishuConfig, ScheduledTask } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
 import TaskEditDialog from './TaskEditDialog'
@@ -233,7 +233,8 @@ export default function TasksTab() {
       ) : (
         <ul className="task-list">
           {tasks.map((task) => {
-            const manual = isManualSchedule(task.schedule)
+            const schedules = schedulesOf(task)
+            const manual = schedules.length === 0
             return (
               <li
                 className={`task-item${highlightedId === task.id ? ' task-item-saved' : ''}${
@@ -266,9 +267,19 @@ export default function TasksTab() {
                   </span>
                 </div>
                 <div className="task-meta">
-                  <span className={`task-chip${manual ? ' task-chip-manual' : ''}`}>
-                    {describeSchedule(task.schedule, zh ? 'zh' : 'en', Date.now())}
-                  </span>
+                  {schedules.length === 0 ? (
+                    <span className="task-chip task-chip-manual">
+                      {describeSchedule({ kind: 'none' }, zh ? 'zh' : 'en', Date.now())}
+                    </span>
+                  ) : (
+                    // One chip per trigger method: each one fires a run, so the
+                    // list must not hide a second cadence behind the first.
+                    schedules.map((schedule, index) => (
+                      <span className="task-chip" key={index}>
+                        {describeSchedule(schedule, zh ? 'zh' : 'en', Date.now())}
+                      </span>
+                    ))
+                  )}
                   <span className="task-chip">
                     {task.kind === 'github-review-requests'
                       ? t.taskKindGithub

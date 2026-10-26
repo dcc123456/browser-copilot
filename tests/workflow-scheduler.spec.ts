@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ScheduledTask } from '../src/lib/scheduler-types'
+import type { Schedule, ScheduledTask } from '../src/lib/scheduler-types'
 import {
   onAlarm,
+  parseTaskAlarmName,
   rescheduleAll,
   scheduleTask,
   taskIdFromAlarmName,
@@ -39,6 +40,13 @@ vi.mock('../src/lib/task-store', async (importOriginal) => {
     disableTask: vi.fn(async (id: string) => {
       const task = store.tasks.find((t) => t.id === id)
       if (task) task.enabled = false
+    }),
+    // A spent one-shot inside a multi-method task is dropped from the stored
+    // list; keep that write in the same in-memory record the scheduler reads.
+    saveTask: vi.fn(async (task: ScheduledTask) => {
+      const index = store.tasks.findIndex((entry) => entry.id === task.id)
+      if (index >= 0) store.tasks[index] = task
+      else store.tasks.push(task)
     }),
   }
 })
@@ -95,6 +103,13 @@ describe('workflow scheduler alarm prefixes', () => {
     expect(taskIdFromAlarmName('other:ghi')).toBeNull()
   })
 
+  it('parses the index suffix of a secondary trigger method', () => {
+    expect(parseTaskAlarmName('workflow:abc#2')).toEqual({ taskId: 'abc', index: 2 })
+    expect(parseTaskAlarmName('task:def')).toEqual({ taskId: 'def', index: 0 })
+    expect(parseTaskAlarmName('task:def#x')).toBeNull()
+    expect(parseTaskAlarmName('other:ghi#1')).toBeNull()
+  })
+
   it('schedules a workflow-kind task under the workflow: prefix', async () => {
     store.setTasks([makeTask({ id: 'wf-task', kind: 'workflow', workflowId: 'wf-1' })])
 
@@ -124,6 +139,83 @@ describe('workflow scheduler alarm prefixes', () => {
     expect(alarmsByName.has('workflow:gone')).toBe(false)
     expect(alarmsByName.has('task:gone')).toBe(false)
     expect(createdCalls).toContain('workflow:wf-task')
+  })
+
+  describe('multiple trigger methods', () => {
+    const MONDAY_9: Schedule = { kind: 'weekly', days: [1], hour: 9, minute: 0 }
+    const WEDNESDAY_18: Schedule = { kind: 'weekly', days: [3], hour: 18, minute: 30 }
+    const HOURLY: Schedule = { kind: 'interval', minutes: 60 }
+    const FOUR_HOURLY: Schedule = { kind: 'interval', minutes: 240 }
+
+    beforeEach(() => {
+      vi.mocked(runTask).mockClear()
+    })
+
+    const multiTask = (id: string, schedules: Schedule[]): ScheduledTask =>
+      makeTask({ id, schedule: schedules[0]!, schedules })
+
+    it('arms one alarm per method, keeping index 0 unsuffixed', async () => {
+      store.setTasks([multiTask('multi', [MONDAY_9, WEDNESDAY_18, HOURLY])])
+
+      await scheduleTask('multi')
+
+      expect(createdCalls.sort()).toEqual(['task:multi', 'task:multi#1', 'task:multi#2'])
+    })
+
+    it('sweeps the alarms of trigger methods that were removed', async () => {
+      store.setTasks([multiTask('multi', [MONDAY_9, WEDNESDAY_18, HOURLY])])
+      await scheduleTask('multi')
+      expect(alarmsByName.has('task:multi#2')).toBe(true)
+
+      createdCalls.length = 0
+      const task = store.tasks[0]!
+      task.schedule = MONDAY_9
+      task.schedules = [MONDAY_9]
+      await scheduleTask('multi')
+
+      expect(alarmsByName.has('task:multi#1')).toBe(false)
+      expect(alarmsByName.has('task:multi#2')).toBe(false)
+      expect(createdCalls).toEqual(['task:multi'])
+    })
+
+    it('re-arms only the trigger method that fired', async () => {
+      store.setTasks([multiTask('multi', [HOURLY, FOUR_HOURLY])])
+      await scheduleTask('multi')
+      createdCalls.length = 0
+
+      onAlarm({ name: 'task:multi#1' } as Parameters<typeof onAlarm>[0])
+      await vi.waitFor(() => expect(runTask).toHaveBeenCalledTimes(1))
+
+      expect(createdCalls).toEqual(['task:multi#1'])
+    })
+
+    it('drops a spent one-shot, keeps the task enabled, and re-arms the rest', async () => {
+      const spent: Schedule = { kind: 'once', at: Date.now() + 30 * 60_000 }
+      store.setTasks([multiTask('mixed', [spent, MONDAY_9])])
+      await scheduleTask('mixed')
+      expect(createdCalls).toEqual(['task:mixed', 'task:mixed#1'])
+
+      createdCalls.length = 0
+      onAlarm({ name: 'task:mixed' } as Parameters<typeof onAlarm>[0])
+      await vi.waitFor(() => expect(runTask).toHaveBeenCalledTimes(1))
+
+      const saved = store.tasks.find((task) => task.id === 'mixed')!
+      expect(saved.enabled).toBe(true)
+      expect(saved.schedules).toEqual([MONDAY_9])
+      expect(saved.schedule).toEqual(MONDAY_9)
+      // The remaining method moved to index 0, so it takes the unsuffixed name.
+      expect(createdCalls).toEqual(['task:mixed'])
+      expect(vi.mocked(runTask).mock.calls[0]?.[0].schedules).toEqual([MONDAY_9])
+    })
+
+    it('does nothing for an alarm whose index the list no longer has', async () => {
+      store.setTasks([multiTask('solo', [MONDAY_9])])
+
+      onAlarm({ name: 'task:solo#3' } as Parameters<typeof onAlarm>[0])
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(runTask).not.toHaveBeenCalled()
+    })
   })
 
   describe('one-shot tasks', () => {

@@ -184,6 +184,8 @@ describe('create_scheduled_task execution', () => {
     expect(saved.prompt).toBe('Check the dashboard and summarize.')
     expect(saved.enabled).toBe(true)
     expect(saved.schedule).toEqual({ kind: 'daily', hour: 9, minute: 0 })
+    // The single schedule the tool speaks is written as the task's whole list.
+    expect(saved.schedules).toEqual([{ kind: 'daily', hour: 9, minute: 0 }])
 
     // The alarm is armed under the plain-task prefix, at least one minute out
     // (chrome.alarms rejects shorter delays).
@@ -424,6 +426,23 @@ describe('create_scheduled_task execution', () => {
     const output = await executeTool('list_scheduled_tasks', {}, baseCtx)
     const parsed = JSON.parse(output) as { tasks: { id?: string }[] }
     expect(parsed.tasks[0]?.id).toBe('existing-1')
+  })
+
+  it('list_scheduled_tasks reports every trigger method', async () => {
+    store.setTasks([
+      makeTask({
+        id: 'multi',
+        name: 'Two cadences',
+        schedule: { kind: 'weekly', days: [1], hour: 9, minute: 0 },
+        schedules: [
+          { kind: 'weekly', days: [1], hour: 9, minute: 0 },
+          { kind: 'interval', minutes: 30 },
+        ],
+      }),
+    ])
+    const output = await executeTool('list_scheduled_tasks', {}, baseCtx)
+    const parsed = JSON.parse(output) as { tasks: { schedule?: string }[] }
+    expect(parsed.tasks[0]?.schedule).toBe('Mon 09:00; Every 30 min')
   })
 
   describe('one-shot and chained tasks', () => {

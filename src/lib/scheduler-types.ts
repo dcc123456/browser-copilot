@@ -56,7 +56,18 @@ export interface ScheduledTask {
   id: string
   name: string
   enabled: boolean
+  /**
+   * Mirror of `schedules[0]`, kept as the single-schedule shape every older
+   * reader (agent tool, run logs, older panel builds) consumes. New writes set
+   * both; see `schedulesOf` / `withSchedules` in `lib/schedule`.
+   */
   schedule: Schedule
+  /**
+   * Every trigger method of this task, in arm order; each entry fires a run of
+   * its own. Absent on records written before a task could hold several — those
+   * read as `[schedule]`. An empty list is a manual-only task.
+   */
+  schedules?: Schedule[]
   kind: TaskKind
   /** Used when `kind === 'agent-prompt'`. */
   prompt?: string

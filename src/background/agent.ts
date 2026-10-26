@@ -157,7 +157,13 @@ import {
   coerceMaxToolRounds,
   listRuns,
 } from '../lib/task-store'
-import { coerceOnceAt, describeSchedule, nextRunAt, normalizeSchedule } from '../lib/schedule'
+import {
+  coerceOnceAt,
+  describeSchedule,
+  nextRunAt,
+  normalizeSchedule,
+  schedulesOf,
+} from '../lib/schedule'
 import type { Schedule, ScheduledTask, TaskKind } from '../lib/scheduler-types'
 import { OUTPUT_NAME, RESERVED_VARIABLE_NAMES } from '../lib/task-chain'
 import { MAX_BULK_LITERAL_CHARS } from '../lib/workflow/dynamic-data'
@@ -3241,6 +3247,9 @@ export async function createScheduledTaskFromArgs(args: Record<string, unknown>)
   const base: Partial<ScheduledTask> = {
     name,
     schedule,
+    // The tool speaks one schedule, so an update replaces every trigger method
+    // the task held. Multi-method tasks are the Tasks tab's business.
+    schedules: [schedule],
     kind,
     prompt: kind === 'agent-prompt' ? prompt : undefined,
     workflowId: kind === 'workflow' ? workflowId : undefined,
@@ -4152,25 +4161,35 @@ export async function executeTool(
         if (outputKeysByTask.has(run.taskId)) continue
         outputKeysByTask.set(run.taskId, Object.keys(run.outputs))
       }
-      const tasks = all.map((task) => ({
-        id: task.id,
-        name: task.name,
-        kind: task.kind,
-        enabled: task.enabled,
-        schedule: describeSchedule(task.schedule, 'en', Date.now()),
-        ...(task.kind === 'agent-prompt' && task.prompt
-          ? { prompt: task.prompt.slice(0, 500) }
-          : {}),
-        ...(task.lastRunAt ? { lastRunAt: task.lastRunAt } : {}),
-        ...(task.lastStatus ? { lastStatus: task.lastStatus } : {}),
-        ...(task.lastSummary ? { lastSummary: task.lastSummary } : {}),
-        ...(task.notifyFeishu ? { notifyFeishu: true } : {}),
-        ...(task.followsTaskId ? { followsTaskId: task.followsTaskId } : {}),
-        ...(task.chainId ? { chainId: task.chainId } : {}),
-        ...(task.outputs && task.outputs.length > 0 ? { outputs: task.outputs } : {}),
-        ...(task.variables ? { variables: task.variables } : {}),
-        ...(outputKeysByTask.has(task.id) ? { lastOutputKeys: outputKeysByTask.get(task.id) } : {}),
-      }))
+      const now = Date.now()
+      const tasks = all.map((task) => {
+        const schedules = schedulesOf(task)
+        return {
+          id: task.id,
+          name: task.name,
+          kind: task.kind,
+          enabled: task.enabled,
+          // Every trigger method reads back, in arm order; a task with none is
+          // manual-only.
+          schedule: schedules.length
+            ? schedules.map((entry) => describeSchedule(entry, 'en', now)).join('; ')
+            : describeSchedule({ kind: 'none' }, 'en'),
+          ...(task.kind === 'agent-prompt' && task.prompt
+            ? { prompt: task.prompt.slice(0, 500) }
+            : {}),
+          ...(task.lastRunAt ? { lastRunAt: task.lastRunAt } : {}),
+          ...(task.lastStatus ? { lastStatus: task.lastStatus } : {}),
+          ...(task.lastSummary ? { lastSummary: task.lastSummary } : {}),
+          ...(task.notifyFeishu ? { notifyFeishu: true } : {}),
+          ...(task.followsTaskId ? { followsTaskId: task.followsTaskId } : {}),
+          ...(task.chainId ? { chainId: task.chainId } : {}),
+          ...(task.outputs && task.outputs.length > 0 ? { outputs: task.outputs } : {}),
+          ...(task.variables ? { variables: task.variables } : {}),
+          ...(outputKeysByTask.has(task.id)
+            ? { lastOutputKeys: outputKeysByTask.get(task.id) }
+            : {}),
+        }
+      })
       return JSON.stringify({ count: tasks.length, tasks })
     }
 

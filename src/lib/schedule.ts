@@ -7,7 +7,7 @@
  * @module lib/schedule
  */
 
-import type { Schedule } from './scheduler-types'
+import type { Schedule, ScheduledTask } from './scheduler-types'
 
 /** Monday=0 … Sunday=6, matching `Date.getDay()` offset by one. */
 export function isWeekend(date: Date): boolean {
@@ -109,11 +109,33 @@ export function normalizeSchedule(raw: unknown): Schedule {
 }
 
 /**
- * Returns true when the task has no automatic schedule and only runs when
- * triggered by hand ("Run now" / Feishu). Such tasks never get an alarm.
+ * Normalizes a stored list of trigger methods. Manual entries are dropped — a
+ * list is only "when this runs automatically" — and `[]` therefore means
+ * manual-only. Exact duplicates are kept: each trigger method is an independent
+ * run, so two identical entries are the user asking for two runs.
  */
-export function isManualSchedule(schedule: Schedule): boolean {
-  return normalizeSchedule(schedule).kind === 'none'
+export function normalizeScheduleList(raw: readonly unknown[]): Schedule[] {
+  return raw.map(normalizeSchedule).filter((schedule) => schedule.kind !== 'none')
+}
+
+/**
+ * The trigger methods of a task. A record written before tasks could hold
+ * several has no `schedules` array; its single `schedule` is the whole list.
+ */
+export function schedulesOf(task: Pick<ScheduledTask, 'schedule' | 'schedules'>): Schedule[] {
+  return normalizeScheduleList(Array.isArray(task.schedules) ? task.schedules : [task.schedule])
+}
+
+/**
+ * Copy of `task` carrying `schedules`, with `schedule` mirroring the first entry
+ * — the field every legacy reader consumes.
+ */
+export function withSchedules<T extends Pick<ScheduledTask, 'schedule' | 'schedules'>>(
+  task: T,
+  schedules: readonly Schedule[],
+): T {
+  const list = normalizeScheduleList(schedules)
+  return { ...task, schedule: list[0] ?? { kind: 'none' }, schedules: list }
 }
 
 /**

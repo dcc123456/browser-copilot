@@ -11,61 +11,73 @@
  *
  * ## Alarm name contract
  *
- * Alarm names are `task:<id>`, and `workflow:<id>` for workflow-kind tasks. On
- * startup we reconcile alarms with stored tasks: tasks without an alarm get one,
- * and stale alarms (deleted tasks) are cleared. This is idempotent, so calling
- * `rescheduleAll` after every change is safe.
+ * A task may hold several trigger methods, and each one fires its own alarm:
+ * `task:<id>` / `workflow:<id>` for the first entry (the historical name, so
+ * alarms armed by an older build keep firing) and `…:<id>#<index>` for the
+ * rest. On startup we reconcile alarms with stored tasks: tasks without an
+ * alarm get one, and stale alarms (deleted tasks, shortened lists) are cleared.
+ * This is idempotent, so calling `rescheduleAll` after every change is safe.
  *
  * @module background/scheduler
  */
 
-import { isManualSchedule, nextRunAt } from '../lib/schedule'
+import { nextRunAt, schedulesOf, withSchedules } from '../lib/schedule'
 import { getTask, listTasks, disableTask, saveTask } from '../lib/task-store'
-import type { ScheduledTask } from '../lib/scheduler-types'
+import type { Schedule, ScheduledTask } from '../lib/scheduler-types'
 import { runTask } from './task-runner'
 
 const ALARM_PREFIX = 'task:'
 const WORKFLOW_ALARM_PREFIX = 'workflow:'
 /** `chrome.alarms` rejects periods and delays under 1 minute. */
 const MIN_ALARM_DELAY_MS = 60_000
+/** Ids never contain it, so the trailing index is unambiguous. */
+const INDEX_SEPARATOR = '#'
 
-/** Legacy name for a task alarm; workflow-kind tasks use the `workflow:` prefix. */
-function alarmName(taskId: string): string {
-  return `${ALARM_PREFIX}${taskId}`
+/**
+ * Alarm name for one trigger method of a task. Index 0 deliberately keeps the
+ * unsuffixed historical name.
+ */
+function alarmNameFor(task: ScheduledTask, index = 0): string {
+  const base =
+    task.kind === 'workflow' ? `${WORKFLOW_ALARM_PREFIX}${task.id}` : `${ALARM_PREFIX}${task.id}`
+  return index === 0 ? base : `${base}${INDEX_SEPARATOR}${index}`
 }
 
 /**
- * Alarm name for a specific task, chosen by its kind so workflow tasks can be
- * told apart (and orphan-cleared) independently from plain scheduled tasks.
+ * Splits one of this scheduler's alarm names into the task it belongs to and
+ * the index of the trigger method that fired.
  */
-function alarmNameFor(task: ScheduledTask): string {
-  return task.kind === 'workflow'
-    ? `${WORKFLOW_ALARM_PREFIX}${task.id}`
-    : `${ALARM_PREFIX}${task.id}`
+export function parseTaskAlarmName(name: string): { taskId: string; index: number } | null {
+  const rest = name.startsWith(WORKFLOW_ALARM_PREFIX)
+    ? name.slice(WORKFLOW_ALARM_PREFIX.length)
+    : name.startsWith(ALARM_PREFIX)
+      ? name.slice(ALARM_PREFIX.length)
+      : ''
+  if (!rest) return null
+  const separator = rest.lastIndexOf(INDEX_SEPARATOR)
+  if (separator === -1) return { taskId: rest, index: 0 }
+  const taskId = rest.slice(0, separator)
+  const indexText = rest.slice(separator + 1)
+  if (!taskId || !/^\d+$/.test(indexText)) return null
+  return { taskId, index: Number(indexText) }
 }
 
 export function taskIdFromAlarmName(name: string): string | null {
-  if (name.startsWith(WORKFLOW_ALARM_PREFIX)) return name.slice(WORKFLOW_ALARM_PREFIX.length)
-  if (name.startsWith(ALARM_PREFIX)) return name.slice(ALARM_PREFIX.length)
-  return null
+  return parseTaskAlarmName(name)?.taskId ?? null
 }
 
-/**
- * Creates or replaces the alarm for one task. Disabled tasks have their alarm
- * cleared (but are kept, so they can be re-enabled).
- */
-export async function scheduleTask(taskId: string): Promise<void> {
-  const task = await getTask(taskId)
-  // Fall back to the legacy `task:` prefix when the task cannot be found, so a
-  // deleted task's alarm is still cleared by the caller's reschedule.
-  const name = task ? alarmNameFor(task) : alarmName(taskId)
-  // A manual ("no schedule") task has no next firing: just make sure it holds no
-  // alarm, then leave it to be run by hand / from Feishu.
-  if (!task || !task.enabled || isManualSchedule(task.schedule)) {
-    await chrome.alarms.clear(name)
-    return
+/** Drops every alarm of one task, at any index and either prefix. */
+async function clearTaskAlarms(taskId: string): Promise<void> {
+  const alarms = await chrome.alarms.getAll()
+  for (const alarm of alarms) {
+    if (parseTaskAlarmName(alarm.name)?.taskId === taskId) await chrome.alarms.clear(alarm.name)
   }
-  const when = nextRunAt(task.schedule, Date.now())
+}
+
+/** Arms one trigger method, or clears the slot when it has no next firing. */
+async function armSchedule(task: ScheduledTask, schedule: Schedule, index: number): Promise<void> {
+  const name = alarmNameFor(task, index)
+  const when = nextRunAt(schedule, Date.now())
   // null also means a one-shot whose instant is gone: leave it unarmed rather
   // than clamping it to "soon", which would re-fire a run that already happened.
   if (when === null) {
@@ -78,6 +90,21 @@ export async function scheduleTask(taskId: string): Promise<void> {
   await chrome.alarms.create(name, { when: safeWhen })
 }
 
+/**
+ * Re-arms one task from scratch: clears the alarms it held (the list may have
+ * shrunk, or the kind changed prefix) and arms one alarm per trigger method.
+ * Disabled and manual tasks end up with no alarms.
+ */
+export async function scheduleTask(taskId: string): Promise<void> {
+  const task = await getTask(taskId)
+  await clearTaskAlarms(taskId)
+  if (!task || !task.enabled) return
+  const schedules = schedulesOf(task)
+  for (let index = 0; index < schedules.length; index++) {
+    await armSchedule(task, schedules[index]!, index)
+  }
+}
+
 /** Clears and recreates alarms for every task, removing orphaned alarms. */
 export async function rescheduleAll(): Promise<void> {
   // Clear anything that no longer corresponds to a known, enabled task first, so
@@ -85,12 +112,13 @@ export async function rescheduleAll(): Promise<void> {
   // plain-task and workflow prefixes.
   const existing = await chrome.alarms.getAll()
   const tasks = await listTasks()
-  const known = new Set(tasks.filter((task) => task.enabled).map((task) => alarmNameFor(task)))
+  const knownIds = new Set(tasks.filter((task) => task.enabled).map((task) => task.id))
 
   for (const alarm of existing) {
-    const isOurs =
-      alarm.name.startsWith(ALARM_PREFIX) || alarm.name.startsWith(WORKFLOW_ALARM_PREFIX)
-    if (isOurs && !known.has(alarm.name)) {
+    const parsed = parseTaskAlarmName(alarm.name)
+    // An index this task no longer has is handled by its own scheduleTask call
+    // below, which sweeps every alarm the task holds before arming it again.
+    if (parsed && !knownIds.has(parsed.taskId)) {
       await chrome.alarms.clear(alarm.name)
     }
   }
@@ -106,30 +134,48 @@ export async function rescheduleAll(): Promise<void> {
  * an alarm receives the event.
  */
 export function onAlarm(alarm: chrome.alarms.Alarm): void {
-  const taskId = taskIdFromAlarmName(alarm.name)
-  if (!taskId) return
-  void handleScheduledRun(taskId)
+  const parsed = parseTaskAlarmName(alarm.name)
+  if (!parsed) return
+  void handleScheduledRun(parsed.taskId, parsed.index)
 }
 
-async function handleScheduledRun(taskId: string): Promise<void> {
+async function handleScheduledRun(taskId: string, index: number): Promise<void> {
   const task = await getTask(taskId)
   if (!task || !task.enabled) return
+  const schedules = schedulesOf(task)
+  const schedule = schedules[index]
+  // A stale alarm from a shortened list: the save path sweeps it, so there is
+  // nothing here to fire.
+  if (!schedule) return
 
   // A one-shot is finished the moment it fires, so it is put away BEFORE running
   // rather than re-armed after: if the run throws, or the worker is evicted
-  // mid-run, nothing is left to fire it a second time. `disableTask` goes through
-  // the store's key lock (the run about to settle writes the same record), and
-  // `rescheduleAll` only knows enabled tasks, so this one stays down.
-  if (task.schedule.kind === 'once') {
-    await disableTask(taskId)
-    await chrome.alarms.clear(alarmNameFor(task))
-    await runTask(task, 'schedule')
+  // mid-run, nothing is left to fire it a second time.
+  if (schedule.kind === 'once') {
+    const remaining = schedules.filter((_, i) => i !== index)
+    if (remaining.length === 0) {
+      // `disableTask` goes through the store's key lock (the run about to settle
+      // writes the same record), and `rescheduleAll` only knows enabled tasks,
+      // so this one stays down.
+      await disableTask(taskId)
+      await chrome.alarms.clear(alarmNameFor(task, index))
+      await runTask(task, 'schedule')
+      return
+    }
+    // Other trigger methods still fire, so the task stays enabled; only the
+    // spent entry goes. Removing it shifts the indices of everything after it,
+    // which is why the whole shortened list is re-armed.
+    const next = withSchedules(task, remaining)
+    await saveTask(next)
+    await scheduleTask(taskId)
+    await runTask(next, 'schedule')
     return
   }
 
-  // Recurring: the alarm is one-shot; queue the next firing before running so a
-  // crash in the task does not leave the schedule stranded.
-  await scheduleTask(taskId)
+  // Recurring: the alarm is one-shot; queue THIS entry's next firing before
+  // running so a crash in the task cannot strand it and firing one method does
+  // not push another method's next run forward.
+  await armSchedule(task, schedule, index)
   await runTask(task, 'schedule')
 }
 

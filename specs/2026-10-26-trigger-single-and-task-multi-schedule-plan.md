@@ -1,11 +1,11 @@
 # Trigger single-select + multiple trigger methods per scheduled task
 
 Date: 2026-10-26
-Status: implementing
+Status: implemented
 
 ## Part 1 — the trigger block edits exactly one trigger
 
-The block form currently shows a type dropdown *and* a "Workflow triggers" button
+The block form currently shows a type dropdown _and_ a "Workflow triggers" button
 that opens a list modal for adding further specs. The user wants only the
 dropdown; a workflow supports a single trigger.
 
@@ -33,9 +33,11 @@ more scheduled task.
 - `lib/schedule.ts` owns the two helpers:
   - `schedulesOf(task)` — normalized, `none` entries dropped, `[]` = manual;
     falls back to `[task.schedule]` when the array is absent (legacy record).
-  - `withSchedules(task, schedules)` — normalizes, dedupes exact duplicates
-    (two runs at the same instant is never intended), rewrites the `schedule`
-    mirror, and stores `[]` for manual-only.
+  - `withSchedules(task, schedules)` — normalizes, rewrites the `schedule`
+    mirror, and stores `[]` for manual-only. Exact duplicates are **kept**: each
+    entry is an independent run, so two identical entries are the user asking
+    for two runs, and silently collapsing them would make "Add trigger method"
+    look like it did nothing.
 - `task-store.asTask` normalizes the array on read so a hand-edited record can
   never reach the scheduler half-written.
 
@@ -55,8 +57,9 @@ more scheduled task.
 
 - `TaskEditDialog` renders one bordered card per entry: a mode select
   (weekly / once / interval) + the existing config controls + remove button +
-  live preview. "Add trigger method" appends a weekly entry; an empty list is the
-  manual task (no alarm), preserving today's manual behavior.
+  live preview. "Add trigger method" appends an interval entry (every 60 min,
+  the neutral starting point); an empty list is the manual task (no alarm),
+  preserving today's manual behavior.
 - `TasksTab` shows one chip per entry and treats a task as manual only when the
   list is empty.
 
