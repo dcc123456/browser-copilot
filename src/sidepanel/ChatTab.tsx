@@ -800,13 +800,12 @@ function ToolCallCard({ entry, t, now }: { entry: Entry; t: ChatT; now: number }
  * One complete agent turn painted as a SINGLE bubble: all assistant text
  * segments and the tool calls interleaved between them share one container,
  * so a turn whose answer brackets tool calls no longer splits into several
- * disconnected bubbles.
+ * disconnected bubbles. The turn's copy/download row sits under the bubble.
  */
 function AssistantTurn({
   entries,
   live,
   isLast,
-  busy,
   now,
   t,
   title,
@@ -815,7 +814,6 @@ function AssistantTurn({
   entries: Entry[]
   live: boolean
   isLast: boolean
-  busy: boolean
   now: number
   t: ChatT
   title: string
@@ -833,26 +831,31 @@ function AssistantTurn({
   }
 
   return (
-    <div
-      className="flex flex-col gap-2.5 rounded-xl border border-border bg-panel-2 px-3 py-2.5"
-      data-role="assistant-turn"
-    >
-      {entries.map((entry) =>
-        entry.role === 'tool' ? (
-          <ToolCallCard entry={entry} key={entry.id} now={now} t={t} />
-        ) : entry.role === 'thinking' ? (
-          <ThinkBlock
-            closed={entry.closed !== false}
-            key={entry.id}
-            live={live}
-            text={entry.text}
-          />
-        ) : (
-          <AssistantContent key={entry.id} live={live} text={entry.text} />
-        ),
-      )}
-      <GeneratedSkillCards assistantText={answer} onSaved={onSkillSaved} t={t} />
-      <MsgActions busy={busy} entry={actionsEntry} isLastAssistant={isLast} t={t} title={title} />
+    // The bubble and its action row share one hover group: the actions live
+    // BELOW the bubble (like desktop agent clients) and only appear while the
+    // message is hovered or something inside it has keyboard focus.
+    <div className="group/msg flex flex-col gap-1">
+      <div
+        className="flex flex-col gap-2.5 rounded-xl border border-border bg-panel-2 px-3 py-2.5"
+        data-role="assistant-turn"
+      >
+        {entries.map((entry) =>
+          entry.role === 'tool' ? (
+            <ToolCallCard entry={entry} key={entry.id} now={now} t={t} />
+          ) : entry.role === 'thinking' ? (
+            <ThinkBlock
+              closed={entry.closed !== false}
+              key={entry.id}
+              live={live}
+              text={entry.text}
+            />
+          ) : (
+            <AssistantContent key={entry.id} live={live} text={entry.text} />
+          ),
+        )}
+        <GeneratedSkillCards assistantText={answer} onSaved={onSkillSaved} t={t} />
+      </div>
+      <MsgActions entry={actionsEntry} live={live} showUsage={isLast} t={t} title={title} />
     </div>
   )
 }
@@ -912,42 +915,62 @@ function ToolbarIconButton({
   )
 }
 
+const MSG_ACTION_CLASS =
+  'inline-flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-md border-0! bg-transparent! p-0! text-muted! transition-colors duration-150 hover:bg-hover! hover:text-ink!'
+
+const MSG_MENU_ITEM_CLASS =
+  'block w-full cursor-pointer rounded-none! border-0! bg-transparent! px-2.5! py-1.5! text-left text-xs! text-ink! hover:bg-hover!'
+
 /**
- * Copy / download actions rendered on user and assistant bubbles.
+ * Copy / download actions of one message, rendered BELOW its bubble (never
+ * inside it) and revealed on hover or keyboard focus — the action row desktop
+ * agent clients use. Every finished assistant round carries its own pair, so
+ * an earlier answer can be copied or exported without scrolling to the end.
  *
  * Copying writes the raw `entry.text` (plain text for the user's own words,
  * raw Markdown for an assistant reply — the form most useful to paste back
  * into another tool). Assistant bubbles additionally offer a download menu
  * (Markdown / plain text / printable HTML) driven by `lib/export-answer`.
- *
- * The buttons sit in the top-right corner and only show on hover / keyboard
- * focus, so they never block the transcript on a touch-less desktop.
- */ function MsgActions({
+ */
+function MsgActions({
   entry,
   title,
   t,
-  isLastAssistant,
-  busy,
+  live,
+  showUsage,
 }: {
   entry: Entry
   title: string
   t: ReturnType<typeof useT>
-  isLastAssistant: boolean
-  busy: boolean
+  /** True while this assistant round is still streaming: no final text yet. */
+  live: boolean
+  /** Per-turn token gauge; only the conversation's latest reply carries it. */
+  showUsage: boolean
 }) {
-  if (entry.role !== 'user' && entry.role !== 'assistant') return null
-  const isAssistant = entry.role === 'assistant'
-  // While a turn is still streaming, NO assistant bubble (the live one
-  // included) shows actions — the answer is still evolving, not a finished
-  // text worth copying or exporting. Buttons appear once the chat completes.
-  if (busy && isAssistant) return null
-  // Only the last assistant reply gets any buttons at all (copy + download +
-  // token); earlier assistant messages show none so the transcript stays calm.
-  if (isAssistant && !isLastAssistant) return null
-  // Download and the token gauge only appear on that turn's closing answer.
-  const isFinal = isAssistant && isLastAssistant
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [menuOpen, setMenuOpen] = useState(false)
+
+  // Clicking anywhere outside the open menu closes it (same deferred-listener
+  // trick as the mode popover; see ChatTab above).
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = (): void => setMenuOpen(false)
+    const id = window.setTimeout(() => {
+      document.addEventListener('click', close, { once: true })
+    }, 0)
+    return () => {
+      window.clearTimeout(id)
+      document.removeEventListener('click', close)
+    }
+  }, [menuOpen])
+
+  // A streaming answer is still evolving, so this round gets its actions when
+  // it ends. The row is hover-revealed, which also keeps it keyboard-only
+  // reachable via focus-within.
+  if (live) return null
+
+  const isAssistant = entry.role === 'assistant'
+  const usage = isAssistant && showUsage ? entry.usage : undefined
 
   const copy = (): void => {
     void navigator.clipboard
@@ -969,28 +992,26 @@ function ToolbarIconButton({
     await downloadAnswer({ text: entry.text, format, title })
   }
 
-  // Clicking anywhere outside the open menu closes it (same deferred-listener
-  // trick as the mode popover; see ChatTab above).
-  useEffect(() => {
-    if (!menuOpen) return
-    const close = (): void => setMenuOpen(false)
-    const id = window.setTimeout(() => {
-      document.addEventListener('click', close, { once: true })
-    }, 0)
-    return () => {
-      window.clearTimeout(id)
-      document.removeEventListener('click', close)
-    }
-  }, [menuOpen])
-
   const copyLabel =
     state === 'copied' ? t.msgCopied : state === 'failed' ? t.msgCopyFailed : t.msgCopy
 
   return (
-    <div className="msg-actions">
+    <div
+      className={[
+        'flex items-center gap-0.5 transition-opacity duration-150',
+        // The open menu must not vanish when the pointer leaves the bubble.
+        menuOpen
+          ? 'opacity-100'
+          : 'opacity-0 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100',
+      ].join(' ')}
+      data-role="msg-actions"
+    >
       <button
         aria-label={copyLabel}
-        className="msg-action msg-copy"
+        className={[
+          MSG_ACTION_CLASS,
+          state === 'copied' ? 'text-accent!' : state === 'failed' ? 'text-err!' : '',
+        ].join(' ')}
         data-state={state}
         onClick={copy}
         title={copyLabel}
@@ -1002,57 +1023,85 @@ function ToolbarIconButton({
           <Copy size={13} aria-hidden="true" />
         )}
       </button>
-      {isFinal && (
+      {isAssistant && (
         <>
-          <button
-            aria-label={t.msgDownload}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            className="msg-action msg-download"
-            onClick={() => setMenuOpen((open) => !open)}
-            title={t.msgDownload}
-            type="button"
-          >
-            <Download size={13} aria-hidden="true" />
-          </button>
-          {menuOpen && (
-            <div className="msg-download-menu" role="menu">
-              <div className="msg-download-title">{t.msgDownloadAs}</div>
-              <button onClick={() => download('md')} type="button">
-                {t.msgDownloadMd}
-              </button>
-              <button onClick={() => download('txt')} type="button">
-                {t.msgDownloadTxt}
-              </button>
-              <button onClick={() => download('html')} type="button">
-                {t.msgDownloadHtmlPdf}
-              </button>
-              {hasTables(entry.text) && (
-                <button onClick={() => download('csv')} type="button">
-                  {t.msgDownloadCsv}
+          <div className="relative flex">
+            <button
+              aria-label={t.msgDownload}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              className={MSG_ACTION_CLASS}
+              onClick={() => setMenuOpen((open) => !open)}
+              title={t.msgDownload}
+              type="button"
+            >
+              <Download size={13} aria-hidden="true" />
+            </button>
+            {menuOpen && (
+              <div
+                className="absolute bottom-full left-0 z-20 mb-1 flex min-w-[176px] flex-col overflow-hidden rounded-lg border border-border bg-panel-2 shadow-menu"
+                role="menu"
+              >
+                <div className="border-b border-border px-2.5 py-1.5 text-[10px] uppercase tracking-[0.04em] text-muted">
+                  {t.msgDownloadAs}
+                </div>
+                <button
+                  className={MSG_MENU_ITEM_CLASS}
+                  onClick={() => download('md')}
+                  type="button"
+                >
+                  {t.msgDownloadMd}
                 </button>
-              )}
-            </div>
-          )}
-          {isFinal && !!entry.usage && (
-            <div className="msg-token" tabIndex={0} role="button" aria-label={t.msgTokenUsage}>
+                <button
+                  className={MSG_MENU_ITEM_CLASS}
+                  onClick={() => download('txt')}
+                  type="button"
+                >
+                  {t.msgDownloadTxt}
+                </button>
+                <button
+                  className={MSG_MENU_ITEM_CLASS}
+                  onClick={() => download('html')}
+                  type="button"
+                >
+                  {t.msgDownloadHtmlPdf}
+                </button>
+                {hasTables(entry.text) && (
+                  <button
+                    className={MSG_MENU_ITEM_CLASS}
+                    onClick={() => download('csv')}
+                    type="button"
+                  >
+                    {t.msgDownloadCsv}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          {usage && (
+            <div
+              className="group/token relative inline-flex h-6 w-6 cursor-default items-center justify-center rounded-md text-muted transition-colors duration-150 hover:text-ink"
+              tabIndex={0}
+              role="button"
+              aria-label={t.msgTokenUsage}
+            >
               <Gauge size={13} aria-hidden="true" />
-              <div className="msg-token-tip">
-                <span className="msg-token-tip-title">{t.tokenBarLastTurn}</span>
-                <span className="msg-token-tip-kv">
-                  {t.tokenBarT}:{formatTokens(entry.usage!.totalTokens)}
+              <div className="absolute bottom-full left-0 z-20 mb-1 hidden min-w-[150px] flex-col items-start gap-0.5 whitespace-nowrap rounded-lg border border-border bg-panel-2 px-2.5 py-1.5 text-[11px] leading-snug text-muted shadow-menu group-hover/token:flex group-focus-within/token:flex">
+                <span className="font-semibold text-ink">{t.tokenBarLastTurn}</span>
+                <span>
+                  {t.tokenBarT}:{formatTokens(usage.totalTokens)}
                 </span>
-                <span className="msg-token-tip-kv">
-                  {t.tokenBarI}:{formatTokens(entry.usage!.inputTokens)}
+                <span>
+                  {t.tokenBarI}:{formatTokens(usage.inputTokens)}
                 </span>
-                <span className="msg-token-tip-kv">
-                  {t.tokenBarO}:{formatTokens(entry.usage!.outputTokens)}
+                <span>
+                  {t.tokenBarO}:{formatTokens(usage.outputTokens)}
                 </span>
-                <span className="msg-token-tip-kv">
-                  {t.tokenBarR}:{formatTokens(entry.usage!.reasoningTokens ?? 0)}
+                <span>
+                  {t.tokenBarR}:{formatTokens(usage.reasoningTokens ?? 0)}
                 </span>
-                <span className="msg-token-tip-kv">
-                  {t.tokenBarC}:{formatTokens(entry.usage!.cachedInputTokens ?? 0)}
+                <span>
+                  {t.tokenBarC}:{formatTokens(usage.cachedInputTokens ?? 0)}
                 </span>
               </div>
             </div>
@@ -3930,8 +3979,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         {groupEntries(entries).map((item) => {
           if (item.kind === 'single') {
             const entry = item.entry
-            return (
-              <div className="msg" data-role={entry.role} key={entry.id}>
+            const body = (
+              <>
                 {/*
                   User text is shown exactly as typed; status and error lines
                   are plain text generated by this extension. Only assistant
@@ -3967,13 +4016,32 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                       : t.chatInterjectionQueued}
                   </span>
                 )}
-                <MsgActions
-                  busy={busy}
-                  entry={entry}
-                  isLastAssistant={false}
-                  t={t}
-                  title={convTitle}
-                />
+              </>
+            )
+            // The user's own message keeps its action row below the bubble
+            // too, right-aligned and hover-revealed like an agent reply's.
+            if (entry.role === 'user') {
+              return (
+                <div
+                  className="group/msg flex max-w-[92%] flex-col items-end gap-1 self-end"
+                  key={entry.id}
+                >
+                  <div className="msg" data-role="user">
+                    {body}
+                  </div>
+                  <MsgActions
+                    entry={entry}
+                    live={false}
+                    showUsage={false}
+                    t={t}
+                    title={convTitle}
+                  />
+                </div>
+              )
+            }
+            return (
+              <div className="msg" data-role={entry.role} key={entry.id}>
+                {body}
               </div>
             )
           }
@@ -3984,7 +4052,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
           const containsLastAssistant = item.entries.some((entry) => entry.id === lastAssistantId)
           return (
             <AssistantTurn
-              busy={busy}
               entries={item.entries}
               isLast={containsLastAssistant}
               key={item.entries[0]!.id}
