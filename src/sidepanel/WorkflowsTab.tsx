@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Circle,
   Download,
+  FolderInput,
   FolderPlus,
   GripVertical,
   Pencil,
@@ -1242,7 +1243,7 @@ export default function WorkflowsTab() {
                 title={t.workflowsMoveToGroup}
                 aria-label={t.workflowsMoveToGroup}
               >
-                <FolderPlus size={14} aria-hidden="true" />
+                <FolderInput size={14} aria-hidden="true" />
               </button>
               {moveMenuFor === BATCH_MOVE_MENU_KEY && (
                 <GroupMoveMenu
@@ -1261,7 +1262,7 @@ export default function WorkflowsTab() {
             title={t.workflowsGroupNew}
             aria-label={t.workflowsGroupNew}
           >
-            <Plus size={14} aria-hidden="true" />
+            <FolderPlus size={14} aria-hidden="true" />
           </button>
           {workflows.length > 0 && (
             <button
