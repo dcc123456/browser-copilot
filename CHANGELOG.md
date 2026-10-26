@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+_To be released._
+
+## [0.6.12] - 2026-10-26
+
 ### Fixed — An imported credential shows up without a reload
 
 Applying a listing that carries credentials writes them in the background, but
@@ -58,7 +62,83 @@ name, and shows like and comments as icon buttons with their counts side by
 side in the action row. The like control left the discussion panel, which is
 now comments only, and the owner action is labelled 下架 (delist).
 
-_To be released._
+### Added — Model settings live in their own tab
+
+Providers, the image model and the AI-takeover model moved out of the general
+Settings tab into a dedicated **Model settings** entry in the More menu; both
+tabs share one settings store. The add-provider menu puts the custom endpoint
+last, and fetched models became a checkbox list so several can be added at
+once.
+
+### Added — A scheduled task can carry several trigger methods
+
+Task editing now holds a list of trigger methods instead of one schedule, and
+each entry arms its own alarm — one added method is one more scheduled run. The
+top-level schedule stays the mirror of the first entry, so existing records need
+no migration, and the list shows one chip per method. Five-field **cron**
+expressions join the presets, so cadences like "the 1st of every month" or "every
+two hours" no longer need a fake weekly list; they are evaluated in local time
+through the same parser the Runner already uses, invalid text keeps the editor
+from saving, and a pattern that can never occur stays unarmed with a hint. The
+`create_scheduled_task` agent tool gained `kind: "cron"`.
+
+### Added — Create a workflow inside a group
+
+Every group header carries a plus action that opens the editor with that group
+already targeted, and the first save files the new workflow into it — a later
+move from the panel still wins. Empty groups now stay visible so they can
+receive their first workflow.
+
+### Added — Editor save state, record-to-canvas and a data table
+
+The Save button is marked while the graph differs from what is on disk, keyed off
+a content fingerprint so React Flow's measurement renders never dirty a fresh
+workflow. Recording now appends its steps to the open canvas after the terminal
+node instead of persisting a second workflow, and a bottom-centre undo / redo /
+auto-layout bar joins them; auto-layout keeps clear of the left palette and the
+zoom controls moved beside the minimap. A new **Data table** tab explains the
+run-scoped variable and lists every writer, reader and written column with
+jump-to-node links, and the sidebar header shows a copyable workflow id.
+
+### Changed — The trigger block edits exactly one trigger
+
+The "Workflow triggers" list modal is gone: any change writes a single launch
+config, matching what the scheduler can actually arm. A graph imported with
+several triggers keeps its primary spec and says so.
+
+### Changed — Webhook header and body panels
+
+The webhook block mirrors Automa's HTTP request editor: a segmented tab strip, a
+seven-column grid for header rows with an icon remove control and a full-width
+add button, and an inset body preview that opens the body editor in a modal.
+Switching to GET/HEAD now falls back to the headers tab instead of leaving an
+empty body panel behind.
+
+### Changed — Chat actions sit under every round
+
+Copy and download moved out of the reply bubble into an action row **below** each
+finished round (the user's own messages included), revealed on hover or keyboard
+focus like desktop agent clients, with the download picker opening upward. Earlier
+replies are exportable again instead of only the newest one.
+
+### Fixed — Reasoning tokens always read zero
+
+OpenAI and DeepSeek bill reasoning inside the completion and report it under
+`completion_tokens_details.reasoning_tokens`, which the usage parser never read,
+so the chat token bar always showed zero. It now prefers the completion-side
+field and keeps the old one as a fallback for other gateways.
+
+### Fixed — New group and batch move are distinguishable
+
+Both used a bare plus beside "new workflow" in the workflows header; new group
+now shows a folder with a plus and batch move a folder with an arrow.
+
+### Docs — How to update an install without losing data
+
+Both READMEs now describe the two upgrade paths: the in-place updater that ships
+from 0.6.8, and the one-time manual file swap older installs still need, with the
+reason an in-place swap keeps the extension id (and so its stored data) while
+loading the new zip from another folder does not.
 
 ## [0.6.11] - 2026-10-26
 
