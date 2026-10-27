@@ -39,6 +39,7 @@ import {
   estimateInputTokens,
   hardCapHistory,
   shouldCompact,
+  type CompactOutcome,
 } from '../lib/context-compact'
 import type { TokenAttribution } from '../lib/token-ledger'
 import { createSessionSummaryFilter } from '../lib/chat-output'
@@ -4873,6 +4874,49 @@ async function summarizeTranscript(
   return result.content
 }
 
+/**
+ * The one summarizer request configuration both compaction paths use: the
+ * conversation's own provider, and the compaction's own attribution row (see
+ * `background/token-accounting`).
+ */
+function summarizerConfigFor(
+  provider: Pick<ProviderProfile, 'apiKey' | 'baseUrl' | 'model' | 'headers'>,
+  attribution: TokenAttribution,
+) {
+  return {
+    apiKey: provider.apiKey,
+    baseUrl: provider.baseUrl,
+    model: provider.model,
+    ...(provider.headers ? { headers: provider.headers } : {}),
+    attribution: { ...attribution, consumer: 'context-compaction' as const },
+  }
+}
+
+/**
+ * Manual compaction, behind the chat panel's "compress context" action: runs
+ * exactly the compaction the automatic trigger does — same summarizer, same
+ * marker, same recent turns kept verbatim — just earlier and on request.
+ *
+ * Without a configured provider this throws instead of compacting: left to
+ * `compactHistory`'s digest fallback it would rewrite the transcript the user
+ * asked to keep, with a summary nobody could have written.
+ */
+export async function compactConversationOnRequest(
+  history: WireMessage[],
+  conversationId: string,
+): Promise<CompactOutcome | null> {
+  const [provider, settings] = await Promise.all([getActiveProvider(), getSettings()])
+  const dictionary: Messages = messagesFor(effectiveLocale(settings.locale, navigator.language))
+  return compactHistory(history, {
+    marker: dictionary.contextCompactedMarker,
+    summarize: (transcript) =>
+      summarizeTranscript(
+        summarizerConfigFor(provider, turnAttribution(conversationId)),
+        transcript,
+      ),
+  })
+}
+
 export async function runAgentTurn(
   history: WireMessage[],
   deps: AgentDeps,
@@ -4907,13 +4951,7 @@ export async function runAgentTurn(
   // compaction summarizer's — the latter is a real cost the user pays to keep
   // the former running, so it gets its own row instead of hiding in "chat".
   const turnUsageAttribution = usageAttributionOf(deps, initialMode)
-  const summarizerConfig = {
-    apiKey: provider.apiKey,
-    baseUrl: provider.baseUrl,
-    model: provider.model,
-    ...(provider.headers ? { headers: provider.headers } : {}),
-    attribution: { ...turnUsageAttribution, consumer: 'context-compaction' as const },
-  }
+  const summarizerConfig = summarizerConfigFor(provider, turnUsageAttribution)
 
   // Plan-first gate (see `planGateBlocks`): arm when the plan skill governs
   // this turn — pinned explicitly, or mounted earlier in the conversation via

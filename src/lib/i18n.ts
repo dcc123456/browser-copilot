@@ -650,6 +650,18 @@ export interface Messages {
   chatContinuingTruncated: (params: { continuation: number; continuations: number }) => string
   /** Terminal status line when the cap was reached despite those continuations. */
   chatReplyStillTruncated: string
+  /** Composer action: compress this conversation's context now, on request. */
+  chatCompactContext: string
+  /** Transient phase line while the manual compaction request runs. */
+  chatCompactRunning: string
+  /** Toast after a manual compaction; `removed` counts messages replaced. */
+  chatCompactDone: (params: { removed: number }) => string
+  /** Toast when the transcript is too short for anything to be compacted. */
+  chatCompactNothing: string
+  /** Toast when compaction was refused because a turn still owns the chat. */
+  chatCompactBusy: string
+  /** Toast when the worker could not compact (no provider, write failure). */
+  chatCompactFailed: string
   chatExtensionReloaded: string
   /** Progress phases shown between send and the first token. */
   phasePreparing: string
@@ -2311,6 +2323,14 @@ const en: Messages = {
     `The answer reached the model's per-reply output limit — continuing it (${continuation}/${continuations})…`,
   chatReplyStillTruncated:
     "The reply reached the model's output limit and may be incomplete — send “continue” to get the rest.",
+  chatCompactContext: 'Compress context',
+  chatCompactRunning: 'Compressing the context…',
+  chatCompactDone: ({ removed }) =>
+    `Context compressed — ${removed} earlier ${removed === 1 ? 'message' : 'messages'} replaced by a summary.`,
+  chatCompactNothing:
+    'Nothing to compress yet — this conversation needs more than two rounds of replies.',
+  chatCompactBusy: 'Wait for the current reply to finish before compressing the context.',
+  chatCompactFailed: 'Could not compress the context — check the configured model in Settings.',
   chatExtensionReloaded:
     'The extension was reloaded. Reload it in chrome://extensions, then reopen this panel.',
   phasePreparing: 'Preparing your request…',
@@ -3916,6 +3936,12 @@ const zhCN: Messages = {
     `回复达到了模型单次输出上限，正在自动续写（第 ${continuation}/${continuations} 次）…`,
   chatReplyStillTruncated:
     '回复已达到模型单次输出上限，内容可能仍不完整；发送「继续」即可获取剩余部分。',
+  chatCompactContext: '压缩上下文',
+  chatCompactRunning: '正在压缩上下文…',
+  chatCompactDone: ({ removed }) => `上下文已压缩：较早的 ${removed} 条消息已合并为一段摘要。`,
+  chatCompactNothing: '暂时还没有可压缩的内容——至少需要三轮以上的回复。',
+  chatCompactBusy: '请等待当前回复结束后再压缩上下文。',
+  chatCompactFailed: '压缩上下文失败——请在设置中检查已配置的模型。',
   chatExtensionReloaded: '扩展已重新加载。请在 chrome://extensions 中重载，然后重新打开此面板。',
   phasePreparing: '正在准备请求…',
   phaseReadingPage: '正在读取页面…',

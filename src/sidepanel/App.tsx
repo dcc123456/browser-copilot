@@ -21,6 +21,7 @@ import WindowPicker from './WindowPicker'
 import UserFilePickerCardHost from './UserFilePickerCard'
 import UpdateCenter from './update/UpdateCenter'
 import { ConfirmHost } from '../ui/confirm'
+import { ToastHost } from '../ui/toast'
 
 type TabId =
   | 'chat'
@@ -389,6 +390,8 @@ export default function App() {
       </div>
       {/* Shared custom confirm/alert dialog host (replaces window.confirm). */}
       <ConfirmHost />
+      {/* Shared toast host — without it `toast()` calls in this panel are no-ops. */}
+      <ToastHost />
       {/* Multi-window picker for "ask" unattended runs (see background/window-policy). */}
       <WindowPicker />
       {/* Workflow upload-file blocks in user-select mode ask here for files. */}

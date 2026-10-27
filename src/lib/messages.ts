@@ -180,6 +180,13 @@ export type Command =
   | { type: 'conversations.get'; id: string }
   | { type: 'conversations.rename'; id: string; title: string }
   | { type: 'conversations.delete'; id: string }
+  /**
+   * Compress a stored conversation's context now, on request — the same
+   * compaction the automatic threshold performs, just earlier. Refused while a
+   * turn owns the conversation, because then the authoritative transcript is the
+   * channel's in-memory copy, not the persisted one.
+   */
+  | { type: 'conversations.compact'; conversationId: string }
 
   // --- Scheduled tasks ---
   | { type: 'tasks.list' }
@@ -622,6 +629,12 @@ export type CommandResult =
     }
   | { type: 'conversations.rename' }
   | { type: 'conversations.delete' }
+  | {
+      type: 'conversations.compact'
+      outcome: 'compacted' | 'nothing' | 'busy'
+      /** Messages replaced by the summary; only meaningful when compacted. */
+      removed: number
+    }
   | { type: 'tasks.list'; tasks: ScheduledTask[] }
   | { type: 'tasks.save' }
   | { type: 'tasks.delete' }

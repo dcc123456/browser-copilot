@@ -55,6 +55,7 @@ import SkillEditDialog from './SkillEditDialog'
 import type { Workflow } from '../lib/workflow/types'
 import type { AgentMode, ConversationMeta } from '../lib/types'
 import { confirmDialog } from '../ui/confirm'
+import { toast } from '../ui/toast'
 import {
   applySlashPick,
   filterSkills,
@@ -85,6 +86,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  FoldHorizontal,
   Gauge,
   Highlighter,
   History,
@@ -1618,6 +1620,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [includeSelection, setIncludeSelection] = useState(false)
   const [busy, setBusy] = useState(false)
+  /** A manual context compression the worker is still running. */
+  const [compacting, setCompacting] = useState(false)
   /** Wall-clock tick driving the live elapsed chips while a turn runs. */
   const [now, setNow] = useState(() => Date.now())
   /** When the current turn started, for the elapsed chips. */
@@ -2617,6 +2621,23 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     showPhase,
   ])
 
+  /**
+   * Re-pull this conversation's transcript over the live port. The worker
+   * answers with `restore`, so the view always shows what it actually stored —
+   * used both for a turn that finished without this panel and for a context
+   * compression it just performed.
+   */
+  const requestResume = useCallback((): void => {
+    try {
+      portRef.current?.postMessage({
+        type: 'resume',
+        conversationId: conversationIdRef.current,
+      } satisfies AgentClientMessage)
+    } catch {
+      /* the reconnect loop resumes on its own */
+    }
+  }, [])
+
   // A turn that finished while this panel was showing the conversation re-pulls
   // the saved transcript. Mid-turn reconnects already follow the live stream
   // (the worker re-attaches it on `resume`), so this is the tidy-up pass: it
@@ -2634,21 +2655,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     ): void => {
       const message = raw as { type?: string; conversationId?: string }
       if (message?.type !== 'conversation.ended') return
-      if (message.conversationId === conversationIdRef.current) {
-        try {
-          portRef.current?.postMessage({
-            type: 'resume',
-            conversationId: conversationIdRef.current,
-          } satisfies AgentClientMessage)
-        } catch {
-          /* the reconnect loop resumes on its own */
-        }
-      }
+      if (message.conversationId === conversationIdRef.current) requestResume()
       sendResponse({ ok: true })
     }
     onMessage.addListener(listener)
     return () => onMessage.removeListener(listener)
-  }, [])
+  }, [requestResume])
 
   // Refresh the conversation list when it changes and on mount.
   const refreshConversations = useCallback(async () => {
@@ -2813,6 +2825,33 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
       await refreshConversations()
     } catch {
       /* ignore */
+    }
+  }
+
+  /**
+   * Compress this conversation's context now instead of waiting for the
+   * threshold. The worker performs the rewrite (and refuses while a turn owns
+   * the conversation), so the transcript is re-pulled afterwards rather than
+   * patched here.
+   */
+  const compactContext = async (): Promise<void> => {
+    if (busy || compacting || entries.length === 0) return
+    setCompacting(true)
+    showPhase(t.chatCompactRunning)
+    try {
+      const result = await sendCommand({ type: 'conversations.compact', conversationId })
+      if (result.type !== 'conversations.compact') return
+      if (result.outcome === 'compacted') {
+        requestResume()
+        toast(t.chatCompactDone({ removed: result.removed }), 'ok')
+      } else {
+        toast(result.outcome === 'busy' ? t.chatCompactBusy : t.chatCompactNothing)
+      }
+    } catch {
+      toast(t.chatCompactFailed, 'error')
+    } finally {
+      clearPhase()
+      setCompacting(false)
     }
   }
 
@@ -3057,6 +3096,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
    * idle, a supplement for the running one while it is busy.
    */
   const submitComposer = (): void => {
+    // While a compression is in flight the stored transcript is being rewritten;
+    // a message now would race the transcript it resumes with.
+    if (compacting) return
     if (busy) {
       const text = draft.trim()
       if (text) interject(text)
@@ -4350,6 +4392,22 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               style={{ display: 'none' }}
               type="file"
             />
+            {entries.length > 0 && (
+              <button
+                aria-label={t.chatCompactContext}
+                className="icon-btn"
+                disabled={busy || compacting}
+                onClick={() => void compactContext()}
+                title={t.chatCompactContext}
+                type="button"
+              >
+                {compacting ? (
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FoldHorizontal size={16} aria-hidden="true" />
+                )}
+              </button>
+            )}
             {!busy && entries.length > 0 && (
               <button onClick={startNewConversation} title={t.convNew} type="button">
                 ＋ {t.chatNewChat}
@@ -4376,9 +4434,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
             <button
               className="primary"
               disabled={
-                busy
+                compacting ||
+                (busy
                   ? !draft.trim()
-                  : !draft.trim() && !activeSkillId && pendingAttachments.length === 0
+                  : !draft.trim() && !activeSkillId && pendingAttachments.length === 0)
               }
               onClick={submitComposer}
               type="button"

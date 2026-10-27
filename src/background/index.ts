@@ -145,7 +145,7 @@ import {
   clearTokenUsage,
   readTokenUsage,
 } from '../lib/storage'
-import { runAgentTurn } from './agent'
+import { compactConversationOnRequest, runAgentTurn } from './agent'
 import {
   clearDraft,
   composeWorkflowFromDraft,
@@ -1629,6 +1629,19 @@ async function handleCommand(
     case 'conversations.delete':
       await deleteConversation(command.id)
       return { type: 'conversations.delete' }
+    case 'conversations.compact': {
+      // A running turn keeps its authoritative transcript in memory and writes
+      // the persisted copy only when it finishes, so compacting that copy now
+      // would be overwritten — refuse instead of racing it.
+      if (channelFor(command.conversationId)) {
+        return { type: 'conversations.compact', outcome: 'busy', removed: 0 }
+      }
+      const history = await loadConversation(command.conversationId)
+      const compacted = await compactConversationOnRequest(history, command.conversationId)
+      if (!compacted) return { type: 'conversations.compact', outcome: 'nothing', removed: 0 }
+      await saveConversation(command.conversationId, history)
+      return { type: 'conversations.compact', outcome: 'compacted', removed: compacted.removed }
+    }
 
     case 'tasks.list':
       return { type: 'tasks.list', tasks: await listTasks() }

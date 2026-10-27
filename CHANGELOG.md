@@ -53,6 +53,16 @@ assembled before the size check that compacts it, so that one compaction pass
 summarized the transcript and then sent it anyway — the summary now reaches the
 outgoing request.
 
+### Added — Compress the context whenever you want
+
+The chat composer has a compress-context button next to the attachment clip. It
+runs exactly the compaction the automatic trigger does — the older rounds'
+answers and tool results fold into one summary, while everything you typed stays
+verbatim — so a long thread can be slimmed down before the window fills instead
+of waiting for the threshold or starting a new conversation. A toast reports how
+many messages were replaced, and says so when there is nothing to compress yet
+or a reply is still running; the reply being streamed is never rewritten.
+
 _To be released._
 
 ## [0.6.12] - 2026-10-26
