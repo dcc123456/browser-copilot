@@ -8,7 +8,11 @@ import { describe, expect, it } from 'vitest'
 import {
   buildToolErrorContext,
   classifyToolError,
+  failureSignature,
+  isUnchangeableFailure,
+  nextFailureStreak,
   recentFailedAttempts,
+  REPEAT_FAILURE_LIMIT,
 } from '../src/lib/tool-error'
 
 describe('classifyToolError', () => {
@@ -23,9 +27,51 @@ describe('classifyToolError', () => {
     expect(classifyToolError('something odd happened')).toBe('UNKNOWN')
   })
 
+  it('recognises a page that forbids injected JavaScript', () => {
+    expect(
+      classifyToolError(
+        'Evaluating a string as JavaScript violates the following Content Security Policy',
+      ),
+    ).toBe('JS_BLOCKED')
+    expect(
+      classifyToolError(
+        '该页面的内容安全策略（CSP）禁止执行自定义 JavaScript（未允许 unsafe-eval），无法在此页面运行 JS 代码。',
+      ),
+    ).toBe('JS_BLOCKED')
+  })
+
   it('prefers STALE_REF over a generic not-found', () => {
     // A stale ref message often also says "not found"; the stale fix must win.
     expect(classifyToolError('Unknown ref "e3" — element not found')).toBe('STALE_REF')
+  })
+})
+
+describe('isUnchangeableFailure', () => {
+  it('treats page-policy and permission blocks as unchangeable', () => {
+    expect(isUnchangeableFailure('Content Security Policy blocks eval')).toBe(true)
+    expect(isUnchangeableFailure('The "click" tool is disabled in settings.')).toBe(true)
+  })
+
+  it('leaves retry-with-fresh-state failures retryable', () => {
+    expect(isUnchangeableFailure('Unknown ref "e9"')).toBe(false)
+    expect(isUnchangeableFailure('timeout after 30000ms')).toBe(false)
+    expect(isUnchangeableFailure('Failed to fetch')).toBe(false)
+  })
+})
+
+describe('failure streaks', () => {
+  it('counts only byte-identical failures', () => {
+    const first = nextFailureStreak(undefined, failureSignature('run_javascript', 'boom'))
+    expect(first.count).toBe(1)
+    const same = nextFailureStreak(first, failureSignature('run_javascript', 'boom'))
+    expect(same.count).toBe(2)
+    const changed = nextFailureStreak(same, failureSignature('run_javascript', 'other boom'))
+    expect(changed.count).toBe(1)
+  })
+
+  it('separates the same message across different tools', () => {
+    expect(failureSignature('click', 'boom')).not.toBe(failureSignature('fill', 'boom'))
+    expect(REPEAT_FAILURE_LIMIT).toBe(3)
   })
 })
 

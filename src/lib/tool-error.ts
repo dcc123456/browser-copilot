@@ -19,6 +19,7 @@ export type ToolErrorType =
   | 'NAVIGATION_FAILED'
   | 'PERMISSION'
   | 'NETWORK'
+  | 'JS_BLOCKED'
   | 'UNKNOWN'
 
 /** Concrete next steps per failure class (short, imperative, actionable). */
@@ -43,6 +44,10 @@ const RECOVERY: Record<ToolErrorType, string[]> = {
     'This is a mode/permission block, not a page problem — explain what you need instead of retrying.',
   ],
   NETWORK: ['Transient network or endpoint failure — pause briefly and retry once.'],
+  JS_BLOCKED: [
+    'This page forbids injected JavaScript, so run_javascript cannot run here — retrying it fails the same way.',
+    'Read what you need with read_current_page or snapshot_page, or tell the user the page blocks JS and what they should run themselves.',
+  ],
   UNKNOWN: [
     'Read the error, take a fresh snapshot, and change your approach — never repeat the identical call.',
   ],
@@ -55,6 +60,15 @@ const RECOVERY: Record<ToolErrorType, string[]> = {
  */
 export function classifyToolError(message: string): ToolErrorType {
   const text = message.toLowerCase()
+  // Before the other classes: a CSP refusal often also mentions what could not
+  // be found/run, and its fix (another method entirely) differs from all of them.
+  if (
+    /content security policy|unsafe-eval|evaluating a string|refused to evaluate|内容安全策略|禁止执行自定义 javascript/.test(
+      text,
+    )
+  ) {
+    return 'JS_BLOCKED'
+  }
   if (/unknown ref|ref .*(stale|invalid|expired)|失效|已过期/.test(text)) return 'STALE_REF'
   if (/timeout|timed out|超时/.test(text)) return 'TIMEOUT'
   if (
@@ -89,6 +103,44 @@ export function buildToolErrorContext(message: string): ToolErrorContext {
     errorType,
     suggestedRecovery: RECOVERY[errorType],
   }
+}
+
+/**
+ * Whether retrying the same call can possibly change the outcome. Only
+ * environment-level blocks qualify: a page that forbids JS or a mode/permission
+ * gate stays that way for the rest of the turn, while stale refs, missing
+ * elements and timeouts are exactly what a fresh snapshot or a wait fixes.
+ */
+export function isUnchangeableFailure(message: string): boolean {
+  const errorType = classifyToolError(message)
+  return errorType === 'JS_BLOCKED' || errorType === 'PERMISSION'
+}
+
+/** Identical failures charged against one tool before it is refused. */
+export const REPEAT_FAILURE_LIMIT = 3
+
+/** One tool's current run of identical failures within a turn. */
+export interface FailureStreak {
+  signature: string
+  count: number
+}
+
+/**
+ * Signature of one failure: the tool, its class and the exact message. Calls
+ * that fail for a DIFFERENT reason start a new streak, so a real change in the
+ * situation is never mistaken for the model repeating itself.
+ */
+export function failureSignature(toolName: string, message: string): string {
+  return `${toolName}\u0000${classifyToolError(message)}\u0000${message}`
+}
+
+/** Extends the streak when the signature repeats, restarts it otherwise. */
+export function nextFailureStreak(
+  prior: FailureStreak | undefined,
+  signature: string,
+): FailureStreak {
+  if (prior && prior.signature === signature) return { signature, count: prior.count + 1 }
+  return { signature, count: 1 }
 }
 
 /** One recorded prior attempt at the same tool (fed back to the model). */

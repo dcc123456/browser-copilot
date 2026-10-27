@@ -29,6 +29,7 @@ import {
   LlmError,
   streamCompletion,
   wrapInterjection,
+  type StreamResult,
   type WireMessage,
   type WireTool,
   type WireToolCall,
@@ -109,7 +110,15 @@ import { evaluateArithmetic } from '../lib/ocr-candidates'
 import { fetchImageAsDataUrl } from '../lib/fetch-image'
 import { isSamePage } from '../lib/pages'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
-import { buildToolErrorContext, recentFailedAttempts } from '../lib/tool-error'
+import {
+  buildToolErrorContext,
+  type FailureStreak,
+  failureSignature,
+  isUnchangeableFailure,
+  nextFailureStreak,
+  recentFailedAttempts,
+  REPEAT_FAILURE_LIMIT,
+} from '../lib/tool-error'
 import {
   type Agent,
   type AgentMode,
@@ -310,6 +319,18 @@ export function planGateBlocks(gate: PlanGate | undefined, name: string): boolea
 
 /** Fallback cap used when settings cannot supply one. */
 const DEFAULT_MAX_TOOL_ROUNDS = 20
+
+/**
+ * Appended as a user turn for the one tools-off reply a panel turn gets when it
+ * exhausts its round budget. Model-facing English, like the other prompts.
+ */
+function roundLimitWrapUpPrompt(roundsCap: number): string {
+  return (
+    `[All ${roundsCap} tool rounds for this turn are used and tools are disabled for this reply. ` +
+    'Answer the user now, in plain text: what you completed, what is still unfinished, the blocker if any, ' +
+    'and the single next step you would take. Do not apologise for the limit and do not write tool-call syntax.]'
+  )
+}
 
 /** Re-exported for tests/consumers; the canonical text lives in lib/system-prompt. */
 export { DEFAULT_SYSTEM_PROMPT }
@@ -2547,6 +2568,15 @@ export interface ToolContext {
    * one plan).
    */
   planGate?: PlanGate
+  /**
+   * Per-turn run of identical failures, keyed by tool name. Once a tool fails
+   * the same unchangeable way {@link REPEAT_FAILURE_LIMIT} times the loop
+   * refuses further calls for the rest of the turn: a page CSP block or a
+   * permission gate cannot be retried away, and letting the model repeat it
+   * burns the round budget the task needs (see the 2026-10-27 turn-resilience
+   * design). Absent outside `runAgentTurn`.
+   */
+  failureStreaks?: Map<string, FailureStreak>
 }
 
 /**
@@ -5105,6 +5135,7 @@ export async function runAgentTurn(
     loadedGroups,
     navigated: false,
     disabled,
+    failureStreaks: new Map(),
     ...(delegation ? { delegation } : {}),
     ...(deps.subAgent ? { subAgent: deps.subAgent } : {}),
     ...(toolAllowSet ? { toolAllowSet } : {}),
@@ -5154,6 +5185,124 @@ export async function runAgentTurn(
     cachedInputTokens: 0,
     reasoningTokens: 0,
     totalTokens: 0,
+  }
+
+  // One streamed model request with the panel side effects every round needs:
+  // phase transitions, retry/continuation notices, the session-summary filter
+  // and per-request token accounting. Shared by the round loop and the
+  // end-of-budget wrap-up so the wrap-up streams and is accounted for exactly
+  // like an ordinary answer instead of growing a second copy.
+  const streamModelRound = async (
+    requestMessages: WireMessage[],
+    roundTools?: WireTool[],
+    retry: { retries: number; delayMs: number } = { retries: 10, delayMs: 5_000 },
+  ): Promise<{ result: StreamResult; replyText: string }> => {
+    // "Thinking" covers the request in flight until either text starts streaming
+    // or a tool call is announced. The first text delta flips it to "Responding";
+    // the panel removes the line on the first delta regardless.
+    deps.send({ type: 'phase', phase: 'thinking' })
+    let announced = false
+    // A model occasionally appends a session-summary `<details>` block to its
+    // answer. It must not reach the panel, and — because this same text becomes
+    // history — it must not teach the next round to imitate it either.
+    const summaryFilter = createSessionSummaryFilter()
+    let replyText = ''
+
+    const result = await streamCompletion(
+      {
+        apiKey: provider.apiKey,
+        baseUrl: provider.baseUrl,
+        model: provider.model,
+        providerLabel: provider.label,
+        attribution: turnUsageAttribution,
+        messages: requestMessages,
+        ...(roundTools && roundTools.length > 0 ? { tools: roundTools } : {}),
+        // A mid-reply connection loss reconnects instead of ending the turn;
+        // an already-started answer is continued, never replayed.
+        retry,
+        // "Stopped half-way with no message" is usually the provider's output
+        // cap, not a dropped socket: ask for the rest instead of returning
+        // half an answer.
+        continueOnLength: 3,
+        // And bound the silence, so a proxy that dies without closing the
+        // connection is cut and retried rather than hanging the turn forever
+        // (same 120s gap as the editor assistant).
+        idleTimeoutMs: 120_000,
+        ...(provider.headers ? { headers: provider.headers } : {}),
+        ...(typeof provider.temperature === 'number' ? { temperature: provider.temperature } : {}),
+        ...(typeof provider.maxTokens === 'number' ? { maxTokens: provider.maxTokens } : {}),
+        ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
+        ...(deps.signal ? { signal: deps.signal } : {}),
+      },
+      {
+        onText: (delta) => {
+          if (!announced) {
+            announced = true
+            deps.send({ type: 'phase', phase: 'responding' })
+          }
+          const visible = summaryFilter.push(delta)
+          if (visible.length === 0) return
+          replyText += visible
+          deps.send({ type: 'delta', text: visible })
+        },
+        onRetry: (info) => {
+          deps.send({
+            type: 'status',
+            text: reconnectingText({
+              retry: info.retry,
+              retries: info.retries,
+              seconds: Math.round(info.delayMs / 1000),
+              continuing: info.continuing,
+            }),
+          })
+        },
+        // Chain-of-thought streamed separately: relay it so the panel can
+        // paint a live reasoning block, but never touch the phase — the
+        // model is still thinking, not responding.
+        onReasoning: (delta) => deps.send({ type: 'thinking', text: delta }),
+        // The answer ran into the provider's output cap: say so, then let the
+        // continuation stream more text instead of ending the turn half-way.
+        onContinue: (info) => {
+          deps.send({
+            type: 'status',
+            text: truncationText.continuing({
+              continuation: info.continuation,
+              continuations: info.continuations,
+            }),
+          })
+        },
+        onUsage: (usage) => {
+          totalUsage.inputTokens += usage.inputTokens
+          totalUsage.outputTokens += usage.outputTokens
+          totalUsage.cachedInputTokens += usage.cachedInputTokens ?? 0
+          totalUsage.reasoningTokens += usage.reasoningTokens ?? 0
+          totalUsage.totalTokens += usage.totalTokens
+          // Push the running turn total as soon as this request reports it,
+          // so the panel's token bar updates per model request instead of
+          // only when the whole turn finishes. Cumulative snapshot — the
+          // panel adds the delta against the last value it applied.
+          deps.send({ type: 'usage', usage: { ...totalUsage } })
+        },
+      },
+    )
+
+    // A transport that produced no deltas (an embedded/non-streaming caller or
+    // a mocked one) still has an answer in `result.content`; derive the reply
+    // from it so the transcript is not silently emptied. Real streams always
+    // arrive through `onText`, and only those are streamed to the panel.
+    if (!announced && result.content.length > 0) {
+      replyText += summaryFilter.push(result.content)
+    }
+    // Release any tail the filter held back while it watched for the start of
+    // a `<details>` block (e.g. an answer that simply ends with a lone `<`).
+    const heldTail = summaryFilter.end()
+    if (heldTail.length > 0) {
+      replyText += heldTail
+      // A transport that never streamed a delta showed the panel nothing, so
+      // there is nothing to release there either.
+      if (announced) deps.send({ type: 'delta', text: heldTail })
+    }
+    return { result, replyText }
   }
 
   for (let round = 0; round < roundsCap; round += 1) {
@@ -5265,99 +5414,10 @@ export async function runAgentTurn(
     // transcript and then send it anyway.
     const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
 
-    // "Thinking" covers the request in flight until either text starts streaming
-    // or a tool call is announced. The first text delta flips it to "Responding";
-    // the panel removes the line on the first delta regardless.
-    deps.send({ type: 'phase', phase: 'thinking' })
-    let announced = false
-
-    // A model occasionally appends a session-summary `<details>` block to its
-    // answer. It must not reach the panel, and — because this same text becomes
-    // history — it must not teach the next round to imitate it either.
-    const summaryFilter = createSessionSummaryFilter()
-    let replyText = ''
-
-    let result
+    let result: StreamResult
+    let replyText: string
     try {
-      result = await streamCompletion(
-        {
-          apiKey: provider.apiKey,
-          baseUrl: provider.baseUrl,
-          model: provider.model,
-          providerLabel: provider.label,
-          attribution: turnUsageAttribution,
-          messages,
-          tools,
-          // A mid-reply connection loss reconnects instead of ending the turn;
-          // an already-started answer is continued, never replayed.
-          retry: { retries: 10, delayMs: 5_000 },
-          // "Stopped half-way with no message" is usually the provider's output
-          // cap, not a dropped socket: ask for the rest instead of returning
-          // half an answer.
-          continueOnLength: 3,
-          // And bound the silence, so a proxy that dies without closing the
-          // connection is cut and retried rather than hanging the turn forever
-          // (same 120s gap as the editor assistant).
-          idleTimeoutMs: 120_000,
-          ...(provider.headers ? { headers: provider.headers } : {}),
-          ...(typeof provider.temperature === 'number'
-            ? { temperature: provider.temperature }
-            : {}),
-          ...(typeof provider.maxTokens === 'number' ? { maxTokens: provider.maxTokens } : {}),
-          ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
-          ...(deps.signal ? { signal: deps.signal } : {}),
-        },
-        {
-          onText: (delta) => {
-            if (!announced) {
-              announced = true
-              deps.send({ type: 'phase', phase: 'responding' })
-            }
-            const visible = summaryFilter.push(delta)
-            if (visible.length === 0) return
-            replyText += visible
-            deps.send({ type: 'delta', text: visible })
-          },
-          onRetry: (info) => {
-            deps.send({
-              type: 'status',
-              text: reconnectingText({
-                retry: info.retry,
-                retries: info.retries,
-                seconds: Math.round(info.delayMs / 1000),
-                continuing: info.continuing,
-              }),
-            })
-          },
-          // Chain-of-thought streamed separately: relay it so the panel can
-          // paint a live reasoning block, but never touch the phase — the
-          // model is still thinking, not responding.
-          onReasoning: (delta) => deps.send({ type: 'thinking', text: delta }),
-          // The answer ran into the provider's output cap: say so, then let the
-          // continuation stream more text instead of ending the turn half-way.
-          onContinue: (info) => {
-            deps.send({
-              type: 'status',
-              text: truncationText.continuing({
-                continuation: info.continuation,
-                continuations: info.continuations,
-              }),
-            })
-          },
-          onUsage: (usage) => {
-            totalUsage.inputTokens += usage.inputTokens
-            totalUsage.outputTokens += usage.outputTokens
-            totalUsage.cachedInputTokens += usage.cachedInputTokens ?? 0
-            totalUsage.reasoningTokens += usage.reasoningTokens ?? 0
-            totalUsage.totalTokens += usage.totalTokens
-            // Push the running turn total as soon as this request reports it,
-            // so the panel's token bar updates per model request instead of
-            // only when the whole turn finishes. Cumulative snapshot — the
-            // panel adds the delta against the last value it applied.
-            deps.send({ type: 'usage', usage: { ...totalUsage } })
-          },
-        },
-      )
+      ;({ result, replyText } = await streamModelRound(messages, tools))
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') return null
       // Reactive recovery from an over-length request that the proactive
@@ -5391,24 +5451,6 @@ export async function runAgentTurn(
       }
       if (error instanceof LlmError) throw error
       throw error
-    }
-
-    // A transport that produced no deltas (an embedded/non-streaming caller or
-    // a mocked one) still has an answer in `result.content`; derive the reply
-    // from it so the transcript is not silently emptied. Real streams always
-    // arrive through `onText`, and only those are streamed to the panel.
-    if (!announced && result.content.length > 0) {
-      replyText += summaryFilter.push(result.content)
-    }
-
-    // Release any tail the filter held back while it watched for the start of
-    // a `<details>` block (e.g. an answer that simply ends with a lone `<`).
-    const heldTail = summaryFilter.end()
-    if (heldTail.length > 0) {
-      replyText += heldTail
-      // A transport that never streamed a delta showed the panel nothing, so
-      // there is nothing to release there either.
-      if (announced) deps.send({ type: 'delta', text: heldTail })
     }
 
     // Track the ACTUAL context size: this request's prompt_tokens. Read from
@@ -5460,6 +5502,35 @@ export async function runAgentTurn(
     }
   }
 
+  // The round budget is spent. Unattended runs and delegated sub-agents get the
+  // status line their callers classify on; a panel turn does not end on a tool
+  // result, because the user watched a long task and needs to know what got
+  // done and what is left instead of a silent stop they have to guess past.
+  // One tools-off completion produces that answer.
+  if (deps.takeInterjections && !deps.signal?.aborted) {
+    try {
+      const { replyText } = await streamModelRound(
+        [
+          { role: 'system', content: systemPrompt },
+          ...history,
+          { role: 'user', content: roundLimitWrapUpPrompt(roundsCap) },
+        ],
+        undefined,
+        // Shorter budget: this is a courtesy summary, and a dead provider must
+        // not hold the turn open for the full reconnect window.
+        { retries: 2, delayMs: 3_000 },
+      )
+      if (replyText.trim()) {
+        history.push({ role: 'assistant', content: replyText })
+        return totalUsage.totalTokens > 0 ? totalUsage : null
+      }
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') {
+        return totalUsage.totalTokens > 0 ? totalUsage : null
+      }
+      // Fall through: the status line below still names the reason it stopped.
+    }
+  }
   deps.send({
     type: 'status',
     text: `Stopped after ${roundsCap} tool rounds to avoid a loop.`,
@@ -5584,6 +5655,13 @@ async function runOneToolCall(
   const pushResult = (content: string): void => {
     history.push({ role: 'tool', tool_call_id: call.id, content, name })
   }
+  // Only unchangeable failures are charged: a stale ref or a timeout is what
+  // the next attempt (with fresh state) is supposed to fix.
+  const noteFailure = (message: string): void => {
+    if (!ctx.failureStreaks || !isUnchangeableFailure(message)) return
+    const signature = failureSignature(name, message)
+    ctx.failureStreaks.set(name, nextFailureStreak(ctx.failureStreaks.get(name), signature))
+  }
 
   let args: Record<string, unknown>
   try {
@@ -5624,6 +5702,21 @@ async function runOneToolCall(
     const message = `The "${name}" tool is disabled in settings.`
     pushResult(JSON.stringify({ error: message }))
     deps.send({ type: 'tool.result', name, summary: `Blocked (${name} disabled)` })
+    return
+  }
+
+  // A page CSP block or a permission gate cannot be retried away, and a model
+  // that keeps repeating one spends the task's whole round budget on it (29
+  // identical refusals in the conversation this guard comes from). The streak
+  // lives on THIS turn's ctx, so the next turn starts clean — a user who fixes
+  // the environment (closes DevTools, changes mode) gets the tool back.
+  const failureStreak = ctx.failureStreaks?.get(name)
+  if (failureStreak && failureStreak.count >= REPEAT_FAILURE_LIMIT) {
+    const refusal =
+      `${name} has already failed ${failureStreak.count} times in this turn with an error that retrying cannot change. ` +
+      'Do not call it again in this turn — use a different tool, or stop and tell the user what is blocking you and what they should do.'
+    pushResult(enrichToolError({ error: refusal }, history, name, ctx.lastUrl))
+    deps.send({ type: 'tool.result', name, summary: `Blocked (${name} kept failing)` })
     return
   }
 
@@ -6219,6 +6312,7 @@ async function runOneToolCall(
     try {
       const parsed = JSON.parse(output) as { ok?: boolean; error?: string }
       ok = parsed.ok !== false
+      if (typeof parsed.error === 'string') noteFailure(parsed.error)
     } catch {
       /* keep ok */
     }
@@ -6245,6 +6339,7 @@ async function runOneToolCall(
           : String(error)
     pushResult(enrichToolError({ error: message }, history, name, ctx.lastUrl))
     deps.send({ type: 'tool.result', name, summary: `Failed: ${message}` })
+    noteFailure(message)
     const audit = auditOf(name, args, ctx)
     await recordAction(
       deps.conversationId,

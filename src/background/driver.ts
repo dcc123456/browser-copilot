@@ -1047,7 +1047,8 @@ async function runJsInMainWorld(
     // the same), which evaluates in the page context without obeying its CSP.
     if (value.error && isCspBlocked(value.error)) {
       const cdp = await runExecJsViaCdp(tab.id, op)
-      if (cdp) return { ...base, ok: true, data: cdp.data }
+      if (cdp?.ok) return { ...base, ok: true, data: cdp.data }
+      if (cdp) return { ...base, error: explainCspFallbackFailure(value.error, cdp.error) }
       return { ...base, error: explainJsError(value.error) }
     }
     return { ...base, error: explainJsError(value.error ?? 'JavaScript execution failed') }
@@ -1067,7 +1068,8 @@ async function runJsInMainWorld(
     // Injection itself can surface the CSP error in some builds; try CDP.
     if (isCspBlocked(message)) {
       const cdp = await runExecJsViaCdp(tab.id, op)
-      if (cdp) return { ...base, ok: true, data: cdp.data }
+      if (cdp?.ok) return { ...base, ok: true, data: cdp.data }
+      if (cdp) return { ...base, error: explainCspFallbackFailure(message, cdp.error) }
     }
     return { ...base, error: explainJsError(message) }
   }
@@ -1075,13 +1077,16 @@ async function runJsInMainWorld(
 
 /**
  * Run the one-shot `runExecJs` expression/body harness through CDP as a CSP
- * fallback. Returns the harness's `{ ok, data }` or `null` when CDP is
- * unavailable/fails (so callers keep their normal error path).
+ * fallback. Returns the harness's `{ ok, data }`, or `{ ok: false, error }`
+ * with the reason the fallback itself failed — losing that reason reported an
+ * environment problem (DevTools already attached, debugger blocked) as a
+ * permanent page limitation, and the model retried the same call until its
+ * round budget ran out. `null` only when the extension has no debugger API.
  */
 async function runExecJsViaCdp(
   tabId: number,
   op: Op,
-): Promise<{ ok: true; data?: unknown } | null> {
+): Promise<{ ok: true; data?: unknown } | { ok: false; error: string } | null> {
   if (!chrome?.debugger) return null
   try {
     const result = (await callHarnessViaCdp(
@@ -1094,10 +1099,24 @@ async function runExecJsViaCdp(
       },
     )) as { ok: true; data?: unknown } | { ok: false; error?: string } | undefined
     if (result && result.ok) return { ok: true, data: result.data }
-    return null
-  } catch {
-    return null
+    return { ok: false, error: result?.error ?? 'the DevTools channel returned no result' }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/**
+ * Final error for a JS call whose CSP fallback also failed. The CSP line alone
+ * reads as "this page will never allow JS", which invites the model to retry;
+ * naming the fallback's own failure makes the obstacle legible and actionable.
+ */
+function explainCspFallbackFailure(cspError: string, fallbackError: string): string {
+  return (
+    'Custom JavaScript cannot run on this page: its Content-Security-Policy forbids eval, ' +
+    `and the extension's DevTools fallback failed too (${fallbackError}). ` +
+    'Retrying run_javascript here will fail the same way — read what you need with read_current_page or snapshot_page, or tell the user the page blocks JavaScript and what they should run themselves. ' +
+    explainJsError(cspError)
+  )
 }
 
 /**
