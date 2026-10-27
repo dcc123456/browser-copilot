@@ -351,7 +351,12 @@ export default function App() {
         transcript that must survive the user editing a skill mid-answer.
       */}
       <div style={{ display: active === 'chat' ? 'contents' : 'none' }}>
-        <ChatTab skills={skills} activeSkillId={activeSkillId} onSelectSkill={setActiveSkillId} />
+        <ChatTab
+          active={active === 'chat'}
+          skills={skills}
+          activeSkillId={activeSkillId}
+          onSelectSkill={setActiveSkillId}
+        />
       </div>
       <div style={{ display: active === 'skills' ? 'contents' : 'none' }}>
         <SkillsTab

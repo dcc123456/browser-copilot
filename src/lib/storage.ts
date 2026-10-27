@@ -461,6 +461,35 @@ export async function getActiveProvider(): Promise<ProviderProfile> {
   return active
 }
 
+/**
+ * The models a provider holds. A profile written before providers held several
+ * models names exactly one, so `model` alone is still a valid answer.
+ */
+export function providerModels(profile: ProviderProfile): string[] {
+  return profile.models?.length ? profile.models : profile.model ? [profile.model] : []
+}
+
+/**
+ * Points the agent at one provider, optionally switching that provider's model
+ * in the same write.
+ *
+ * Both live in one settings record, and the chat composer changes them
+ * together: two separate patches could leave the pointer on a profile while its
+ * model still names the previous choice. A model the profile does not list is
+ * ignored rather than written, so `model` stays one of the profile's models.
+ */
+export async function activateProvider(id: string, model?: string): Promise<Settings> {
+  return withKeyLock(KEY_SETTINGS, async () => {
+    const settings = await getSettings()
+    const target = settings.providers.find((profile) => profile.id === id)
+    const providers =
+      target && model && model !== target.model && providerModels(target).includes(model)
+        ? settings.providers.map((profile) => (profile.id === id ? { ...profile, model } : profile))
+        : settings.providers
+    return setSettingsLocked({ providers, activeProviderId: id })
+  })
+}
+
 /** Inserts or replaces one provider profile. */
 export async function saveProvider(profile: ProviderProfile): Promise<Settings> {
   // The providers list is computed here and merged inside setSettingsLocked —

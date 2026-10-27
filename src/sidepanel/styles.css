@@ -781,7 +781,8 @@ body {
 
 .composer textarea {
   flex: 1;
-  min-height: 0;
+  /* Keeps two lines readable when the action row wraps on a narrow panel. */
+  min-height: 38px;
   resize: none;
   padding: 9px 10px;
   border: 1px solid var(--border);
@@ -802,7 +803,10 @@ body {
   align-items: center;
   gap: 8px;
   justify-content: space-between;
-  flex-wrap: nowrap;
+  /* The action cluster (attach, compress, model picker, new chat, send) is
+     wider than a narrow panel's leftover space, so it drops to a second line
+     as a whole instead of splitting into a stack of one-control rows. */
+  flex-wrap: wrap;
   white-space: nowrap;
 }
 

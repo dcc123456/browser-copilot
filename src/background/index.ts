@@ -111,6 +111,7 @@ import { validateProfile } from '../lib/providers'
 import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
 import { normalizeAgent, validateAgent } from '../lib/agents'
 import {
+  activateProvider,
   clearConversation,
   clearHistory,
   deleteAgent,
@@ -1476,7 +1477,10 @@ async function handleCommand(
       return { type: 'settings', settings: await deleteProvider(command.id) }
 
     case 'provider.activate':
-      return { type: 'settings', settings: await setSettings({ activeProviderId: command.id }) }
+      return {
+        type: 'settings',
+        settings: await activateProvider(command.id, command.model),
+      }
 
     case 'provider.test': {
       const problems = validateProfile(command.profile, await workerMessages())

@@ -30,6 +30,7 @@ import {
   aiPrefillSteps,
   DEFAULT_CONVERSATION_ID,
   newId,
+  providerModels,
   type AiPrefillStep,
 } from '../lib/storage'
 import { isTriggerNode } from '../lib/workflow/migrate'
@@ -53,7 +54,7 @@ import { CardSection, type CardSectionTone } from './components/CardSection'
 import { useRepairEvents } from './hooks/useWorkflowRuntimeEvents'
 import SkillEditDialog from './SkillEditDialog'
 import type { Workflow } from '../lib/workflow/types'
-import type { AgentMode, ConversationMeta } from '../lib/types'
+import type { AgentMode, ConversationMeta, ProviderProfile, Settings } from '../lib/types'
 import { confirmDialog } from '../ui/confirm'
 import { toast } from '../ui/toast'
 import {
@@ -81,6 +82,7 @@ import Markdown from './Markdown'
 import { downloadAnswer, hasTables, type AnswerFormat } from '../lib/export-answer'
 import {
   ArrowDown,
+  ArrowUp,
   Brain,
   Check,
   ChevronRight,
@@ -94,6 +96,7 @@ import {
   Loader2,
   Minus,
   Paperclip,
+  SquarePen,
   Wrench,
   X,
 } from 'lucide-react'
@@ -1301,7 +1304,19 @@ interface Props {
   skills: Skill[]
   activeSkillId: string | null
   onSelectSkill: (id: string | null) => void
+  /**
+   * Whether the chat tab is the visible one. Every tab stays mounted, so this is
+   * also the signal to re-read settings the Models tab may have changed.
+   */
+  active?: boolean
 }
+
+/**
+ * `<select>` value for one provider/model pair. The separator is a control
+ * character, so neither an id nor a model name can produce an ambiguous key.
+ */
+const modelChoiceValue = (providerId: string, model: string): string =>
+  `${providerId}\u001f${model}`
 
 /**
  * Sensible starting parameters per trigger kind, applied when the user picks a
@@ -1606,7 +1621,7 @@ function WorkflowTriggerPicker({
   )
 }
 
-export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props) {
+export default function ChatTab({ skills, activeSkillId, onSelectSkill, active = true }: Props) {
   const t = useT()
   // Only the trigger picker needs the locale itself: weekday names come from
   // `Intl.DateTimeFormat`, which localizes them correctly for free.
@@ -1622,6 +1637,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
   const [busy, setBusy] = useState(false)
   /** A manual context compression the worker is still running. */
   const [compacting, setCompacting] = useState(false)
+  /** Every configured provider, for the composer's model picker. */
+  const [providers, setProviders] = useState<ProviderProfile[]>([])
+  /** The `<select>` value (`providerId\u001fmodel`) the agent currently uses. */
+  const [modelSelection, setModelSelection] = useState('')
   /** Wall-clock tick driving the live elapsed chips while a turn runs. */
   const [now, setNow] = useState(() => Date.now())
   /** When the current turn started, for the elapsed chips. */
@@ -2672,20 +2691,72 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
     }
   }, [])
 
-  // Load local settings once on mount: the autonomy mode rides along with each
-  // chat message (the worker reads settings itself).
+  /**
+   * Adopts one settings snapshot: the autonomy mode (it rides along with each
+   * chat message; the worker reads settings itself) and the provider list
+   * behind the composer's model picker.
+   */
+  const applySettingsSnapshot = useCallback((settings: Settings): void => {
+    const list = settings.providers ?? []
+    const activeProfile =
+      list.find((profile) => profile.id === settings.activeProviderId) ?? list[0]
+    setMode(settings.mode)
+    setProviders(list)
+    setModelSelection(activeProfile ? modelChoiceValue(activeProfile.id, activeProfile.model) : '')
+  }, [])
+
+  // Read on mount, and again whenever the chat tab becomes visible: the panel
+  // keeps every tab mounted, so providers added in the Models tab would
+  // otherwise not reach this composer until the whole panel was reopened.
   useEffect(() => {
+    if (!active) return
     void (async () => {
       try {
         const result = await sendCommand({ type: 'settings.get' })
-        if (result.type === 'settings') {
-          setMode(result.settings.mode)
-        }
+        if (result.type !== 'settings') return
+        applySettingsSnapshot(result.settings)
       } catch {
         /* keep defaults */
       }
     })()
-  }, [])
+  }, [active, applySettingsSnapshot])
+
+  /**
+   * One provider entry per model, grouped by provider: the side panel is too
+   * narrow for "provider · model" labels, and the optgroup names the provider.
+   */
+  const modelGroups = useMemo(
+    () =>
+      providers
+        .map((profile) => ({
+          providerId: profile.id,
+          label: profile.label,
+          models: providerModels(profile),
+        }))
+        .filter((group) => group.models.length > 0),
+    [providers],
+  )
+
+  /**
+   * Switches the model that upcoming turns use. The picker and Settings expose
+   * the same `activeProviderId` + `model`, so this is a settings write, not a
+   * per-conversation override.
+   */
+  const switchModel = async (value: string): Promise<void> => {
+    const separator = value.indexOf('\u001f')
+    if (separator < 0) return
+    const providerId = value.slice(0, separator)
+    const model = value.slice(separator + 1)
+    const previous = modelSelection
+    setModelSelection(value)
+    try {
+      const result = await sendCommand({ type: 'provider.activate', id: providerId, model })
+      if (result.type === 'settings') applySettingsSnapshot(result.settings)
+    } catch {
+      setModelSelection(previous)
+      toast(t.chatModelSwitchFailed, 'error')
+    }
+  }
 
   const changeMode = async (next: AgentMode): Promise<void> => {
     // Both "no per-step approval" modes get an explicit warning. Workflow
@@ -4200,7 +4271,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
         <span className="composer-resize-grip" />
       </div>
 
-      <div className="composer" style={{ height: composerHeight }}>
+      <div className="composer" style={{ minHeight: composerHeight }}>
         {/*
           The menu sits above the textarea and is positioned by CSS rather than
           measured caret coordinates: the composer is only a few lines tall, so
@@ -4370,7 +4441,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
               </div>
             )}
           </div>
-          <div className="actions" style={{ margin: 0 }}>
+          <div className="actions ml-auto shrink-0" style={{ margin: 0 }}>
             <button
               aria-label={t.chatAttach}
               className="icon-btn"
@@ -4408,9 +4479,40 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 )}
               </button>
             )}
+            {modelGroups.length > 0 && (
+              /* `.mode-select` is the composer's compact select styling (12px,
+                 tight padding); the width lives on the wrapper because the
+                 global `select { width: 100% }` is unlayered and would beat a
+                 Tailwind width class on the select itself. */
+              <div className="mode-select w-36 shrink-0">
+                <select
+                  aria-label={t.chatModelSelect}
+                  disabled={busy}
+                  onChange={(event) => void switchModel(event.target.value)}
+                  title={t.chatModelSelect}
+                  value={modelSelection}
+                >
+                  {modelGroups.map((group) => (
+                    <optgroup key={group.providerId} label={group.label}>
+                      {group.models.map((model) => (
+                        <option key={model} value={modelChoiceValue(group.providerId, model)}>
+                          {model}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            )}
             {!busy && entries.length > 0 && (
-              <button onClick={startNewConversation} title={t.convNew} type="button">
-                ＋ {t.chatNewChat}
+              <button
+                aria-label={t.chatNewChat}
+                className="icon-btn"
+                onClick={startNewConversation}
+                title={t.chatNewChat}
+                type="button"
+              >
+                <SquarePen size={16} aria-hidden="true" />
               </button>
             )}
             {busy && (
@@ -4431,19 +4533,29 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill }: Props)
                 {t.chatStop}
               </button>
             )}
-            <button
-              className="primary"
-              disabled={
-                compacting ||
-                (busy
-                  ? !draft.trim()
-                  : !draft.trim() && !activeSkillId && pendingAttachments.length === 0)
-              }
-              onClick={submitComposer}
-              type="button"
-            >
-              {busy ? t.chatInterject : t.chatSend}
-            </button>
+            {busy ? (
+              <button
+                className="primary"
+                disabled={!draft.trim()}
+                onClick={submitComposer}
+                type="button"
+              >
+                {t.chatInterject}
+              </button>
+            ) : (
+              <button
+                aria-label={t.chatSend}
+                className="primary icon-btn"
+                disabled={
+                  compacting || (!draft.trim() && !activeSkillId && pendingAttachments.length === 0)
+                }
+                onClick={submitComposer}
+                title={t.chatSend}
+                type="button"
+              >
+                <ArrowUp size={16} aria-hidden="true" />
+              </button>
+            )}
           </div>
         </div>
         <div className="token-bar">

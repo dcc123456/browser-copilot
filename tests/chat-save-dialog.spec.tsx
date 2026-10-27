@@ -758,9 +758,7 @@ describe('chat save-as-workflow flow', () => {
         setter.call(textarea, 'do the task')
         textarea.dispatchEvent(new Event('input', { bubbles: true }))
       })
-      const send = [...container.querySelectorAll('button')].find(
-        (b) => b.textContent?.trim() === 'Send',
-      )
+      const send = container.querySelector('button[aria-label="Send"]')
       expect(send).toBeDefined()
       await act(async () => {
         send!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -802,9 +800,7 @@ describe('chat save-as-workflow flow', () => {
           setter.call(textarea, 'do the task')
           textarea.dispatchEvent(new Event('input', { bubbles: true }))
         })
-        const send = [...container.querySelectorAll('button')].find(
-          (b) => b.textContent?.trim() === 'Send',
-        )
+        const send = container.querySelector('button[aria-label="Send"]')
         await act(async () => {
           send!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
         })

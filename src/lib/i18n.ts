@@ -617,6 +617,10 @@ export interface Messages {
   /** Composer hint when a question card is waiting while the supplement is queued. */
   chatInterjectionQueued: string
   chatNewChat: string
+  /** Composer model picker label (also its aria-label / tooltip). */
+  chatModelSelect: string
+  /** Toast when the model switch could not be saved. */
+  chatModelSwitchFailed: string
   chatAttachSelection: string
   /** Composer 📎 button tooltip. */
   chatAttach: string
@@ -2305,6 +2309,8 @@ const en: Messages = {
   chatInterjectionUnapplied: 'Not applied (the task stopped) — returned to the input.',
   chatInterjectionQueued: 'Queued for the running task',
   chatNewChat: 'New chat',
+  chatModelSelect: 'Model',
+  chatModelSwitchFailed: 'Could not switch the model — check it in Settings.',
   chatAttachSelection: 'Attach selection',
   chatAttach: 'Attach files',
   chatAttachmentRemove: 'Remove attachment',
@@ -3919,6 +3925,8 @@ const zhCN: Messages = {
   chatInterjectionUnapplied: '未生效（任务已停止）——已退回输入框。',
   chatInterjectionQueued: '已排队，等待当前任务读取',
   chatNewChat: '新对话',
+  chatModelSelect: '模型',
+  chatModelSwitchFailed: '切换模型失败——请在设置中检查该模型。',
   chatAttachSelection: '附带选中内容',
   chatAttach: '添加附件',
   chatAttachmentRemove: '移除附件',

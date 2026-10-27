@@ -21,6 +21,7 @@ import {
   validateProfile,
   type ProviderProfile,
 } from '../lib/providers'
+import { providerModels } from '../lib/storage'
 import {
   THINKING_LEVELS,
   normalizeThinkingLevel,
@@ -51,12 +52,6 @@ interface Draft extends Omit<
   /** The add-model field. Always empty between adds, so the fetched-model
    *  suggestions are never filtered down to a prefilled value. */
   modelInput: string
-}
-
-/** The models a provider holds; a profile written before providers held
- *  several models names exactly one. */
-function providerModels(profile: ProviderProfile): string[] {
-  return profile.models?.length ? profile.models : profile.model ? [profile.model] : []
 }
 
 function toDraft(profile: ProviderProfile): Draft {

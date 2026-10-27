@@ -151,7 +151,12 @@ export type Command =
   | { type: 'agents.reset'; id: string }
   | { type: 'provider.save'; profile: ProviderProfile }
   | { type: 'provider.delete'; id: string }
-  | { type: 'provider.activate'; id: string }
+  /**
+   * Makes `id` the active provider. `model` additionally switches that
+   * profile's model in the same write — the chat composer's model picker
+   * chooses both at once.
+   */
+  | { type: 'provider.activate'; id: string; model?: string }
   | { type: 'provider.test'; profile: ProviderProfile }
   | { type: 'provider.models'; profile: ProviderProfile }
   | { type: 'page.read'; maxChars?: number }

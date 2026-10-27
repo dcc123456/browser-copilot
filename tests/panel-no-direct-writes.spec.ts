@@ -33,6 +33,7 @@ const FORBIDDEN_IMPORTS: Record<string, readonly string[]> = {
     'setSettings',
     'saveProvider',
     'deleteProvider',
+    'activateProvider',
     'saveConversation',
     'touchConversation',
     'renameConversation',
