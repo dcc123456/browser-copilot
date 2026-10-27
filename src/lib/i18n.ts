@@ -643,6 +643,13 @@ export interface Messages {
     seconds: number
     continuing: boolean
   }) => string
+  /**
+   * Status line while an answer the provider cut at its output-token cap is
+   * being continued. Both counts are 1-based continuations, not attempts.
+   */
+  chatContinuingTruncated: (params: { continuation: number; continuations: number }) => string
+  /** Terminal status line when the cap was reached despite those continuations. */
+  chatReplyStillTruncated: string
   chatExtensionReloaded: string
   /** Progress phases shown between send and the first token. */
   phasePreparing: string
@@ -2300,6 +2307,10 @@ const en: Messages = {
     continuing
       ? `Connection lost. Reconnecting in ${seconds}s (${retry}/${retries}) — continuing the reply where it stopped…`
       : `Connection lost. Reconnecting in ${seconds}s (${retry}/${retries})…`,
+  chatContinuingTruncated: ({ continuation, continuations }) =>
+    `The answer reached the model's per-reply output limit — continuing it (${continuation}/${continuations})…`,
+  chatReplyStillTruncated:
+    "The reply reached the model's output limit and may be incomplete — send “continue” to get the rest.",
   chatExtensionReloaded:
     'The extension was reloaded. Reload it in chrome://extensions, then reopen this panel.',
   phasePreparing: 'Preparing your request…',
@@ -3901,6 +3912,10 @@ const zhCN: Messages = {
     continuing
       ? `连接中断，${seconds}s 后自动重连（第 ${retry}/${retries} 次）——从已输出的内容继续…`
       : `连接中断，${seconds}s 后自动重连（第 ${retry}/${retries} 次）…`,
+  chatContinuingTruncated: ({ continuation, continuations }) =>
+    `回复达到了模型单次输出上限，正在自动续写（第 ${continuation}/${continuations} 次）…`,
+  chatReplyStillTruncated:
+    '回复已达到模型单次输出上限，内容可能仍不完整；发送「继续」即可获取剩余部分。',
   chatExtensionReloaded: '扩展已重新加载。请在 chrome://extensions 中重载，然后重新打开此面板。',
   phasePreparing: '正在准备请求…',
   phaseReadingPage: '正在读取页面…',

@@ -288,6 +288,18 @@ export interface StreamRetryInfo {
 }
 
 /**
+ * Fired before an automatic continuation of an answer the provider cut short
+ * because it hit its own output-token cap. Not a failure: the reply simply ran
+ * out of room, and the next request picks up where the text stopped.
+ */
+export interface StreamContinueInfo {
+  /** 1-based continuation number about to be sent. */
+  continuation: number
+  /** Total continuations the caller allowed. */
+  continuations: number
+}
+
+/**
  * Caller-owned retry budget.
  *
  * Omitted → the provider-wide default (3 attempts, exponential backoff) and a
@@ -323,6 +335,12 @@ export interface StreamHandlers {
    * user "reconnecting, picking up where it stopped" rather than "retrying".
    */
   onRetry?: (info: StreamRetryInfo) => void
+  /**
+   * Fired before a length-truncated reply is asked for again. The host should
+   * say "still answering" rather than "reconnecting": nothing was lost, the
+   * provider just ran out of output tokens.
+   */
+  onContinue?: (info: StreamContinueInfo) => void
   /**
    * Chain-of-thought deltas from reasoning models (DeepSeek / Qwen / Ark
    * `reasoning_content`). Kept separate from `onText` so a provider's
@@ -628,6 +646,13 @@ export interface StreamRequest {
    */
   retry?: StreamRetryPolicy
   /**
+   * Extra requests allowed to finish an answer the provider cut at its own
+   * output-token cap (`finish_reason: "length"`). Omitted or 0 → the truncated
+   * reply is returned as-is, exactly as before. A continuation is not a retry:
+   * it does not consume the {@link retry} budget.
+   */
+  continueOnLength?: number
+  /**
    * Abort an attempt after this long with no text/reasoning delta. A silent
    * connection is indistinguishable from a slow first token, so a total cap
    * punishes thinking models; only the gap between deltas is bounded here. Each
@@ -846,6 +871,14 @@ export async function streamCompletion(
   // AFTER the body started streaming is terminal (there is nowhere to resume).
   const maxRetries = policy ? Math.max(0, Math.floor(policy.retries)) : LLM_MAX_ATTEMPTS - 1
   const attempts = maxRetries + 1
+  // Opt-in: how many extra requests may finish an answer the provider cut at
+  // its output-token cap. Zero keeps the historical behaviour of returning the
+  // truncated text as-is.
+  const maxContinuations =
+    typeof request.continueOnLength === 'number'
+      ? Math.max(0, Math.floor(request.continueOnLength))
+      : 0
+  let continuations = 0
 
   // Text already streamed to the caller across attempts. A retry with this
   // non-empty resumes from it; the final content is this plus the last
@@ -854,7 +887,8 @@ export async function streamCompletion(
   let reasoning = ''
   let lastUsage: TokenUsage | null = null
 
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  let attempt = 1
+  while (attempt <= attempts) {
     if (request.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     const continuing = delivered.length > 0
     // A reply that already started is continued, never replayed: resending the
@@ -955,6 +989,25 @@ export async function streamCompletion(
 
       // The reply completed; silence after this point is not this request's.
       idle?.dispose()
+
+      // A `length` finish reason is the provider's output cap cutting the answer
+      // short, not the model deciding it is done — and a plain 200 with a clean
+      // `[DONE]` means the user sees half a reply with no hint of why. Ask for
+      // the rest: `delivered` becomes the assistant turn and the next pass
+      // continues from it, so nothing already on screen is repeated.
+      if (
+        continuations < maxContinuations &&
+        result.finishReason === 'length' &&
+        result.toolCalls.length === 0 &&
+        result.content.length > 0
+      ) {
+        delivered += result.content
+        reasoning += result.reasoning
+        continuations += 1
+        handlers.onContinue?.({ continuation: continuations, continuations: maxContinuations })
+        continue
+      }
+
       return {
         content: delivered + result.content,
         reasoning: reasoning + result.reasoning,
@@ -1002,6 +1055,10 @@ export async function streamCompletion(
         message: failure.message,
       })
       await sleepWithSignal(delayMs, request.signal)
+      // The retry budget is spent only by an attempt that actually failed. A
+      // length continuation re-enters the loop from the try block without ever
+      // reaching this line, so finishing a capped answer costs no retries.
+      attempt += 1
     }
   }
   // The loop either returns or throws on its last attempt; this only satisfies

@@ -28,6 +28,19 @@ panel proves the reload worked. A backup is kept while the old version is still
 running, and while the folder permission is not granted, so the rollback copy is
 never lost before it is safe to remove.
 
+### Fixed — A reply that stops half-way is finished, not silently dropped
+
+Two ways an answer ended mid-sentence with no explanation. The common one is the
+provider's own output-token cap: the stream closes cleanly, so the client treated
+half an answer as a finished one. Chat now asks the model to continue from the
+last character it wrote — up to three times per reply, without spending the
+reconnect budget — and says so in the status line; if the cap is reached anyway,
+the panel says the reply may be incomplete instead of pretending it ended. The
+other was a proxy that drops the connection without closing it: the request hung
+forever. A chat request now aborts after 120 seconds of total silence and
+reconnects, the same window the assistant already used — a reply that keeps
+streaming is never cut, however long it runs.
+
 _To be released._
 
 ## [0.6.12] - 2026-10-26

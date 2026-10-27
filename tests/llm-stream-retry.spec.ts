@@ -11,7 +11,12 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { LlmError, streamCompletion, type StreamRetryInfo } from '../src/lib/llm'
+import {
+  LlmError,
+  streamCompletion,
+  type StreamContinueInfo,
+  type StreamRetryInfo,
+} from '../src/lib/llm'
 
 const encoder = new TextEncoder()
 
@@ -19,6 +24,16 @@ const encoder = new TextEncoder()
 function textFrame(text: string): string {
   return `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`
 }
+
+/** SSE frame saying the answer was cut by the provider's output-token cap. */
+const LENGTH_FRAME = `data: ${JSON.stringify({
+  choices: [{ delta: {}, finish_reason: 'length' }],
+})}\n\n`
+
+/** SSE frame saying the answer finished on its own. */
+const STOP_FRAME = `data: ${JSON.stringify({
+  choices: [{ delta: {}, finish_reason: 'stop' }],
+})}\n\n`
 
 /** SSE frame carrying a tool-call fragment. */
 function toolFrame(name: string, args = '{"a"'): string {
@@ -403,5 +418,109 @@ describe('streamCompletion idle watchdog', () => {
     expect((error as Error).message).toContain('stopped sending output')
     expect((error as Error).message).not.toContain('Cannot reach')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('streamCompletion length continuation', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('finishes an answer the provider cut at its output cap', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(streamResponse([textFrame('Hello '), LENGTH_FRAME, DONE]))
+      .mockResolvedValueOnce(streamResponse([textFrame('world'), STOP_FRAME, DONE]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const deltas: string[] = []
+    const continuations: StreamContinueInfo[] = []
+    const result = await streamCompletion(
+      { ...request, retry: { retries: 3, delayMs: 0 }, continueOnLength: 2 },
+      { onText: (delta) => deltas.push(delta), onContinue: (info) => continuations.push(info) },
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const messages = sentBody(fetchMock, 1).messages as Array<Record<string, unknown>>
+    expect(messages[1]).toEqual({ role: 'assistant', content: 'Hello ' })
+    expect(String(messages[2]?.content)).toContain('Continue')
+    expect(result.content).toBe('Hello world')
+    // Nothing is replayed to the panel: the continuation only streams the rest.
+    expect(deltas.join('')).toBe('Hello world')
+    expect(result.finishReason).toBe('stop')
+    expect(continuations).toEqual([{ continuation: 1, continuations: 2 }])
+  })
+
+  it('stops after the caller’s continuation budget and reports the cap', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(streamResponse([textFrame('a'), LENGTH_FRAME, DONE]))
+      .mockResolvedValueOnce(streamResponse([textFrame('b'), LENGTH_FRAME, DONE]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const continuations: StreamContinueInfo[] = []
+    const result = await streamCompletion(
+      { ...request, retry: { retries: 3, delayMs: 0 }, continueOnLength: 1 },
+      { onContinue: (info) => continuations.push(info) },
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.content).toBe('ab')
+    // The host reads this as "still cut" and tells the user about the limit.
+    expect(result.finishReason).toBe('length')
+    expect(continuations).toHaveLength(1)
+  })
+
+  it('leaves a truncated tool call alone', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        streamResponse([textFrame('working '), toolFrame('click'), LENGTH_FRAME, DONE]),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await streamCompletion({
+      ...request,
+      retry: { retries: 3, delayMs: 0 },
+      continueOnLength: 3,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result.finishReason).toBe('length')
+    expect(result.toolCalls).toHaveLength(1)
+  })
+
+  it('does not spend the retry budget on a continuation', async () => {
+    // One retry allowed: a continuation that counted as an attempt would leave
+    // nothing for the 502 below and the call would throw.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(streamResponse([textFrame('a'), LENGTH_FRAME, DONE]))
+      .mockResolvedValueOnce(httpError(502))
+      .mockResolvedValueOnce(streamResponse([textFrame('b'), STOP_FRAME, DONE]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await streamCompletion(
+      { ...request, retry: { retries: 1, delayMs: 0 }, continueOnLength: 1 },
+      {},
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(result.content).toBe('ab')
+    expect(result.finishReason).toBe('stop')
+  })
+
+  it('returns the truncated answer untouched when the caller opts out', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(streamResponse([textFrame('half'), LENGTH_FRAME, DONE]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await streamCompletion({ ...request, retry: { retries: 3, delayMs: 0 } })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result.content).toBe('half')
+    expect(result.finishReason).toBe('length')
   })
 })

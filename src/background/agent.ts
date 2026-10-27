@@ -5009,6 +5009,13 @@ export async function runAgentTurn(
   }
   // And the reconnect status line, for the same reason.
   const reconnectingText = messages.chatReconnecting
+  // Same aliasing rule for the two lines that tell the user an answer was cut
+  // at the provider's output cap: one before we ask for the rest, one when the
+  // cap is reached anyway.
+  const truncationText = {
+    continuing: messages.chatContinuingTruncated,
+    stillTruncated: messages.chatReplyStillTruncated,
+  }
 
   // Filter the advertised tools per round (see advertiseTools): the core set
   // plus any on-demand group the model has loaded so far this conversation.
@@ -5205,6 +5212,14 @@ export async function runAgentTurn(
           // A mid-reply connection loss reconnects instead of ending the turn;
           // an already-started answer is continued, never replayed.
           retry: { retries: 10, delayMs: 5_000 },
+          // "Stopped half-way with no message" is usually the provider's output
+          // cap, not a dropped socket: ask for the rest instead of returning
+          // half an answer.
+          continueOnLength: 3,
+          // And bound the silence, so a proxy that dies without closing the
+          // connection is cut and retried rather than hanging the turn forever
+          // (same 120s gap as the editor assistant).
+          idleTimeoutMs: 120_000,
           ...(provider.headers ? { headers: provider.headers } : {}),
           ...(typeof provider.temperature === 'number'
             ? { temperature: provider.temperature }
@@ -5239,6 +5254,17 @@ export async function runAgentTurn(
           // paint a live reasoning block, but never touch the phase — the
           // model is still thinking, not responding.
           onReasoning: (delta) => deps.send({ type: 'thinking', text: delta }),
+          // The answer ran into the provider's output cap: say so, then let the
+          // continuation stream more text instead of ending the turn half-way.
+          onContinue: (info) => {
+            deps.send({
+              type: 'status',
+              text: truncationText.continuing({
+                continuation: info.continuation,
+                continuations: info.continuations,
+              }),
+            })
+          },
           onUsage: (usage) => {
             totalUsage.inputTokens += usage.inputTokens
             totalUsage.outputTokens += usage.outputTokens
@@ -5316,6 +5342,11 @@ export async function runAgentTurn(
     }
 
     if (result.toolCalls.length === 0) {
+      // Still cut after the continuations: the cap is real, not a dropped
+      // connection. Tell the user instead of ending on a half sentence.
+      if (result.finishReason === 'length') {
+        deps.send({ type: 'status', text: truncationText.stillTruncated })
+      }
       history.push({ role: 'assistant', content: replyText })
       // A supplement that arrived while this answer streamed still belongs to
       // THIS task: apply it and keep the same turn going, so the model answers
