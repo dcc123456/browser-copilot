@@ -87,6 +87,56 @@ describe('default button placement', () => {
     expect(crosshairTop + 40).toBeLessThanOrEqual(iconTop)
   })
 
+  it('keeps the crosshair above the icon when it is dragged mid-page', async () => {
+    // Mid-page has room below, but the pair is one stack: the crosshair must
+    // stay above instead of jumping under the icon.
+    const iconTop = 300
+    const icon = floatingHost()
+    if (!icon) throw new Error('floating button did not mount')
+    icon.getBoundingClientRect = () =>
+      ({
+        x: window.innerWidth - 56,
+        y: iconTop,
+        left: window.innerWidth - 56,
+        top: iconTop,
+        right: window.innerWidth - 16,
+        bottom: iconTop + 40,
+        width: 40,
+        height: 40,
+        toJSON: () => ({}),
+      }) as DOMRect
+
+    window.dispatchEvent(new Event('resize'))
+    await settle()
+
+    const crosshairTop = Number.parseFloat(launcherHost()?.style.top ?? 'NaN')
+    expect(crosshairTop).toBe(iconTop - 8 - 40)
+  })
+
+  it('flips below only when the icon touches the top edge', async () => {
+    const iconTop = 8
+    const icon = floatingHost()
+    if (!icon) throw new Error('floating button did not mount')
+    icon.getBoundingClientRect = () =>
+      ({
+        x: window.innerWidth - 56,
+        y: iconTop,
+        left: window.innerWidth - 56,
+        top: iconTop,
+        right: window.innerWidth - 16,
+        bottom: iconTop + 40,
+        width: 40,
+        height: 40,
+        toJSON: () => ({}),
+      }) as DOMRect
+
+    window.dispatchEvent(new Event('resize'))
+    await settle()
+
+    const crosshairTop = Number.parseFloat(launcherHost()?.style.top ?? 'NaN')
+    expect(crosshairTop).toBe(iconTop + 40 + 8)
+  })
+
   it('keeps a user-dragged position instead of the corner default', () => {
     deliver({ type: 'floating.hide' })
     deliver({ type: 'floating.show', pos: { x: 50, y: 50 } })

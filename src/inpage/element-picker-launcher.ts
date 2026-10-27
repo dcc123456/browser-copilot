@@ -67,12 +67,12 @@ function unmount(): void {
 }
 
 /**
- * Keeps the crosshair clear of the plugin's restore button: the floating button
- * is draggable and its saved position may sit wherever the crosshair used to
- * be, which hid one button behind the other. Anchored below it (flipped above
- * near the bottom edge), and parked in the same bottom-right corner when the
- * panel is open and there is no floating button. With both at their defaults
- * the crosshair sits directly ABOVE the plugin icon.
+ * Keeps the crosshair glued above the plugin's restore button so the pair
+ * moves as one stack: the floating button is draggable, and its saved
+ * position may sit anywhere, so the crosshair follows every move (style
+ * observer) and keeps the same 8px gap. Only near the top edge, where there
+ * is no room above, does it flip below. With the panel open and no floating
+ * button it parks in the same bottom-right corner on its own.
  */
 function place(host: HTMLElement): void {
   host.style.right = `${EDGE}px`
@@ -84,10 +84,8 @@ function place(host: HTMLElement): void {
   }
   const rect = floating.getBoundingClientRect()
   host.style.right = `${Math.max(EDGE, Math.round(window.innerWidth - rect.right))}px`
-  let top = Math.round(rect.bottom + GAP)
-  if (top + BUTTON_SIZE > window.innerHeight - EDGE) {
-    top = Math.round(rect.top - GAP - BUTTON_SIZE)
-  }
+  let top = Math.round(rect.top - GAP - BUTTON_SIZE)
+  if (top < EDGE) top = Math.round(rect.bottom + GAP)
   host.style.top = `${Math.max(EDGE, top)}px`
 }
 
