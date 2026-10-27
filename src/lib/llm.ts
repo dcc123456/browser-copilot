@@ -65,6 +65,13 @@ export type WireMessage =
        * {@link toApiMessages} so providers never receive it.
        */
       displayContent?: string
+      /**
+       * Name of the skill slash-picked for this turn, kept so the panel can
+       * render the `/name` tag in the transcript (also after a reload).
+       * Display-only: {@link toApiMessages} rebuilds the plain user turn, so it
+       * never reaches a provider.
+       */
+      skillName?: string
     }
   | {
       role: 'assistant'

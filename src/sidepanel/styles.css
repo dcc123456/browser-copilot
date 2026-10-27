@@ -779,23 +779,20 @@ body {
   position: relative;
 }
 
+/* Borderless on purpose: the bordered field is the wrapper (see the composer
+   in ChatTab), which lets the active-skill tag sit on the text's first line. */
 .composer textarea {
   flex: 1;
   /* Keeps two lines readable when the action row wraps on a narrow panel. */
   min-height: 38px;
   resize: none;
-  padding: 9px 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--sunken);
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--text);
   font: inherit;
   line-height: 1.5;
-}
-
-.composer textarea:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
 }
 
 .composer-row {
@@ -803,9 +800,9 @@ body {
   align-items: center;
   gap: 8px;
   justify-content: space-between;
-  /* The action cluster (attach, compress, model picker, new chat, send) is
-     wider than a narrow panel's leftover space, so it drops to a second line
-     as a whole instead of splitting into a stack of one-control rows. */
+  /* The action cluster (attach, model picker, new chat, send) is wider than a
+     narrow panel's leftover space, so it drops to a second line as a whole
+     instead of splitting into a stack of one-control rows. */
   flex-wrap: wrap;
   white-space: nowrap;
 }

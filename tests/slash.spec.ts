@@ -6,6 +6,7 @@ import {
   findSlashQuery,
   moveSelection,
   rankByTerm,
+  takeAttachTrigger,
 } from '../src/lib/slash'
 import type { Skill } from '../src/lib/types'
 
@@ -167,6 +168,35 @@ describe('moveSelection', () => {
   it('stays at zero for an empty list', () => {
     expect(moveSelection(0, 1, 0)).toBe(0)
     expect(moveSelection(0, -1, 0)).toBe(0)
+  })
+})
+
+describe('takeAttachTrigger', () => {
+  it('consumes a fresh @ at the start or after whitespace', () => {
+    expect(takeAttachTrigger('', '@', 1)).toEqual({ text: '', caret: 0 })
+    expect(takeAttachTrigger('hello ', 'hello @', 7)).toEqual({ text: 'hello ', caret: 6 })
+    expect(takeAttachTrigger('hello\n', 'hello\n@', 7)).toEqual({ text: 'hello\n', caret: 6 })
+  })
+
+  it('leaves the text after the caret in place', () => {
+    expect(takeAttachTrigger('ab', '@ab', 1)).toEqual({ text: 'ab', caret: 0 })
+  })
+
+  // The same cases that keep `/` from firing on URLs, kept for `@` addresses.
+  it('ignores an @ inside a word', () => {
+    expect(takeAttachTrigger('me@host', 'me@host@', 8)).toBeNull()
+    expect(takeAttachTrigger('me', 'me@', 3)).toBeNull()
+  })
+
+  it('ignores a paste or a caret landing on an existing @', () => {
+    // Two characters inserted at once: not a single typed `@`.
+    expect(takeAttachTrigger('', '@x', 2)).toBeNull()
+    // The text did not change around the caret.
+    expect(takeAttachTrigger('a@b', 'a@b', 2)).toBeNull()
+  })
+
+  it('needs a caret', () => {
+    expect(takeAttachTrigger('', '@', null)).toBeNull()
   })
 })
 

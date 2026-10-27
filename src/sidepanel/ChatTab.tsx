@@ -59,9 +59,10 @@ import { confirmDialog } from '../ui/confirm'
 import { toast } from '../ui/toast'
 import {
   applySlashPick,
-  filterSkills,
   findSlashQuery,
   moveSelection,
+  rankByTerm,
+  takeAttachTrigger,
   type SlashQuery,
 } from '../lib/slash'
 import { isNearBottom } from '../lib/scroll'
@@ -85,10 +86,10 @@ import {
   ArrowUp,
   Brain,
   Check,
+  ChevronDown,
   ChevronRight,
   Copy,
   Download,
-  FoldHorizontal,
   Gauge,
   Highlighter,
   History,
@@ -153,6 +154,8 @@ interface Entry {
   text: string
   /** Files carried by a user turn, as slimmed summaries (no inline text). */
   attachments?: AttachmentSummary[]
+  /** Name of the skill pinned for this turn, shown as a `/name` tag. */
+  skillName?: string
   /** Token usage of the completed turn this assistant reply belongs to (hover). */
   usage?: TurnTokenUsage
   /** Tool name for `tool` entries (the chip text stays as a fallback). */
@@ -180,6 +183,18 @@ interface Entry {
    * instead of disappearing with the closed channel.
    */
   interjection?: 'queued' | 'unapplied'
+}
+
+/**
+ * One row of the composer's slash menu: a built-in command or a saved skill.
+ * Both share a name and description so one ranking covers them together.
+ */
+interface SlashEntry {
+  key: string
+  name: string
+  description: string
+  /** Absent for built-in commands. */
+  skill?: Skill
 }
 
 /**
@@ -428,6 +443,15 @@ function MessageAttachments({ attachments }: { attachments?: AttachmentSummary[]
         ),
       )}
     </div>
+  )
+}
+
+/** The `/name` tag recorded for a turn that ran a slash-picked skill. */
+function SkillTag({ name }: { name: string }) {
+  return (
+    <span className="skill-chip" title={`/${name}`}>
+      <span className="skill-chip-name">/{name}</span>
+    </span>
   )
 }
 
@@ -1639,8 +1663,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
   const [compacting, setCompacting] = useState(false)
   /** Every configured provider, for the composer's model picker. */
   const [providers, setProviders] = useState<ProviderProfile[]>([])
-  /** The `<select>` value (`providerId\u001fmodel`) the agent currently uses. */
+  /** The picker value (`providerId\u001fmodel`) the agent currently uses. */
   const [modelSelection, setModelSelection] = useState('')
+  /** Whether the composer's model listbox is open (it opens upward). */
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const modelMenuRef = useRef<HTMLDivElement>(null)
   /** Wall-clock tick driving the live elapsed chips while a turn runs. */
   const [now, setNow] = useState(() => Date.now())
   /** When the current turn started, for the elapsed chips. */
@@ -1705,6 +1732,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
       role: string
       text: string
       attachments?: AttachmentSummary[]
+      skillName?: string
     }[]
   } | null>(null)
   const [mode, setMode] = useState<AgentMode>('semi')
@@ -2312,6 +2340,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 ...(entry.role === 'user' && entry.attachments?.length
                   ? { attachments: entry.attachments }
                   : {}),
+                ...(entry.role === 'user' && entry.skillName ? { skillName: entry.skillName } : {}),
               }
             })
             setEntries(restored)
@@ -2722,8 +2751,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
   }, [active, applySettingsSnapshot])
 
   /**
-   * One provider entry per model, grouped by provider: the side panel is too
-   * narrow for "provider · model" labels, and the optgroup names the provider.
+   * One entry per configured model, grouped by provider: the side panel is too
+   * narrow for "provider · model" labels, and the menu's group heading names
+   * the provider.
    */
   const modelGroups = useMemo(
     () =>
@@ -2736,6 +2766,21 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
         .filter((group) => group.models.length > 0),
     [providers],
   )
+
+  /** The model name on the picker button; the provider is implied by its group. */
+  const modelSeparator = modelSelection.indexOf('\u001f')
+  const selectedModelName = modelSeparator < 0 ? '' : modelSelection.slice(modelSeparator + 1)
+
+  // The listbox is not a native popup, so an outside pointer press has to
+  // dismiss it the way a `<select>` would.
+  useEffect(() => {
+    if (!modelMenuOpen) return
+    const closeOnOutsidePress = (event: PointerEvent): void => {
+      if (!modelMenuRef.current?.contains(event.target as Node)) setModelMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePress)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePress)
+  }, [modelMenuOpen])
 
   /**
    * Switches the model that upcoming turns use. The picker and Settings expose
@@ -3055,6 +3100,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
   const startTurn = (outgoing: string, withSelection = includeSelection): boolean => {
     // Workflow generation mode: auto-generate name from task text without blocking.
     const workflowName = modeRef.current === 'workflow' ? generateWorkflowName(outgoing) : undefined
+    const sentSkillName = activeSkillId
+      ? skills.find((skill) => skill.id === activeSkillId)?.name
+      : undefined
 
     const delivered = post({
       type: 'chat',
@@ -3073,9 +3121,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
       return false
     }
 
+    // A slash-picked skill applies to this message only; the next one starts
+    // unpinned. The worker already received the id, and the tag below keeps the
+    // choice visible in the transcript.
+    if (activeSkillId) onSelectSkill(null)
+    setModelMenuOpen(false)
+
     append({
       role: 'user',
       text: outgoing,
+      ...(sentSkillName ? { skillName: sentSkillName } : {}),
       // Summaries only: the full text content went to the worker with the
       // message, and the transcript rendering never needs it twice.
       ...(pendingAttachments.length
@@ -3512,9 +3567,37 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
   // with a localized fallback for untitled conversations.
   const convTitle =
     conversations.find((entry) => entry.id === conversationId)?.title || t.msgDownloadUntitled
-  const matches = query ? filterSkills(skills, query.term) : []
+  /**
+   * What `/` can summon: built-in commands first, then saved skills.
+   *
+   * `/compact` is listed only while it can actually run — an offered action
+   * that silently does nothing is worse than a shorter menu.
+   */
+  const slashEntries = useMemo<SlashEntry[]>(() => {
+    const commands: SlashEntry[] =
+      !busy && !compacting && entries.length > 0
+        ? [{ key: 'command:compact', name: 'compact', description: t.chatCompactContext }]
+        : []
+    return [
+      ...commands,
+      ...skills.map((skill) => ({
+        key: `skill:${skill.id}`,
+        name: skill.name,
+        description: skill.description,
+        skill,
+      })),
+    ]
+  }, [busy, compacting, entries.length, skills, t.chatCompactContext])
+  const matches = query
+    ? rankByTerm(
+        slashEntries,
+        query.term,
+        (entry) => entry.name,
+        (entry) => entry.description,
+      )
+    : []
   // Only open once there is something to pick, so a stray '/' is not disruptive.
-  const menuOpen = query !== null && skills.length > 0
+  const menuOpen = query !== null && slashEntries.length > 0
 
   const closeMenu = (): void => {
     setQuery(null)
@@ -3529,7 +3612,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
    * lag one keystroke behind.
    */
   const syncMenu = (text: string, caret: number | null): void => {
-    if (caret === null || skills.length === 0) {
+    if (caret === null || slashEntries.length === 0) {
       closeMenu()
       return
     }
@@ -3540,12 +3623,18 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
     setHighlight(0)
   }
 
-  const pickSkill = (skill: Skill): void => {
+  /**
+   * Applies a menu pick. The `/term` is always consumed — it is a control
+   * gesture, not content — and then the entry decides what happens: a skill is
+   * pinned for the next turn only (see `startTurn`), `/compact` runs now.
+   */
+  const pickSlashEntry = (entry: SlashEntry): void => {
     if (!query) return
     const { text, caret } = applySlashPick(draft, query)
     setDraft(text)
-    onSelectSkill(skill.id)
     closeMenu()
+    if (entry.skill) onSelectSkill(entry.skill.id)
+    else void compactContext()
 
     // Restore focus and caret after React commits the new value; without this the
     // caret jumps to the end and focus can land on the clicked button.
@@ -3572,7 +3661,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
         const chosen = matches[highlight]
         if (chosen) {
           event.preventDefault()
-          pickSkill(chosen)
+          pickSlashEntry(chosen)
           return
         }
       }
@@ -3992,6 +4081,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                     )}
                     {previewConv.messages.map((message, index) => (
                       <div className="msg" data-role={message.role} key={index}>
+                        {message.skillName && (
+                          <>
+                            <SkillTag name={message.skillName} />{' '}
+                          </>
+                        )}
                         {message.text}
                         <MessageAttachments attachments={message.attachments} />
                       </div>
@@ -4100,6 +4194,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                   replies are parsed as Markdown, and those render as turns
                   below.
                 */}
+                {entry.skillName && (
+                  <>
+                    <SkillTag name={entry.skillName} />{' '}
+                  </>
+                )}
                 {entry.text}
                 {entry.id === phaseRef.current && busy && (
                   <span
@@ -4282,23 +4381,23 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
             {matches.length === 0 ? (
               <div className="slash-empty">{t.chatSlashNoMatch}</div>
             ) : (
-              matches.map((skill, index) => (
+              matches.map((entry, index) => (
                 <button
                   aria-selected={index === highlight}
                   className="slash-item"
                   data-active={index === highlight}
-                  key={skill.id}
+                  key={entry.key}
                   onMouseDown={(event) => {
                     event.preventDefault()
-                    pickSkill(skill)
+                    pickSlashEntry(entry)
                   }}
                   onMouseEnter={() => setHighlight(index)}
                   role="option"
                   type="button"
                 >
-                  <span className="slash-item-name">{skill.name}</span>
-                  {skill.description && (
-                    <span className="slash-item-desc">{skill.description}</span>
+                  <span className="slash-item-name">/{entry.name}</span>
+                  {entry.description && (
+                    <span className="slash-item-desc">{entry.description}</span>
                   )}
                 </button>
               ))
@@ -4330,16 +4429,14 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
           </div>
         )}
         {/*
-          The active-skill chip lives INSIDE the input box: the wrapper is the
-          positioning context, the chip floats over the textarea's top edge,
-          and the textarea gains matching top padding while it is shown.
+          The bordered field is the input box. The active skill is a tag on the
+          first line, and the textarea is its flex sibling so typed text starts
+          beside the tag instead of under a floating chip.
         */}
-        <div className="relative min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 items-stretch gap-1.5 rounded-[10px] border border-border bg-sunken px-2.5 py-2 focus-within:border-accent focus-within:ring-[3px] focus-within:ring-accent-soft">
           {activeSkill && (
-            <div className="skill-chip absolute left-2 top-1.5 z-10 mr-2">
-              <span className="skill-chip-name">
-                {t.chatSkillActive({ name: activeSkill.name })}
-              </span>
+            <span className="skill-chip mt-px shrink-0 self-start" title={`/${activeSkill.name}`}>
+              <span className="skill-chip-name">/{activeSkill.name}</span>
               <button
                 aria-label={t.skillsStopUsing}
                 className="skill-chip-clear"
@@ -4349,13 +4446,26 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
               >
                 ×
               </button>
-            </div>
+            </span>
           )}
           <textarea
-            className={`h-full w-full${activeSkill ? ' pt-8!' : ''}`}
             onChange={(event) => {
-              setDraft(event.target.value)
-              syncMenu(event.target.value, event.target.selectionStart)
+              const next = event.target.value
+              const caret = event.target.selectionStart
+              const attach = takeAttachTrigger(draft, next, caret)
+              if (attach) {
+                // `@` opens the file picker, so it is a gesture, not content:
+                // consume it, park the caret where it stood, open the picker.
+                setDraft(attach.text)
+                closeMenu()
+                requestAnimationFrame(() => {
+                  textareaRef.current?.setSelectionRange(attach.caret, attach.caret)
+                })
+                fileInputRef.current?.click()
+                return
+              }
+              setDraft(next)
+              syncMenu(next, caret)
             }}
             onCompositionEnd={() => {
               composingRef.current = false
@@ -4378,13 +4488,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 void addFiles(files)
               }
             }}
-            placeholder={
-              busy
-                ? t.chatInterjectPlaceholder
-                : skills.length > 0
-                  ? t.chatPlaceholderWithSkills
-                  : t.chatPlaceholder
-            }
+            placeholder={busy ? t.chatInterjectPlaceholder : t.chatPlaceholder}
             ref={textareaRef}
             value={draft}
           />
@@ -4463,45 +4567,68 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
               style={{ display: 'none' }}
               type="file"
             />
-            {entries.length > 0 && (
-              <button
-                aria-label={t.chatCompactContext}
-                className="icon-btn"
-                disabled={busy || compacting}
-                onClick={() => void compactContext()}
-                title={t.chatCompactContext}
-                type="button"
-              >
-                {compacting ? (
-                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
-                ) : (
-                  <FoldHorizontal size={16} aria-hidden="true" />
-                )}
-              </button>
-            )}
             {modelGroups.length > 0 && (
-              /* `.mode-select` is the composer's compact select styling (12px,
-                 tight padding); the width lives on the wrapper because the
-                 global `select { width: 100% }` is unlayered and would beat a
-                 Tailwind width class on the select itself. */
-              <div className="mode-select w-36 shrink-0">
-                <select
+              /*
+                The popup of a native <select> is drawn by the OS and covers the
+                control itself, so this is a button plus a listbox opened upward
+                (`bottom-full`) — the composer sits at the panel's bottom edge.
+              */
+              <div
+                className="relative shrink-0"
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setModelMenuOpen(false)
+                }}
+                ref={modelMenuRef}
+              >
+                <button
+                  aria-expanded={modelMenuOpen}
+                  aria-haspopup="listbox"
                   aria-label={t.chatModelSelect}
+                  className="flex h-7 w-36 items-center justify-between gap-1 rounded-md border border-border bg-panel px-2 text-xs text-ink hover:bg-hover disabled:opacity-50"
                   disabled={busy}
-                  onChange={(event) => void switchModel(event.target.value)}
+                  onClick={() => setModelMenuOpen((open) => !open)}
                   title={t.chatModelSelect}
-                  value={modelSelection}
+                  type="button"
                 >
-                  {modelGroups.map((group) => (
-                    <optgroup key={group.providerId} label={group.label}>
-                      {group.models.map((model) => (
-                        <option key={model} value={modelChoiceValue(group.providerId, model)}>
-                          {model}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
+                  <span className="truncate">{selectedModelName}</span>
+                  <ChevronDown aria-hidden="true" className="shrink-0 text-muted" size={14} />
+                </button>
+                {modelMenuOpen && (
+                  <div
+                    aria-label={t.chatModelSelect}
+                    className="absolute bottom-full right-0 z-20 mb-1 max-h-60 w-56 overflow-y-auto rounded-lg border border-border bg-panel-2 p-1 shadow-menu"
+                    role="listbox"
+                  >
+                    {modelGroups.map((group) => (
+                      <div aria-label={group.label} key={group.providerId} role="group">
+                        <div className="px-2 py-1 text-[11px] font-semibold text-muted">
+                          {group.label}
+                        </div>
+                        {group.models.map((model) => {
+                          const choice = modelChoiceValue(group.providerId, model)
+                          const isSelected = choice === modelSelection
+                          return (
+                            <button
+                              aria-selected={isSelected}
+                              className={`block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-hover ${
+                                isSelected ? 'bg-accent-soft text-ink' : 'text-ink'
+                              }`}
+                              key={choice}
+                              onClick={() => {
+                                setModelMenuOpen(false)
+                                void switchModel(choice)
+                              }}
+                              role="option"
+                              type="button"
+                            >
+                              {model}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {!busy && entries.length > 0 && (

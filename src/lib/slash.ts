@@ -130,6 +130,29 @@ export function applySlashPick(text: string, query: SlashQuery): { text: string;
   return { text: joined, caret: before.length }
 }
 
+/**
+ * Recognises a freshly typed `@` that should open the file picker, and consumes
+ * it.
+ *
+ * Like `/`, the `@` is a gesture rather than content, so it must not travel to
+ * the model. The rules mirror {@link findSlashQuery}: only a word-start `@`
+ * counts, so an address (`me@host`) stays ordinary text. Requiring that exactly
+ * one character was inserted keeps a pasted `@` — or a caret move onto an
+ * existing one — from silently eating it.
+ */
+export function takeAttachTrigger(
+  previous: string,
+  next: string,
+  caret: number | null,
+): { text: string; caret: number } | null {
+  if (caret === null || caret < 1) return null
+  if (next[caret - 1] !== '@') return null
+  const before = caret >= 2 ? next[caret - 2] : undefined
+  if (before !== undefined && !/\s/.test(before)) return null
+  if (`${next.slice(0, caret - 1)}${next.slice(caret)}` !== previous) return null
+  return { text: `${next.slice(0, caret - 1)}${next.slice(caret)}`, caret: caret - 1 }
+}
+
 /** Moves a selection index within a list, wrapping at both ends. */
 export function moveSelection(current: number, delta: number, length: number): number {
   if (length === 0) return 0

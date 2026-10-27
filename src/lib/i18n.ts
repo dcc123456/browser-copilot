@@ -603,6 +603,7 @@ export interface Messages {
 
   // Chat
   chatEmpty: string
+  /** Composer hint: Enter/Shift+Enter, `/` for commands, `@` for files. */
   chatPlaceholder: string
   chatSend: string
   chatStop: string
@@ -654,7 +655,7 @@ export interface Messages {
   chatContinuingTruncated: (params: { continuation: number; continuations: number }) => string
   /** Terminal status line when the cap was reached despite those continuations. */
   chatReplyStillTruncated: string
-  /** Composer action: compress this conversation's context now, on request. */
+  /** Composer `/compact` command description (it replaced a toolbar button). */
   chatCompactContext: string
   /** Transient phase line while the manual compaction request runs. */
   chatCompactRunning: string
@@ -682,14 +683,11 @@ export interface Messages {
   chatApprove: string
   chatDecline: string
   chatConfirmTitle: (params: { name: string }) => string
-  chatSkillActive: (params: { name: string }) => string
   /** Sent as the user turn when a skill is active but the user typed nothing. */
   chatSkillGo: (params: { name: string }) => string
   /** Same as above, but the user also attached their current page selection. */
   chatSkillGoSelection: (params: { name: string }) => string
-  /** Composer hint shown once at least one skill exists. */
-  chatPlaceholderWithSkills: string
-  /** Shown in the slash menu when no skill matches what was typed. */
+  /** Shown in the slash menu when no command or skill matches what was typed. */
   chatSlashNoMatch: string
   /** Ask whether to persist this session's operations as a reusable workflow. */
   chatSaveWorkflowPrompt: (params: { steps: number }) => string
@@ -2300,7 +2298,8 @@ const en: Messages = {
   dialogOK: 'OK',
 
   chatEmpty: 'Ask about the page you are looking at, or anything else.',
-  chatPlaceholder: 'Message… (Enter to send, Shift+Enter for a new line)',
+  chatPlaceholder:
+    'Message… (Enter to send, Shift+Enter for a new line, / for commands, @ for files)',
   chatSend: 'Send',
   chatStop: 'Stop',
   chatInterjectPlaceholder: 'Type a supplement… (Enter applies it to the running task)',
@@ -2354,12 +2353,10 @@ const en: Messages = {
   chatAskPlaceholder: 'Type your answer…',
   chatAskRecommended: 'Recommended',
   chatJumpToLatest: 'Jump to latest',
-  chatSkillActive: ({ name }) => `Skill: ${name}`,
   chatSkillGo: ({ name }) => `Apply the "${name}" skill now.`,
   chatSkillGoSelection: ({ name }) =>
     `Apply the "${name}" skill to the text I selected on the page.`,
-  chatPlaceholderWithSkills: 'Message… (Enter to send, Shift+Enter for a new line, / for skills)',
-  chatSlashNoMatch: 'No matching skill',
+  chatSlashNoMatch: 'No matching command or skill',
   chatSaveWorkflowPrompt: ({ steps }) =>
     `This session performed ${steps} step${steps > 1 ? 's' : ''} that can be reused. Save them as a workflow?`,
   chatSaveWorkflowDraftPrompt: ({ steps }) =>
@@ -3916,7 +3913,7 @@ const zhCN: Messages = {
   dialogOK: '知道了',
 
   chatEmpty: '可以询问当前正在浏览的页面，或任何其他问题。',
-  chatPlaceholder: '输入消息…（Enter 发送，Shift+Enter 换行）',
+  chatPlaceholder: '输入消息…（Enter 发送，Shift+Enter 换行，/ 唤出命令，@ 添加附件）',
   chatSend: '发送',
   chatStop: '停止',
   chatInterjectPlaceholder: '输入补充说明…（Enter 会应用到正在执行的任务）',
@@ -3966,11 +3963,9 @@ const zhCN: Messages = {
   chatAskPlaceholder: '输入你的回答…',
   chatAskRecommended: '推荐',
   chatJumpToLatest: '回到最新',
-  chatSkillActive: ({ name }) => `技能：${name}`,
   chatSkillGo: ({ name }) => `请使用"${name}"技能处理。`,
   chatSkillGoSelection: ({ name }) => `请用"${name}"技能处理我在页面上选中的内容。`,
-  chatPlaceholderWithSkills: '输入消息…（Enter 发送，Shift+Enter 换行，/ 选择技能）',
-  chatSlashNoMatch: '没有匹配的技能',
+  chatSlashNoMatch: '没有匹配的命令或技能',
   chatSaveWorkflowPrompt: ({ steps }) =>
     `本次会话共执行了 ${steps} 步可复用操作，是否保存为工作流？`,
   chatSaveWorkflowDraftPrompt: ({ steps }) =>

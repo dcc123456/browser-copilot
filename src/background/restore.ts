@@ -18,6 +18,8 @@ export interface RestoreMessage {
   role: 'user' | 'assistant' | 'tool'
   text: string
   attachments?: AttachmentSummary[]
+  /** Skill slash-picked for this turn, rendered as its `/name` tag. */
+  skillName?: string
 }
 
 /**
@@ -105,6 +107,7 @@ export function toRestoreMessages(history: readonly WireMessage[]): RestoreMessa
           ...(entry.attachments?.length
             ? { attachments: toAttachmentSummaries(entry.attachments) }
             : {}),
+          ...(entry.skillName ? { skillName: entry.skillName } : {}),
         }
       }
       return {

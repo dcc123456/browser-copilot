@@ -40,6 +40,25 @@ describe('system prompt', () => {
     expect(prompt.length).toBeLessThan(260)
   })
 
+  it('chat mode still carries a skill pinned for the turn', () => {
+    const prompt = buildSystemPrompt({
+      mode: 'chat',
+      activeSkill: {
+        id: 's1',
+        name: 'Summarise',
+        description: 'Summarise text',
+        instructions: 'Reply in bullets.',
+        autoMatch: true,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    })
+    // The user message points at "the instructions in the system prompt".
+    expect(prompt).toContain('ACTIVE SKILL')
+    expect(prompt).toContain('Reply in bullets.')
+    expect(prompt).not.toContain('SEMI-AUTO')
+  })
+
   it('places an active skill AFTER the mode line so it is the nearest instruction', () => {
     const prompt = buildSystemPrompt({
       mode: 'semi',

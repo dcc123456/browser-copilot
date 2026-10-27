@@ -6,11 +6,13 @@
  * Pinned here:
  * 1. the picker lists every model of every configured provider, grouped by
  *    provider, and starts on the profile Settings marked active;
- * 2. choosing a model is one `provider.activate` command carrying both the
+ * 2. its popup opens UPWARD (`bottom-full`), so it cannot cover the control
+ *    the way a native `<select>` popup does;
+ * 3. choosing a model is one `provider.activate` command carrying both the
  *    provider id and the model — never a panel-side settings write;
- * 3. a failed save moves the picker back and tells the user, instead of
+ * 4. a failed save moves the picker back and tells the user, instead of
  *    leaving the composer claiming a model the agent is not using;
- * 4. "new chat" and "send" are icon buttons: their label exists only as the
+ * 5. "new chat" and "send" are icon buttons: their label exists only as the
  *    accessible name (`tests/chat-save-dialog.spec.tsx` finds Send by it).
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -45,9 +47,6 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Command } from '../src/lib/messages'
 import ChatTab from '../src/sidepanel/ChatTab'
-
-/** `\u001f` is the picker's provider/model separator (see ChatTab). */
-const value = (providerId: string, model: string): string => `${providerId}\u001f${model}`
 
 function profile(id: string, label: string, model: string, models?: string[]) {
   return {
@@ -186,52 +185,85 @@ afterEach(() => {
   container = null
 })
 
-const modelPicker = (scope: ParentNode): HTMLSelectElement | null =>
-  scope.querySelector('select[aria-label="Model"]')
+const pickerButton = (scope: ParentNode): HTMLButtonElement | null =>
+  scope.querySelector('button[aria-label="Model"]')
+
+const modelListbox = (scope: ParentNode): HTMLElement | null =>
+  scope.querySelector('[role="listbox"]')
+
+const modelOptions = (scope: ParentNode): HTMLButtonElement[] => [
+  ...scope.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+]
+
+/** Opens the listbox and returns the picker button whose label shows the choice. */
+async function openPicker(scope: ParentNode): Promise<HTMLButtonElement> {
+  const button = pickerButton(scope)!
+  await act(async () => {
+    button.click()
+  })
+  await flush()
+  return button
+}
+
+const pickModel = async (scope: ParentNode, model: string): Promise<void> => {
+  const option = modelOptions(scope).find((entry) => entry.textContent?.trim() === model)
+  expect(option).toBeDefined()
+  await act(async () => {
+    option?.click()
+  })
+  await flush()
+}
 
 describe('chat model picker', () => {
   it('lists every model grouped by provider and starts on the active one', async () => {
     const mounted = await mountChat()
-    const picker = modelPicker(mounted)
-    expect(picker).not.toBeNull()
-    expect([...(picker?.querySelectorAll('optgroup') ?? [])].map((g) => g.label)).toEqual([
-      'Alpha',
-      'Beta',
+    const button = await openPicker(mounted)
+    expect(button.textContent?.trim()).toBe('a1')
+    const menu = modelListbox(mounted)
+    expect(menu).not.toBeNull()
+    expect(
+      [...(menu?.querySelectorAll('[role="group"]') ?? [])].map((group) =>
+        group.getAttribute('aria-label'),
+      ),
+    ).toEqual(['Alpha', 'Beta'])
+    expect(modelOptions(mounted).map((option) => option.textContent?.trim())).toEqual([
+      'a1',
+      'a2',
+      'b1',
     ])
-    expect([...(picker?.querySelectorAll('option') ?? [])].map((o) => o.value)).toEqual([
-      value('alpha', 'a1'),
-      value('alpha', 'a2'),
-      value('beta', 'b1'),
-    ])
-    expect(picker?.value).toBe(value('alpha', 'a1'))
+    expect(
+      modelOptions(mounted)
+        .filter((option) => option.getAttribute('aria-selected') === 'true')
+        .map((option) => option.textContent?.trim()),
+    ).toEqual(['a1'])
+  })
+
+  it('opens upward so the popup never covers the picker', async () => {
+    const mounted = await mountChat()
+    await openPicker(mounted)
+    // Positioned by the wrapper (`relative`) with its bottom on the button's top.
+    expect(modelListbox(mounted)?.className).toContain('bottom-full')
   })
 
   it('switches the model with one provider.activate command', async () => {
     const mounted = await mountChat()
-    const picker = modelPicker(mounted)!
-    await act(async () => {
-      picker.value = value('alpha', 'a2')
-      picker.dispatchEvent(new Event('change', { bubbles: true }))
-    })
-    await flush()
+    await openPicker(mounted)
+    await pickModel(mounted, 'a2')
     expect(mocks.sendCommand).toHaveBeenCalledWith({
       type: 'provider.activate',
       id: 'alpha',
       model: 'a2',
     })
-    expect(picker.value).toBe(value('alpha', 'a2'))
+    expect(pickerButton(mounted)?.textContent?.trim()).toBe('a2')
+    expect(modelListbox(mounted)).toBeNull()
   })
 
   it('moves back and reports when the switch could not be saved', async () => {
     activateError = new Error('settings write failed')
     const mounted = await mountChat()
-    const picker = modelPicker(mounted)!
-    await act(async () => {
-      picker.value = value('beta', 'b1')
-      picker.dispatchEvent(new Event('change', { bubbles: true }))
-    })
-    await flush()
-    expect(picker.value).toBe(value('alpha', 'a1'))
+    await openPicker(mounted)
+    await pickModel(mounted, 'b1')
+    expect(pickerButton(mounted)?.textContent?.trim()).toBe('a1')
     expect(mocks.toast).toHaveBeenCalledTimes(1)
     expect(String(mocks.toast.mock.calls[0]?.[0])).toContain('switch the model')
   })
@@ -239,7 +271,7 @@ describe('chat model picker', () => {
   it('is absent until a provider is configured', async () => {
     settingsReply = { mode: 'chat', activeProviderId: '', providers: [] }
     const mounted = await mountChat()
-    expect(modelPicker(mounted)).toBeNull()
+    expect(pickerButton(mounted)).toBeNull()
   })
 })
 

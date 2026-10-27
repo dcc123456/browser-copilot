@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
 /**
- * Component test for the chat composer's "compress context" action, driving the
- * REAL ChatTab with a mocked command channel and port. Pins the contract:
+ * Component test for `/compact`, the slash command that replaced the composer's
+ * "compress context" button. Drives the REAL ChatTab with a mocked command
+ * channel and port. Pins the contract:
  *
- * 1. the action is a Command — the panel never rewrites a stored transcript
+ * 1. the command is offered by the `/` menu only while it can actually run;
+ * 2. running it is a Command — the panel never rewrites a stored transcript
  *    itself (see `tests/panel-no-direct-writes.spec.ts`);
- * 2. a compression that landed re-pulls the transcript over the port, so the
+ * 3. a compression that landed re-pulls the transcript over the port, so the
  *    view shows what the worker actually stored;
- * 3. a refused compression leaves the conversation alone and only reports why.
+ * 4. a refused compression leaves the conversation alone and only reports why;
+ * 5. the old toolbar button is gone.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -151,18 +154,46 @@ afterEach(() => {
   container = null
 })
 
-const compactButton = (scope: ParentNode): HTMLButtonElement | null =>
-  scope.querySelector('button[aria-label="Compress context"]')
+/** Types `text` into the composer the way a keyboard would (caret at the end). */
+async function typeInto(text: string): Promise<HTMLTextAreaElement> {
+  const field = container?.querySelector('textarea') as HTMLTextAreaElement
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+  await act(async () => {
+    setter?.call(field, text)
+    field.setSelectionRange(text.length, text.length)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await flush()
+  return field
+}
 
-describe('manual context compression', () => {
-  it('sends the compression as a command and re-pulls the transcript', async () => {
+const slashItems = (scope: ParentNode): HTMLButtonElement[] => [
+  ...scope.querySelectorAll<HTMLButtonElement>('.slash-item'),
+]
+
+/** Opens the `/` menu on `term` and confirms Enter on the highlighted entry. */
+async function runCompactCommand(): Promise<void> {
+  await typeInto('/compact')
+  const field = container?.querySelector('textarea') as HTMLTextAreaElement
+  expect(slashItems(container!).map((item) => item.textContent)).toEqual([
+    expect.stringContaining('/compact'),
+  ])
+  await act(async () => {
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  })
+  await flush()
+  await flush()
+}
+
+describe('/compact command', () => {
+  it('replaces the old toolbar button', async () => {
     const mounted = await mountWithConversation()
-    const button = compactButton(mounted)
-    expect(button).not.toBeNull()
-    await act(async () => {
-      button?.click()
-    })
-    await flush()
+    expect(mounted.querySelector('button[aria-label="Compress context"]')).toBeNull()
+  })
+
+  it('sends the compression as a command and re-pulls the transcript', async () => {
+    await mountWithConversation()
+    await runCompactCommand()
     expect(mocks.sendCommand).toHaveBeenCalledWith({
       type: 'conversations.compact',
       conversationId: 'default',
@@ -174,11 +205,8 @@ describe('manual context compression', () => {
 
   it('leaves the conversation alone when there is nothing to compress', async () => {
     compactReply = { type: 'conversations.compact', outcome: 'nothing', removed: 0 }
-    const mounted = await mountWithConversation()
-    await act(async () => {
-      compactButton(mounted)?.click()
-    })
-    await flush()
+    await mountWithConversation()
+    await runCompactCommand()
     expect(fakePort.postMessage).not.toHaveBeenCalledWith({
       type: 'resume',
       conversationId: 'default',
@@ -186,8 +214,14 @@ describe('manual context compression', () => {
     expect(mocks.toast).toHaveBeenCalledTimes(1)
   })
 
-  it('is not usable while a reply is still streaming', async () => {
-    const mounted = await mountWithConversation(true)
-    expect(compactButton(mounted)?.disabled ?? false).toBe(true)
+  it('is not offered while a reply is still streaming', async () => {
+    await mountWithConversation(true)
+    const field = await typeInto('/compact')
+    expect(slashItems(container!)).toEqual([])
+    // The typed text stays ordinary text; nothing was executed.
+    expect(field.value).toBe('/compact')
+    expect(mocks.sendCommand).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'conversations.compact' }),
+    )
   })
 })

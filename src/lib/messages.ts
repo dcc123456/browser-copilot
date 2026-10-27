@@ -630,6 +630,8 @@ export type CommandResult =
         role: 'user' | 'assistant' | 'tool'
         text: string
         attachments?: AttachmentSummary[]
+        /** Skill slash-picked for the turn, shown as its `/name` tag. */
+        skillName?: string
       }[]
     }
   | { type: 'conversations.rename' }
@@ -1104,6 +1106,8 @@ export type AgentServerMessage =
         role: 'user' | 'assistant' | 'tool'
         text: string
         attachments?: AttachmentSummary[]
+        /** Skill slash-picked for the turn, shown as its `/name` tag. */
+        skillName?: string
       }[]
       running: boolean
     }

@@ -55,20 +55,23 @@ describe('toApiMessages', () => {
     expect(JSON.stringify(out)).not.toContain('displayContent')
   })
 
-  it('strips displayContent from plain user turns', () => {
+  it('strips displayContent and the skill tag from plain user turns', () => {
     const messages: WireMessage[] = [
       // Model-facing content carries the skill/selection envelopes; the raw
-      // user text is display-only and must never reach the provider.
+      // user text and the `/trans` tag are display-only and must never reach
+      // the provider.
       {
         role: 'user',
         content: '[internal directive]\n\nmodel sees this',
         displayContent: 'translate it',
+        skillName: 'trans',
       },
     ]
     const out = toApiMessages(messages)
     expect(out[0]).toEqual({ role: 'user', content: '[internal directive]\n\nmodel sees this' })
     expect(JSON.stringify(out)).not.toContain('translate it')
     expect(JSON.stringify(out)).not.toContain('displayContent')
+    expect(JSON.stringify(out)).not.toContain('skillName')
   })
 
   it('strips displayContent when folding attachments into content parts', () => {
@@ -449,6 +452,15 @@ describe('toRestoreMessages', () => {
     expect(out[0]!.text).toBe('请用"trans"技能处理我在页面上选中的内容。')
     expect(out[0]!.text).not.toContain('ACTIVE')
     expect(out[0]!.text).not.toContain('Content selected on the page')
+  })
+
+  it('passes the skill tag through so a reloaded turn keeps it', () => {
+    const history: WireMessage[] = [
+      { role: 'user', content: 'translate it', displayContent: 'translate it', skillName: 'trans' },
+    ]
+    expect(toRestoreMessages(history)).toEqual([
+      { role: 'user', text: 'translate it', skillName: 'trans' },
+    ])
   })
 
   it('keeps an empty displayContent for attachment-only turns', () => {

@@ -1603,6 +1603,7 @@ async function handleCommand(
             role: 'user' | 'assistant'
             content: string
             attachments?: AttachmentDescriptor[]
+            skillName?: string
           } =>
             (entry.role === 'user' || entry.role === 'assistant') &&
             typeof entry.content === 'string' &&
@@ -1619,6 +1620,7 @@ async function handleCommand(
           ...(entry.role === 'user' && entry.attachments?.length
             ? { attachments: toAttachmentSummaries(entry.attachments) }
             : {}),
+          ...(entry.role === 'user' && entry.skillName ? { skillName: entry.skillName } : {}),
         }))
       return {
         type: 'conversations.get' as const,
@@ -3641,6 +3643,8 @@ chrome.runtime.onConnect.addListener((port) => {
 
         let text = message.text
         let grantedPageUrl: string | undefined
+        /** Skill pinned for this turn, recorded so the panel can show its tag. */
+        let pinnedSkillName: string | undefined
         if (message.includeSelection) {
           sendWithTracking({ type: 'phase', phase: 'reading-page' })
           try {
@@ -3676,7 +3680,10 @@ chrome.runtime.onConnect.addListener((port) => {
         // far less likely to ignore or refuse the skill.
         if (message.skillId) {
           const pinned = await getSkill(message.skillId)
-          if (pinned) text = wrapSkillDirective(pinned, text)
+          if (pinned) {
+            text = wrapSkillDirective(pinned, text)
+            pinnedSkillName = pinned.name
+          }
         }
 
         // Report anything dropped during sanitization before the turn proper,
@@ -3695,6 +3702,7 @@ chrome.runtime.onConnect.addListener((port) => {
           // skill directive and the page-selection envelope, which are
           // model-facing only and must not be rendered as the user's message.
           displayContent: message.text,
+          ...(pinnedSkillName ? { skillName: pinnedSkillName } : {}),
           ...(sanitized.kept.length ? { attachments: sanitized.kept } : {}),
         })
         // Persist metadata so the conversation appears in the history list;

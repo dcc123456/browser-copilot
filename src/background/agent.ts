@@ -357,8 +357,15 @@ export function buildSystemPrompt(options: {
 }): string {
   // Chat mode is pure conversation: no operating rules, no skill catalogue, no
   // mode instructions. Just a short identity line so the model stays in role.
+  // A skill the user pinned for this turn still arrives: the user message
+  // directs the model to apply "the instructions in the system prompt", so
+  // dropping them here would leave that pointer dangling.
   if (options.mode === 'chat') {
-    return 'You are Browser Copilot, a browser-extension assistant in the side panel. Answer the user conversationally in their language. You cannot read or act on the page in this mode; keep it concise.'
+    const identity =
+      'You are Browser Copilot, a browser-extension assistant in the side panel. Answer the user conversationally in their language. You cannot read or act on the page in this mode; keep it concise.'
+    return options.activeSkill
+      ? `${identity}\n\n${renderSkillPrompt(options.activeSkill)}`
+      : identity
   }
 
   // Delegated specialists always run on the project's base rules even when the
