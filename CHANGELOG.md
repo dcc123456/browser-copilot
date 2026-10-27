@@ -8,6 +8,54 @@ All notable changes to this project are documented here. The format is based on
 
 _To be released._
 
+## [0.6.14] - 2026-10-27
+
+### Added — Pick a page element and copy it into the chat
+
+Settings has a page-element picker: switch it on and a crosshair button appears
+on every page, in the bottom-right corner. Clicking it puts the page into pick
+mode — hover highlights the element under the pointer, click locks it, and the
+confirm action writes the payload to the clipboard so it can be pasted straight
+into the chat. What gets copied is chosen right under the toggle: the CSS
+selector only, the visible text only, or the element's HTML with tags and text
+(descendants included), which stays the default. The locked element's selector
+and the payload size are shown on the card, with a warning above 100,000
+characters; the copy itself is still performed rather than silently dropped. A
+copy failure keeps the card open with a retry hint.
+
+### Changed — Key settings cards move to the top
+
+Download folder, local agent access and team sharing are now the first cards
+in Settings, so the setup that needs credentials or paths comes before
+appearance and behaviour options.
+
+### Changed — Both page buttons live in the bottom-right corner
+
+The minimized plugin's restore button now defaults to the bottom-right corner,
+and the picker crosshair sits directly above it. The pair moves as one stack:
+dragging the plugin icon carries the crosshair along and keeps the 8 px gap,
+flipping below only when the button touches the top edge. A position the user
+dragged before is still restored per window.
+
+### Fixed — A minimized panel could lose its restore button
+
+Enabling the picker injects its launcher into tabs that were open before the
+extension (re)loaded. Every content script of the extension hears every tab
+message, so the broadcast for the floating button looked delivered even when
+only the picker script was present, and the restore button was never injected —
+the page showed just the crosshair. Both scripts now answer their own control
+messages with a receipt; a missing receipt reinjects the named script, in both
+directions.
+
+### Fixed — Republishing an update immediately reused a branch
+
+Submitting the same workflow twice within one minute produced the same
+`submit/<slug>-YYYYMMDDHHmm` branch, so the second run failed with a 409/422
+and surfaced the generic "conflicting change" error. Branch names are now
+stamped to the second, and the conflict message explains the recovery steps
+(wait a minute; merge or close an already-open pull request for that
+workflow).
+
 ## [0.6.13] - 2026-10-27
 
 ### Added — Type `/` in the composer to run commands and skills
