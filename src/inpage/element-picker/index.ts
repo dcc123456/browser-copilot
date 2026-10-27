@@ -518,11 +518,13 @@ export const startPicker: PickerStart = async (args) => {
 
   // The picker launcher is another extension control parked on the page. Hide
   // it while picking so the press interceptor cannot lock onto our own button;
-  // cleanup() restores it. Verify mode never mounts this card, so it leaves the
-  // launcher alone.
+  // cleanup() restores it. `visibility` (not `display`) keeps its box, so the
+  // floating window it is docked into does not resize and the plugin icon
+  // stays put while picking. Verify mode never mounts this card, so it leaves
+  // the launcher alone.
   const launcherHost =
     mode === 'verify' ? null : document.getElementById('bc-element-picker-launcher')
-  if (launcherHost instanceof HTMLElement) launcherHost.style.display = 'none'
+  if (launcherHost instanceof HTMLElement) launcherHost.style.visibility = 'hidden'
 
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => root.querySelector(sel) as T
   const findBySel = $<HTMLSelectElement>('[data-role="findby"]')
@@ -1054,7 +1056,7 @@ export const startPicker: PickerStart = async (args) => {
     window.removeEventListener('keydown', onKey, true)
     host.remove()
     if (launcherHost instanceof HTMLElement && launcherHost.isConnected) {
-      launcherHost.style.display = ''
+      launcherHost.style.visibility = ''
     }
   }
   // Hover stays on document (mousemove must reach the page to highlight, and a

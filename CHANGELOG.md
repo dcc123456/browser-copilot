@@ -29,13 +29,13 @@ Download folder, local agent access and team sharing are now the first cards
 in Settings, so the setup that needs credentials or paths comes before
 appearance and behaviour options.
 
-### Changed — Both page buttons live in the bottom-right corner
+### Changed — The two page buttons share one floating window
 
-The minimized plugin's restore button now defaults to the bottom-right corner,
-and the picker crosshair sits directly above it. The pair moves as one stack:
-dragging the plugin icon carries the crosshair along and keeps the 8 px gap,
-flipping below only when the button touches the top edge. A position the user
-dragged before is still restored per window.
+The minimized plugin's restore button defaults to the bottom-right corner, and
+the picker crosshair docks into that same window directly above it. Dragging the
+plugin icon moves the whole window and keeps the 8 px gap, flipping it below
+only when the button touches the top edge. A position the user dragged before is
+still restored per window, and opening the picker no longer shifts the icon.
 
 ### Fixed — A minimized panel could lose its restore button
 
@@ -46,6 +46,15 @@ only the picker script was present, and the restore button was never injected �
 the page showed just the crosshair. Both scripts now answer their own control
 messages with a receipt; a missing receipt reinjects the named script, in both
 directions.
+
+### Fixed — A reloaded extension left a dead floating button behind
+
+Reloading the extension orphans the content scripts already on a page: their
+host stays in the DOM, but `chrome.runtime` is invalidated, so clicking the
+restore icon does nothing — and a freshly injected script skipped mounting
+because the window id already existed. Both scripts now recognise that they are
+the newest instance and replace a host they did not create, so the icon reopens
+the panel again and the crosshair rejoins the same window.
 
 ### Fixed — Republishing an update immediately reused a branch
 

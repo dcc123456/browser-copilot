@@ -629,10 +629,12 @@ describe('element picker: copy mode copies the selected payload', () => {
     document.documentElement.appendChild(launcher)
 
     await mountCopy()
-    expect(launcher.style.display).toBe('none')
+    // `visibility` keeps the launcher's box so a floating window it is docked
+    // into does not resize while picking.
+    expect(launcher.style.visibility).toBe('hidden')
 
     dispatchKey('Escape')
-    expect(launcher.style.display).toBe('')
+    expect(launcher.style.visibility).toBe('')
 
     launcher.remove()
   })

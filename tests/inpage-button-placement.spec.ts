@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 /**
- * Default placement of the two page buttons: both park in the bottom-right
- * corner, with the picker crosshair directly above the plugin icon, and a
- * user-dragged position still overrides that corner anchoring.
+ * The two page buttons form ONE floating window: with the plugin minimized,
+ * the picker crosshair docks into the icon's host (above the icon by default),
+ * and the whole window follows a dragged position. The crosshair only lives on
+ * its own, in the bottom-right corner, while the panel is open.
  *
- * jsdom has no layout engine, so the icon's box is handed to the launcher
- * explicitly; everything else (inline styles, observers, resize) is the real
- * content-script code.
+ * jsdom has no layout engine, so the window's height is handed to the code
+ * explicitly where the icon-anchored math depends on it.
  *
  * @module tests/inpage-button-placement
  */
@@ -19,11 +19,15 @@ type Listener = (
 ) => void
 
 const listeners: Listener[] = []
+const sent: unknown[] = []
 
 beforeAll(async () => {
   ;(globalThis as unknown as { chrome: unknown }).chrome = {
     runtime: {
-      sendMessage: () => Promise.resolve(undefined),
+      sendMessage: (message: unknown) => {
+        sent.push(message)
+        return Promise.resolve(undefined)
+      },
       onMessage: { addListener: (fn: Listener) => listeners.push(fn) },
       getURL: (path: string) => `chrome-extension://test/${path}`,
     },
@@ -43,108 +47,112 @@ const launcherHost = (): HTMLElement | null => document.getElementById('bc-eleme
 /** MutationObserver callbacks in jsdom land on the microtask queue. */
 const settle = (): Promise<void> => new Promise((done) => setTimeout(done, 0))
 
-describe('default button placement', () => {
+/** jsdom reports 0 for every box; the docked window is crosshair + 8 + icon. */
+function stubWindowHeight(host: HTMLElement): void {
+  Object.defineProperty(host, 'offsetHeight', { value: 88, configurable: true })
+}
+
+describe('one floating window', () => {
   it('parks the crosshair in the bottom-right corner while the panel is open', () => {
     deliver({ type: 'elementPicker.set', enabled: true, locale: 'en', format: 'html' })
 
     const host = launcherHost()
-    expect(host?.style.right).toBe('16px')
-    expect(host?.style.top).toBe(`${window.innerHeight - 16 - 40}px`)
-  })
-
-  it('parks the plugin icon in the bottom-right corner', () => {
-    deliver({ type: 'floating.show' })
-
-    const host = floatingHost()
+    expect(host?.parentElement).toBe(document.documentElement)
     expect(host?.style.right).toBe('16px')
     expect(host?.style.bottom).toBe('16px')
-    expect(host?.style.top).toBe('')
   })
 
-  it('stacks the crosshair directly above the plugin icon', async () => {
-    const iconTop = window.innerHeight - 16 - 40
-    const iconBottom = window.innerHeight - 16
-    const icon = floatingHost()
-    if (!icon) throw new Error('floating button did not mount')
-    icon.getBoundingClientRect = () =>
-      ({
-        x: window.innerWidth - 56,
-        y: iconTop,
-        left: window.innerWidth - 56,
-        top: iconTop,
-        right: window.innerWidth - 16,
-        bottom: iconBottom,
-        width: 40,
-        height: 40,
-        toJSON: () => ({}),
-      }) as DOMRect
-
-    window.dispatchEvent(new Event('resize'))
+  it('docks the crosshair into the plugin window when the panel is minimized', async () => {
+    deliver({ type: 'floating.show' })
     await settle()
 
-    const crosshairTop = Number.parseFloat(launcherHost()?.style.top ?? 'NaN')
-    expect(crosshairTop).toBe(iconTop - 8 - 40)
-    expect(crosshairTop + 40).toBeLessThanOrEqual(iconTop)
+    const windowHost = floatingHost()
+    const launcher = launcherHost()
+    expect(launcher?.parentElement).toBe(windowHost)
+    expect(launcher?.style.position).toBe('static')
+    expect(windowHost?.style.right).toBe('16px')
+    expect(windowHost?.style.bottom).toBe('16px')
   })
 
-  it('keeps the crosshair above the icon when it is dragged mid-page', async () => {
-    // Mid-page has room below, but the pair is one stack: the crosshair must
-    // stay above instead of jumping under the icon.
-    const iconTop = 300
-    const icon = floatingHost()
-    if (!icon) throw new Error('floating button did not mount')
-    icon.getBoundingClientRect = () =>
-      ({
-        x: window.innerWidth - 56,
-        y: iconTop,
-        left: window.innerWidth - 56,
-        top: iconTop,
-        right: window.innerWidth - 16,
-        bottom: iconTop + 40,
-        width: 40,
-        height: 40,
-        toJSON: () => ({}),
-      }) as DOMRect
+  it('keeps the crosshair above the icon in the window stack', () => {
+    const windowHost = floatingHost()
+    const stack = windowHost?.shadowRoot?.querySelector('.stack')
 
-    window.dispatchEvent(new Event('resize'))
-    await settle()
-
-    const crosshairTop = Number.parseFloat(launcherHost()?.style.top ?? 'NaN')
-    expect(crosshairTop).toBe(iconTop - 8 - 40)
+    expect(stack?.firstElementChild?.tagName).toBe('SLOT')
+    expect(stack?.lastElementChild?.tagName).toBe('BUTTON')
+    expect(windowHost?.classList.contains('flipped')).toBe(false)
   })
 
-  it('flips below only when the icon touches the top edge', async () => {
-    const iconTop = 8
-    const icon = floatingHost()
-    if (!icon) throw new Error('floating button did not mount')
-    icon.getBoundingClientRect = () =>
-      ({
-        x: window.innerWidth - 56,
-        y: iconTop,
-        left: window.innerWidth - 56,
-        top: iconTop,
-        right: window.innerWidth - 16,
-        bottom: iconTop + 40,
-        width: 40,
-        height: 40,
-        toJSON: () => ({}),
-      }) as DOMRect
+  it('anchors a dragged window by the icon center, crosshair above it', () => {
+    const windowHost = floatingHost()
+    if (!windowHost) throw new Error('floating window did not mount')
+    stubWindowHeight(windowHost)
 
-    window.dispatchEvent(new Event('resize'))
-    await settle()
-
-    const crosshairTop = Number.parseFloat(launcherHost()?.style.top ?? 'NaN')
-    expect(crosshairTop).toBe(iconTop + 40 + 8)
-  })
-
-  it('keeps a user-dragged position instead of the corner default', () => {
-    deliver({ type: 'floating.hide' })
     deliver({ type: 'floating.show', pos: { x: 50, y: 50 } })
 
-    const host = floatingHost()
-    expect(host?.style.bottom).toBe('auto')
-    expect(host?.style.right).toBe('auto')
-    expect(host?.style.left).not.toBe('')
-    expect(host?.style.top).not.toBe('')
+    const iconLeft = window.innerWidth / 2 - 20
+    const iconTop = window.innerHeight / 2 - 20
+    expect(windowHost.style.left).toBe(`${iconLeft}px`)
+    expect(windowHost.style.top).toBe(`${iconTop - 48}px`)
+    expect(windowHost.style.right).toBe('auto')
+    expect(windowHost.style.bottom).toBe('auto')
+    expect(windowHost.classList.contains('flipped')).toBe(false)
+  })
+
+  it('flips the stack only when the icon touches the top edge', () => {
+    const windowHost = floatingHost()
+    if (!windowHost) throw new Error('floating window did not mount')
+    stubWindowHeight(windowHost)
+
+    deliver({ type: 'floating.show', pos: { x: 50, y: 0 } })
+
+    expect(windowHost.classList.contains('flipped')).toBe(true)
+    expect(windowHost.style.top).toBe('8px')
+  })
+
+  it('replaces a window left behind by a dead script and reopens on click', () => {
+    const stale = document.createElement('div')
+    stale.id = 'browser-copilot-floating-host'
+    stale.dataset.stale = '1'
+    stale.attachShadow({ mode: 'open' }).innerHTML = '<button type="button"></button>'
+    document.documentElement.appendChild(stale)
+
+    deliver({ type: 'floating.hide' })
+    deliver({ type: 'floating.show' })
+
+    const windowHost = floatingHost()
+    expect(windowHost).not.toBe(stale)
+    expect(windowHost?.dataset.stale).toBeUndefined()
+    expect(stale.isConnected).toBe(false)
+
+    const button = windowHost?.shadowRoot?.querySelector('button')
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(sent).toContainEqual({ type: 'floating.expand' })
+  })
+
+  it('replaces a crosshair left behind by a dead script', () => {
+    const stale = document.createElement('div')
+    stale.id = 'bc-element-picker-launcher'
+    stale.dataset.stale = '1'
+    document.documentElement.appendChild(stale)
+
+    deliver({ type: 'elementPicker.set', enabled: true, locale: 'en', format: 'html' })
+
+    const launcher = launcherHost()
+    expect(launcher).not.toBe(stale)
+    expect(stale.isConnected).toBe(false)
+    expect(launcher?.shadowRoot?.querySelector('button')).not.toBeNull()
+  })
+
+  it('returns the crosshair to the corner when the window disappears', async () => {
+    deliver({ type: 'floating.hide' })
+    await settle()
+
+    expect(floatingHost()).toBeNull()
+    const launcher = launcherHost()
+    expect(launcher?.parentElement).toBe(document.documentElement)
+    expect(launcher?.style.position).toBe('fixed')
+    expect(launcher?.style.right).toBe('16px')
+    expect(launcher?.style.bottom).toBe('16px')
   })
 })
