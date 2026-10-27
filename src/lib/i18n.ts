@@ -2103,7 +2103,8 @@ const en: Messages = {
     'GitHub refused the request. Check the token scopes (public_repo), rate limits, or a proxy.',
   marketplaceErrorRateLimited: 'GitHub rate limit reached. Try again later.',
   marketplaceErrorNotFound: 'The marketplace repository could not be found.',
-  marketplaceErrorConflict: 'A conflicting change exists. Try again in a moment.',
+  marketplaceErrorConflict:
+    'A conflicting change exists. Wait a minute and try again; if a pull request for this workflow is already open, merge or close it first.',
   marketplaceErrorInvalid: 'Some of the submitted data is invalid.',
   marketplaceErrorForkPending: 'GitHub is still creating your fork. Try again shortly.',
   marketplaceErrorNetwork: 'Could not reach GitHub. Check your connection or proxy and try again.',
@@ -3726,7 +3727,8 @@ const zhCN: Messages = {
     'GitHub 拒绝了请求，请检查令牌权限（public_repo）、限流，或前置网络代理。',
   marketplaceErrorRateLimited: 'GitHub 接口限流，请稍后再试。',
   marketplaceErrorNotFound: '找不到工作流仓库。',
-  marketplaceErrorConflict: '存在冲突的改动，请稍后重试。',
+  marketplaceErrorConflict:
+    '存在冲突的改动。请等一分钟后再试；如果该工作流已有打开的 PR，请先合并或关闭它。',
   marketplaceErrorInvalid: '提交的内容不合法。',
   marketplaceErrorForkPending: 'GitHub 还在创建你的 fork，请稍后再试。',
   marketplaceErrorNetwork: '无法连接 GitHub，请检查网络或代理后重试。',

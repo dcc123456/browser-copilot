@@ -196,9 +196,15 @@ function textToBase64(text: string): string {
   return bytesToBase64(new TextEncoder().encode(text))
 }
 
-/** `YYYYMMDDHHmm`, with a retry suffix so a second attempt gets a fresh branch. */
+/**
+ * `YYYYMMDDHHmmss`, with a retry suffix so a second attempt gets a fresh branch.
+ *
+ * Seconds, not minutes: publishing the same workflow twice in quick succession
+ * (fix a typo, update again) must not reuse the previous attempt's branch name,
+ * or GitHub rejects the second run as a conflicting change.
+ */
 export function branchStamp(now: Date, attempt = 0): string {
-  const stamp = now.toISOString().replace(/[-:T]/g, '').slice(0, 12)
+  const stamp = now.toISOString().replace(/[-:T]/g, '').slice(0, 14)
   return attempt === 0 ? stamp : `${stamp}-${attempt}`
 }
 

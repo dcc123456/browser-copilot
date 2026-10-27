@@ -618,7 +618,7 @@ describe('pushPublish', () => {
       },
     })
 
-    const branch = `submit/${prepared.slug}-202610250900`
+    const branch = `submit/${prepared.slug}-20261025090000`
     expect(calls.createFork).toHaveLength(0)
     expect(calls.getRef).toEqual([{ owner: 'octocat', repo: MARKETPLACE_REPO, branch: 'main' }])
     expect(calls.createRef).toEqual([
@@ -726,7 +726,7 @@ describe('pushPublish', () => {
 
     await pushPublish(prepared, { client, auth: AUTH, now: NOW, sleep: async () => {} })
 
-    const base = `submit/${prepared.slug}-202610250900`
+    const base = `submit/${prepared.slug}-20261025090000`
     expect(calls.createRef.map((call) => call.branch)).toEqual([base, `${base}-1`])
     expect(calls.putFile.every((call) => call.branch === `${base}-1`)).toBe(true)
     expect(calls.createPull[0]!.head).toBe(`octocat:${base}-1`)
@@ -790,7 +790,7 @@ describe('pushPublish', () => {
       sleep: async () => {},
     })
 
-    const branch = `submit/${prepared.slug}-202610250900`
+    const branch = `submit/${prepared.slug}-20261025090000`
     expect(calls.createFork).toHaveLength(0)
     expect(calls.getRepo).toEqual([{ owner: 'acme', repo: 'team-workflows' }])
     expect(calls.getRef).toEqual([{ owner: 'acme', repo: 'team-workflows', branch: 'main' }])
@@ -854,7 +854,7 @@ describe('unpublishWorkflow', () => {
       { client, auth: AUTH, now: NOW, sleep: async () => {} },
     )
 
-    const branch = `submit/${SLUG}-202610250900`
+    const branch = `submit/${SLUG}-20261025090000`
     expect(calls.listTree).toEqual([{ owner: 'octocat', repo: MARKETPLACE_REPO, branch: 'main' }])
     expect(calls.deleteFile.map((call) => call.path)).toEqual([
       `workflows/${SLUG}/workflow.json`,
@@ -909,7 +909,7 @@ describe('unpublishWorkflow', () => {
       { client, auth: AUTH, now: NOW, sleep: async () => {} },
     )
 
-    const base = `submit/${SLUG}-202610250900`
+    const base = `submit/${SLUG}-20261025090000`
     expect(calls.createRef.map((call) => call.branch)).toEqual([base, `${base}-1`])
     expect(calls.deleteFile.every((call) => call.branch === `${base}-1`)).toBe(true)
     expect(calls.createPull[0]!.head).toBe(`octocat:${base}-1`)
@@ -940,7 +940,7 @@ describe('unpublishWorkflow', () => {
       },
     )
 
-    const branch = `submit/${SLUG}-202610250900`
+    const branch = `submit/${SLUG}-20261025090000`
     expect(calls.createFork).toHaveLength(0)
     expect(calls.listTree).toEqual([{ owner: 'acme', repo: 'team-workflows', branch: 'main' }])
     expect(calls.deleteFile.every((call) => call.owner === 'acme')).toBe(true)
@@ -953,8 +953,13 @@ describe('unpublishWorkflow', () => {
 })
 
 describe('branchStamp', () => {
-  it('is a minute-precision UTC stamp with an optional retry suffix', () => {
-    expect(branchStamp(NOW)).toBe('202610250900')
-    expect(branchStamp(NOW, 1)).toBe('202610250900-1')
+  it('is a second-precision UTC stamp with an optional retry suffix', () => {
+    expect(branchStamp(NOW)).toBe('20261025090000')
+    expect(branchStamp(NOW, 1)).toBe('20261025090000-1')
+  })
+
+  it('changes within the same minute, so a quick update gets a fresh branch', () => {
+    const later = new Date(NOW.getTime() + 40_000)
+    expect(branchStamp(later)).not.toBe(branchStamp(NOW))
   })
 })
