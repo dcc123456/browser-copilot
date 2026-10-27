@@ -321,6 +321,13 @@ export function planGateBlocks(gate: PlanGate | undefined, name: string): boolea
 const DEFAULT_MAX_TOOL_ROUNDS = 20
 
 /**
+ * How many configured budgets a chat turn may spend: the setting is a batch,
+ * not a stop, so a long task gets ten batches before the safety ceiling. At the
+ * ceiling the turn still ends with a summary rather than silence.
+ */
+const PANEL_ROUND_STRETCHES = 10
+
+/**
  * Appended as a user turn for the one tools-off reply a panel turn gets when it
  * exhausts its round budget. Model-facing English, like the other prompts.
  */
@@ -5088,8 +5095,16 @@ export async function runAgentTurn(
     })
   }
   const roundsCap = maxToolRounds || DEFAULT_MAX_TOOL_ROUNDS
-  // Compaction is limited to one pass per turn: a single pass already removes
-  // every compactable turn, so repeated triggers in one turn would only burn
+  // A chat turn treats the configured budget as ONE batch: spending it extends
+  // the same turn by another batch instead of ending it, so a long task reaches
+  // a result rather than stopping half-way (dcc, 2026-10-27: 预算用完也不要结束).
+  // The ceiling only stops a turn that never converges; unattended runs keep the
+  // single hard cap, because their callers classify on the stop status.
+  const extendRoundBudget = deps.takeInterjections !== undefined
+  const roundsCeiling = extendRoundBudget ? roundsCap * PANEL_ROUND_STRETCHES : roundsCap
+  // Compaction is limited to one pass per turn (per batch in a panel turn,
+  // re-armed at each checkpoint): a single pass already removes every
+  // compactable turn, so repeated triggers in one stretch would only burn
   // summarizer calls on an unchanged history.
   let compactedThisTurn = false
   // One reactive compaction+retry per turn: when the provider itself returns
@@ -5117,6 +5132,10 @@ export async function runAgentTurn(
   const truncationText = {
     continuing: messages.chatContinuingTruncated,
     stillTruncated: messages.chatReplyStillTruncated,
+  }
+  // And the round-budget extension line, same shadowing rule.
+  const roundBudgetText = {
+    extended: messages.chatRoundBudgetExtended,
   }
 
   // Filter the advertised tools per round (see advertiseTools): the core set
@@ -5305,7 +5324,20 @@ export async function runAgentTurn(
     return { result, replyText }
   }
 
-  for (let round = 0; round < roundsCap; round += 1) {
+  for (let round = 0; round < roundsCeiling; round += 1) {
+    // One batch spent: say so and keep going. A checkpoint, not a stop — the
+    // panel's Stop button is how the user ends a run early.
+    if (extendRoundBudget && round > 0 && round % roundsCap === 0) {
+      deps.send({
+        type: 'status',
+        text: roundBudgetText.extended({ rounds: round, budget: roundsCeiling }),
+      })
+      // A batch is also a context window: without re-arming, a turn that
+      // compacted in batch 1 would run the remaining batches with no
+      // compaction available at all.
+      compactedThisTurn = false
+      lengthErrorRetried = false
+    }
     // Bail promptly when the run is cancelled, rather than waiting for the next
     // in-flight fetch to notice its signal. The streamCompletion catch below
     // also handles an abort mid-request.
@@ -5502,18 +5534,18 @@ export async function runAgentTurn(
     }
   }
 
-  // The round budget is spent. Unattended runs and delegated sub-agents get the
-  // status line their callers classify on; a panel turn does not end on a tool
-  // result, because the user watched a long task and needs to know what got
-  // done and what is left instead of a silent stop they have to guess past.
-  // One tools-off completion produces that answer.
+  // The safety ceiling is reached — the turn kept working through every batch
+  // and still has no final answer. Unattended runs and delegated sub-agents get
+  // the status line their callers classify on; a panel turn does not end on a
+  // tool result, because the user watched a long task and needs to know what
+  // got done and what is left. One tools-off completion produces that answer.
   if (deps.takeInterjections && !deps.signal?.aborted) {
     try {
       const { replyText } = await streamModelRound(
         [
           { role: 'system', content: systemPrompt },
           ...history,
-          { role: 'user', content: roundLimitWrapUpPrompt(roundsCap) },
+          { role: 'user', content: roundLimitWrapUpPrompt(roundsCeiling) },
         ],
         undefined,
         // Shorter budget: this is a courtesy summary, and a dead provider must
@@ -5533,7 +5565,7 @@ export async function runAgentTurn(
   }
   deps.send({
     type: 'status',
-    text: `Stopped after ${roundsCap} tool rounds to avoid a loop.`,
+    text: `Stopped after ${roundsCeiling} tool rounds to avoid a loop.`,
   })
   return totalUsage.totalTokens > 0 ? totalUsage : null
 }

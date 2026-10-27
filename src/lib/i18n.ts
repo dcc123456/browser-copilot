@@ -653,6 +653,12 @@ export interface Messages {
   chatContinuingTruncated: (params: { continuation: number; continuations: number }) => string
   /** Terminal status line when the cap was reached despite those continuations. */
   chatReplyStillTruncated: string
+  /**
+   * Status line when a chat turn has spent its configured round budget and is
+   * extended by another batch instead of stopping. `rounds` is what was spent,
+   * `budget` the absolute ceiling this turn will never pass.
+   */
+  chatRoundBudgetExtended: (params: { rounds: number; budget: number }) => string
   /** Composer `/compact` command description (it replaced a toolbar button). */
   chatCompactContext: string
   /** Transient phase line while the manual compaction request runs. */
@@ -2333,6 +2339,8 @@ const en: Messages = {
     `The answer reached the model's per-reply output limit — continuing it (${continuation}/${continuations})…`,
   chatReplyStillTruncated:
     "The reply reached the model's output limit and may be incomplete — send “continue” to get the rest.",
+  chatRoundBudgetExtended: ({ rounds, budget }) =>
+    `Used the ${rounds}-step budget — continuing for another batch so the task can finish (hard limit ${budget} steps). Press Stop to end it now.`,
   chatCompactContext: 'Compress context',
   chatCompactRunning: 'Compressing the context…',
   chatCompactDone: ({ removed }) =>
@@ -2710,7 +2718,7 @@ const en: Messages = {
   settingsKeyPlaceholderLocal: 'any value works locally',
   settingsMaxToolRounds: 'Max action steps per reply',
   settingsMaxToolRoundsHint:
-    'The maximum number of actions (clicks, reads, scrolls, …) the agent may take in one turn before it stops to avoid looping. Higher values let long tasks finish on their own; lower values make it check in sooner. Range 1–100.',
+    'How many actions (clicks, reads, scrolls, …) the agent takes in one batch. In chat it then gets another batch automatically, so long tasks reach a result; scheduled tasks and AI-agent blocks stop at the limit. Range 1–100.',
   settingsModelsEmpty: 'The endpoint returned an empty model list.',
   settingsModelsFailed: ({ message }) =>
     `${message} — not all gateways expose /models; you can still type the model name.`,
@@ -3954,6 +3962,8 @@ const zhCN: Messages = {
     `回复达到了模型单次输出上限，正在自动续写（第 ${continuation}/${continuations} 次）…`,
   chatReplyStillTruncated:
     '回复已达到模型单次输出上限，内容可能仍不完整；发送「继续」即可获取剩余部分。',
+  chatRoundBudgetExtended: ({ rounds, budget }) =>
+    `已用完 ${rounds} 步预算——自动续期继续执行，让任务跑出结果（本回合上限 ${budget} 步）。需要提前结束可点「停止」。`,
   chatCompactContext: '压缩上下文',
   chatCompactRunning: '正在压缩上下文…',
   chatCompactDone: ({ removed }) => `上下文已压缩：较早的 ${removed} 条消息已合并为一段摘要。`,
@@ -4293,7 +4303,7 @@ const zhCN: Messages = {
   settingsKeyPlaceholderLocal: '本地服务填任意值即可',
   settingsMaxToolRounds: '每条回复最多操作步数',
   settingsMaxToolRoundsHint:
-    '代理在一轮对话中最多可执行的操作次数（点击、读取、滚动等），超过后会自动停止以防死循环。数值越大，长任务越能一次性完成；数值越小，越会早点停下来等你确认。范围 1–100。',
+    '代理每一批最多执行的操作次数（点击、读取、滚动等）。聊天中用完会自动续期，保证长任务跑到出结果；定时任务和 AI 智能体块到上限即停止。范围 1–100。',
   settingsModelsEmpty: '该接口返回的模型列表为空。',
   settingsModelsFailed: ({ message }) =>
     `${message}——并非所有网关都提供 /models，你仍可手动输入模型名称。`,

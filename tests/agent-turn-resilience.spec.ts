@@ -126,7 +126,7 @@ describe('repeated unchangeable failures', () => {
 })
 
 describe('round budget', () => {
-  function exhaustedBudgetMock() {
+  function successfulJs() {
     execOnActiveTabMock.mockResolvedValue({
       ok: true,
       data: 1,
@@ -134,43 +134,68 @@ describe('round budget', () => {
       frameUrl: 'https://x.test/',
       isTopFrame: true,
     })
+  }
+
+  it('extends a panel turn past its budget instead of ending it', async () => {
+    successfulJs()
     streamMock
       .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c1')] } as never)
       .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c2')] } as never)
-      .mockResolvedValueOnce({
-        content: 'SUMMARY: read the page, 2 of 5 steps done',
-        toolCalls: [],
-      } as never)
-  }
+      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c3')] } as never)
+      .mockResolvedValueOnce({ content: 'RESULT: task finished', toolCalls: [] } as never)
 
-  it('ends a panel turn with a tools-off summary', async () => {
-    exhaustedBudgetMock()
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
     await runAgentTurn(
       history as never,
-      deps({
-        takeInterjections: () => [],
-        getMaxToolRounds: async () => 2,
-      }) as never,
+      deps({ takeInterjections: () => [], getMaxToolRounds: async () => 2 }) as never,
     )
 
-    expect(streamMock).toHaveBeenCalledTimes(3)
-    const wrapUp = streamMock.mock.calls[2]![0]
-    expect(wrapUp.tools).toBeUndefined()
-    const lastMessage = wrapUp.messages.at(-1)
-    expect(lastMessage?.role).toBe('user')
-    expect(String(lastMessage?.content)).toMatch(/All 2 tool rounds/)
-    expect(history.at(-1)).toMatchObject({
-      role: 'assistant',
-      content: 'SUMMARY: read the page, 2 of 5 steps done',
-    })
+    // Round 3 runs on the extended budget (2 was the configured batch), and the
+    // request still offers tools — this is a continuation, not a wrap-up.
+    expect(streamMock).toHaveBeenCalledTimes(4)
+    expect(streamMock.mock.calls[2]![0].tools?.length).toBeGreaterThan(0)
+    expect(history.at(-1)).toMatchObject({ role: 'assistant', content: 'RESULT: task finished' })
+    expect(
+      sent.some((message) => message.type === 'status' && /another batch/.test(message.text)),
+    ).toBe(true)
     expect(
       sent.some((message) => message.type === 'status' && /Stopped after/.test(message.text)),
     ).toBe(false)
   })
 
-  it('keeps the status line for unattended turns', async () => {
-    exhaustedBudgetMock()
+  it('still ends with a tools-off summary at the safety ceiling', async () => {
+    successfulJs()
+    // A model that never answers while tools are on; only the tools-off
+    // wrap-up request gets prose.
+    streamMock.mockImplementation(async (request: { tools?: unknown[] }) =>
+      request.tools === undefined
+        ? ({ content: 'SUMMARY: 10 rounds done, still blocked', toolCalls: [] } as never)
+        : ({ content: '', toolCalls: [jsCall(`c${Math.random()}`)] } as never),
+    )
+
+    const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
+    await runAgentTurn(
+      history as never,
+      deps({ takeInterjections: () => [], getMaxToolRounds: async () => 1 }) as never,
+    )
+
+    // One-round batches → the ceiling is reached after 10 rounds, then the
+    // single tools-off wrap-up request.
+    expect(streamMock).toHaveBeenCalledTimes(11)
+    const wrapUp = streamMock.mock.calls[10]![0]
+    expect(wrapUp.tools).toBeUndefined()
+    const lastMessage = wrapUp.messages.at(-1)
+    expect(lastMessage?.role).toBe('user')
+    expect(String(lastMessage?.content)).toMatch(/All 10 tool rounds/)
+    expect(history.at(-1)).toMatchObject({ role: 'assistant' })
+  })
+
+  it('keeps the hard cap and status line for unattended turns', async () => {
+    successfulJs()
+    streamMock
+      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c1')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c2')] } as never)
+
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
     await runAgentTurn(history as never, deps({ getMaxToolRounds: async () => 2 }) as never)
 

@@ -78,18 +78,43 @@ the model from repeating the same doomed call until the round budget ran out.
      Retryable classes (timeouts, stale refs, not-found) are never blocked —
      their fixes are exactly "try again with fresh state".
    - When a **panel** turn (`deps.takeInterjections` present) exhausts its round
-     budget, make one final tools-off completion that asks the model to summarise
-     what was done, what is left, the blocker and the next step, then persist it
-     as an assistant message. Unattended runs (scheduled tasks, workflow
-     `ai-agent` blocks, Feishu) and delegated sub-agents keep the existing
-     `Stopped after N tool rounds…` status, because their callers classify on it.
+     budget, it does **not** stop: the budget is a batch, and the turn gets
+     another batch (see the ruling below). Only at the absolute ceiling
+     (`PANEL_ROUND_STRETCHES = 10` batches) does one final tools-off completion
+     ask the model to summarise what was done, what is left, the blocker and the
+     next step, and persist it as an assistant message. Unattended runs
+     (scheduled tasks, workflow `ai-agent` blocks, Feishu) and delegated
+     sub-agents keep the hard cap and the existing `Stopped after N tool
+rounds…` status, because their callers classify on it.
+   - Each extension checkpoint emits the bilingual `chatRoundBudgetExtended`
+     status line (steps spent, absolute ceiling, how to stop early) and re-arms
+     the once-per-turn context compaction / length-400 retry, so batch 2..10 have
+     the same headroom against a growing transcript as batch 1.
    - The per-round streaming block is extracted into one local helper so the
      wrap-up uses the same retry/idle-timeout/summary-filter behaviour instead of
      a second copy.
 4. Tests: classification + streak semantics in `tests/tool-error.spec.ts`; a new
    `tests/agent-turn-resilience.spec.ts` covering the breaker (4th call refused,
-   driver not invoked) and the wrap-up (final request carries no tools, assistant
-   summary persisted; unattended run unaffected).
+   driver not invoked), the extension (a 2-step batch continues with tools still
+   advertised and reaches the answer, with the status line), the safety ceiling
+   (tools-off summary persisted) and the untouched unattended cap.
+
+## Ruling: the budget is a batch, not a stop
+
+「我希望预算用完也不要结束，要让任务有结果」 — hitting the configured round
+budget must not end the turn; the task has to reach a result.
+
+Implemented as: a chat (panel) turn may spend up to `maxToolRounds × 10` rounds,
+extended one configured batch at a time, each checkpoint announced in the
+transcript. The per-batch setting therefore means "how much work before the turn
+reports progress and continues", not "when it dies". The hard cap still exists
+as a safety valve against a model that never answers, and it is only ever
+reached with tools on.
+
+The pathological loop that prompted this is handled by the breaker, not by the
+budget: the offending turn repeated one unchangeable CSP failure 29 times; after
+this change it would have been refused after 3 and pushed to a different
+approach, so the extra batches buy real work rather than more identical calls.
 
 ## Rejected alternatives
 
@@ -105,3 +130,10 @@ the model from repeating the same doomed call until the round budget ran out.
 - **Run the wrap-up for unattended turns too.** Their callers depend on the
   `Stopped after…` status to fail the step loudly; a partial summary would look
   like success.
+- **Stop at the configured budget and summarise there.** This was the first
+  implementation of this design; the user rejected it — a summary in place of
+  the result is still a turn that ends half-way. Kept only as the ceiling
+  safety valve.
+- **Let a panel turn run without any ceiling.** A model that never answers would
+  bill indefinitely; 10 batches is the compromise, and the breaker is what
+  prevents repeats from eating them.
