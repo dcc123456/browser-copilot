@@ -343,6 +343,10 @@ export function thinkingVendorOf(baseUrl: string): ThinkingVendor {
   if (host.endsWith('.kimi.com')) return 'kimi'
   if (host.endsWith('.minimaxi.com') || host.endsWith('.minimax.cn')) return 'minimax'
   if (host.endsWith('.minimax.chat')) return 'minimax'
+  // The international endpoint the MiniMax preset offers. Without it the
+  // vendor reads as unknown, and the generic body sends `reasoning_effort:
+  // 'none'` for "off" — which MiniMax answers with a 400 on M3.1.
+  if (host.endsWith('.minimax.io')) return 'minimax'
   if (host.endsWith('.siliconflow.cn')) return 'siliconflow'
   if (host.endsWith('.groq.com')) return 'groq'
   if (host === 'api.x.ai') return 'xai'

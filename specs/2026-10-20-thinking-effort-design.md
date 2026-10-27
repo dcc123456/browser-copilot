@@ -70,6 +70,38 @@
 
 > **2026-10-22 补充（千问 / MiniMax 复核）**：上面两条「同厂商不同模型」的差异在 2026-10-22 重新抓取官方文档复核后确认成立，因此 §3.2 的厂商表从「一厂商一行」升级为「一厂商一行 ＋ 若干按模型名匹配的子形态」——厂商级形态表只描述参数形态，**档位与请求体片段必须按模型取**，否则会对 MiniMax M3.1-Flash 发 `thinking.type=disabled`（400）或对 Qwen3.8 发它不认的 `thinking_budget`。
 
+### 2.5 MiniMax 实测（2026-10-27，真实 API）
+
+> 端点 `https://api.minimaxi.com/v1`（用户自己配置的 key），模型 `MiniMax-M3.1-Flash` / `MiniMax-M3` / `MiniMax-M2.5`，
+> 问题用「球棒与球共 1.10，球棒贵 1.00，球多少钱」。以下都是**实测返回**，不是文档转述。
+
+| 模型       | 发的参数                             | HTTP    | 思考量（`usage.completion_tokens_details.reasoning_tokens`）                                  |
+| ---------- | ------------------------------------ | ------- | --------------------------------------------------------------------------------------------- |
+| M3.1-Flash | 无                                   | 200     | 82 / 124 / 85                                                                                 |
+| M3.1-Flash | `reasoning_effort:"low"`             | 200     | 56 / 54 / 65                                                                                  |
+| M3.1-Flash | `reasoning_effort:"medium"`          | 200     | 50 / 86 / 59                                                                                  |
+| M3.1-Flash | `reasoning_effort:"xhigh"`           | 200     | 82 / 58 / 62                                                                                  |
+| M3.1-Flash | `reasoning_effort:"none"`            | **400** | `model "MiniMax-M3.1-Flash" requires adaptive thinking; reasoning effort none is not allowed` |
+| M3.1-Flash | `thinking:{type:"disabled"}`         | **400** | `thinking.type="disabled" … is not allowed`                                                   |
+| M3         | 无                                   | 200     | 思考写在 **content 的 `<think>` 块**里（`reasoning_content` 为空）                            |
+| M3         | `thinking:{type:"disabled"}`         | 200     | **没有 `<think>` 块了** ⇒ 关闭思考真的生效                                                    |
+| M3         | `reasoning_effort:"high"`            | 200     | 仍然思考 ⇒ 该参数被接受但无效                                                                 |
+| M2.5       | `reasoning_effort` / `thinking.type` | 200     | 仍然思考 ⇒ 两者都被接受但无效（M2 恒思考）                                                    |
+
+三条结论：
+
+1. **M3.1 的档位"被接受但不明显改变思考量"**——多轮采样里 `low/medium/xhigh` 与不发的区间完全重叠
+   （换一道更费思考的题再测三轮：low 209/159/187，xhigh 201/343/182，不发 223/158/470）。
+   M3.1-Flash 是 **adaptive thinking**，思考长度由模型自己决定；`reasoning_effort` 不像 OpenAI 那样
+   是硬档位。因此面板的档位对 M3.1 只是"请求被接受"，不是"多想/少想"的保证。
+2. **M3 的 "off" 是唯一可验证生效的 MiniMax 思考设置**：`thinking.type=disabled` 真的让 `<think>` 块消失。
+3. **"off" 对 M3.1 是 400**（两种写法都 400），所以档位表必须**按模型**给：M3.1 不给 off，M3 只给 off。
+
+> **国际端点的漏洞（2026-10-27 修）**：`thinkingVendorOf` 原本只认 `.minimaxi.com` / `.minimax.cn` /
+> `.minimax.chat`，**不认 `.minimax.io`**——而项目自己的 MiniMax 预设就列着"国际 `https://api.minimax.io/v1`"。
+> 落在国际端点的用户会被判成 `unknown` 厂商，于是面板给出全部四档、且 "off" 会被翻成通用的
+> `reasoning_effort:'none'`——按上表，这正是 M3.1 必 400 的那个值。现已把 `.minimax.io` 并入 minimax 厂商判定。
+
 ## 3. 设计 · Design
 
 ### 3.1 供应商中立的语义层
@@ -141,6 +173,10 @@
 「—」表示该厂商（或该模型）表达不了这个语义档位：面板**不显示**该档位，而不是显示一个会被降级的假选项。降级只发生在厂商自己缺档位但语义可近似时（DeepSeek 的 `medium`→`high`、Kimi 的 `medium`→`high`），并且厂商文档本身就这么写（DeepSeek 明确 `medium`/`xhigh` 归一为 `high`）。
 
 MiniMax M3.1-Flash 的 `high`→`xhigh` 也算这一类降级：它的 `max` 是**默认档**（`reasoning_effort` 默认 `max`），发 `max` 等于没发，所以「最多想」落在 `xhigh`——这是唯一一个真正改变默认行为的档位。
+
+> 实测修正（§2.5）：M3.1-Flash 是 **adaptive thinking**，`reasoning_effort` 被接受但不控制思考长度
+> （多轮采样里三档的思考量区间完全重叠）。所以 M3.1 的档位语义是"请求被厂商接受"，
+> 不是"多想/少想"的保证；真正可验证生效的 MiniMax 思考设置是 M3 的 `off`（`thinking.type=disabled`）。
 
 Qwen3.8 的换算方向相反但结论一样：它把 `thinking_budget` 的三段区间（0–4096 / 4097–16384 / 16385–262144）命名为 `low/medium/xhigh`，所以直接发档位名即可，不必自己折算预算。
 
