@@ -15,11 +15,7 @@
     "staticErrorCount": 0,
     "staticWarningCount": 0,
     "terminalStepMissing": true,
-    "blockCounts": {
-      "new-tab": 1,
-      "read-page": 1,
-      "ai-agent": 1
-    },
+    "blockCounts": { "new-tab": 1, "read-page": 1, "ai-agent": 1 },
     "trial": {
       "outcome": "failed",
       "full": true,

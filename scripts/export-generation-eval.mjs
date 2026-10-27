@@ -16,11 +16,15 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { format } from 'prettier'
 import { loadTsModules } from './load-ts-module.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT_DIR = path.join(ROOT, 'tests/fixtures/generation-eval')
 const FIXTURE_NAME = (round) => `round-${String(round).padStart(3, '0')}.json`
+
+/** Same formatter the repository's `format:check` gate runs. */
+const prettyJson = (value) => format(JSON.stringify(value), { parser: 'json' })
 
 function parseArgs(argv) {
   const args = { check: false, source: undefined, out: OUT_DIR }
@@ -73,7 +77,7 @@ async function buildCorpus(source, corpusModule, attemptModule) {
     if (!sanitized) throw new Error(`round ${round} did not survive sanitizing`)
     corpusModule.assertFixtureSafe(sanitized)
     records.push(sanitized)
-    fixtures.set(FIXTURE_NAME(round), `${JSON.stringify(sanitized, null, 2)}\n`)
+    fixtures.set(FIXTURE_NAME(round), await prettyJson(sanitized))
   }
   const manifest = {
     source: 'tmp/selftest-round{2..83}.json',
@@ -83,7 +87,7 @@ async function buildCorpus(source, corpusModule, attemptModule) {
     excluded: corpusModule.CORPUS_EXCLUDED,
     golden: attemptModule.summarizeGenerationAttempts(records),
   }
-  fixtures.set('manifest.json', `${JSON.stringify(manifest, null, 2)}\n`)
+  fixtures.set('manifest.json', await prettyJson(manifest))
   return fixtures
 }
 

@@ -11,10 +11,7 @@
     "saved": true,
     "nodeCount": 24,
     "staticOk": false,
-    "staticCodes": [
-      "DATA_UNWRITTEN_VARIABLE",
-      "LOCATOR_POSITIONAL"
-    ],
+    "staticCodes": ["DATA_UNWRITTEN_VARIABLE", "LOCATOR_POSITIONAL"],
     "staticErrorCount": 4,
     "staticWarningCount": 0,
     "terminalStepMissing": true,

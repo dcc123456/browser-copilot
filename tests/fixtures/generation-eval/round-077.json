@@ -31,11 +31,7 @@
       "totalSteps": 13,
       "draftSaved": true
     },
-    "goal": {
-      "level": "L3",
-      "certified": true,
-      "unmetCount": 0
-    }
+    "goal": { "level": "L3", "certified": true, "unmetCount": 0 }
   },
   "replay": {
     "ran": true,
@@ -45,11 +41,7 @@
     "outcome": "passed",
     "coveredSteps": 13,
     "totalSteps": 13,
-    "goal": {
-      "level": "L3",
-      "certified": true,
-      "unmetCount": 0
-    },
+    "goal": { "level": "L3", "certified": true, "unmetCount": 0 },
     "repair": {
       "attempted": false,
       "status": "not-needed",

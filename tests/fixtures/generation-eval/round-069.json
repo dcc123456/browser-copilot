@@ -11,10 +11,7 @@
     "saved": true,
     "nodeCount": 19,
     "staticOk": false,
-    "staticCodes": [
-      "LOCATOR_MISSING",
-      "LOCATOR_POSITIONAL"
-    ],
+    "staticCodes": ["LOCATOR_MISSING", "LOCATOR_POSITIONAL"],
     "staticErrorCount": 5,
     "staticWarningCount": 0,
     "blockCounts": {

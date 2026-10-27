@@ -14,10 +14,7 @@
     "staticCodes": [],
     "staticErrorCount": 0,
     "staticWarningCount": 0,
-    "blockCounts": {
-      "new-tab": 1,
-      "read-page": 2
-    },
+    "blockCounts": { "new-tab": 1, "read-page": 2 },
     "trial": {
       "outcome": "failed",
       "full": true,

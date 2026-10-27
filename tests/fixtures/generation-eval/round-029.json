@@ -11,10 +11,7 @@
     "saved": true,
     "nodeCount": 39,
     "staticOk": false,
-    "staticCodes": [
-      "LOCATOR_POSITIONAL",
-      "SIDE_EFFECT_POSTCONDITION_MISSING"
-    ],
+    "staticCodes": ["LOCATOR_POSITIONAL", "SIDE_EFFECT_POSTCONDITION_MISSING"],
     "staticErrorCount": 3,
     "staticWarningCount": 0,
     "coverageGap": 1,

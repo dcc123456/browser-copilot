@@ -11,9 +11,7 @@
     "saved": true,
     "nodeCount": 13,
     "staticOk": false,
-    "staticCodes": [
-      "LOCATOR_POSITIONAL"
-    ],
+    "staticCodes": ["LOCATOR_POSITIONAL"],
     "staticErrorCount": 2,
     "staticWarningCount": 0,
     "coverageGap": 1,
@@ -23,11 +21,7 @@
       "coveredSteps": 12,
       "totalSteps": 12
     },
-    "goal": {
-      "level": "L3",
-      "certified": false,
-      "unmetCount": 0
-    }
+    "goal": { "level": "L3", "certified": false, "unmetCount": 0 }
   },
   "replay": {
     "ran": true,
@@ -37,11 +31,7 @@
     "outcome": "passed",
     "coveredSteps": 12,
     "totalSteps": 12,
-    "goal": {
-      "level": "L3",
-      "certified": false,
-      "unmetCount": 0
-    },
+    "goal": { "level": "L3", "certified": false, "unmetCount": 0 },
     "repair": {
       "attempted": false,
       "status": "not-needed",

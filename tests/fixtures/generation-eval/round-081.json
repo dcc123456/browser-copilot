@@ -11,9 +11,7 @@
     "saved": true,
     "nodeCount": 42,
     "staticOk": false,
-    "staticCodes": [
-      "LOCATOR_POSITIONAL"
-    ],
+    "staticCodes": ["LOCATOR_POSITIONAL"],
     "staticErrorCount": 7,
     "staticWarningCount": 0,
     "coverageGap": 1,
