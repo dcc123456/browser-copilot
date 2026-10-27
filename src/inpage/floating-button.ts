@@ -76,12 +76,13 @@ function leftTopToPos(left: number, top: number): ButtonPos {
   }
 }
 
-/** Pins the host at the given position (drops the default right/center anchoring). */
+/** Pins the host at the given position (drops the default right/bottom anchoring). */
 function applyPos(host: HTMLElement, pos: ButtonPos): void {
   const { left, top } = posToLeftTop(pos)
   host.style.left = `${left}px`
   host.style.top = `${top}px`
   host.style.right = 'auto'
+  host.style.bottom = 'auto'
   host.style.transform = 'none'
 }
 
@@ -92,11 +93,12 @@ function mount(pos?: ButtonPos): void {
   const host = document.createElement('div')
   host.id = HOST_ID
   // Reset anything the page inherits onto the host element itself.
+  // Default spot: the bottom-right corner, under the picker crosshair. The
+  // crosshair anchors above this button (see element-picker-launcher).
   host.style.all = 'initial'
   host.style.position = 'fixed'
   host.style.right = '16px'
-  host.style.top = '50%'
-  host.style.transform = 'translateY(-50%)'
+  host.style.bottom = '16px'
   host.style.zIndex = '2147483647'
   host.style.pointerEvents = 'none'
 

@@ -70,13 +70,16 @@ function unmount(): void {
  * Keeps the crosshair clear of the plugin's restore button: the floating button
  * is draggable and its saved position may sit wherever the crosshair used to
  * be, which hid one button behind the other. Anchored below it (flipped above
- * near the bottom edge), defaulting to the old spot when the panel is open.
+ * near the bottom edge), and parked in the same bottom-right corner when the
+ * panel is open and there is no floating button. With both at their defaults
+ * the crosshair sits directly ABOVE the plugin icon.
  */
 function place(host: HTMLElement): void {
   host.style.right = `${EDGE}px`
+  host.style.bottom = 'auto'
   const floating = document.getElementById(FLOATING_HOST_ID)
   if (!floating) {
-    host.style.top = 'calc(50% + 28px)'
+    host.style.top = `${Math.max(EDGE, window.innerHeight - EDGE - BUTTON_SIZE)}px`
     return
   }
   const rect = floating.getBoundingClientRect()
