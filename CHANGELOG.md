@@ -6,7 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-_To be released._
+### Fixed — The two page buttons move as one
+
+Dragging the crosshair now moves the plugin icon with it, not only the other way
+round. A crosshair left behind by a script from an earlier extension version is
+dropped when the window mounts instead of sitting in the corner while the icon
+moves. Drags also no longer anchor on the hover-scaled button box, which had
+made the window jump slightly at the start of a drag.
 
 ## [0.6.14] - 2026-10-27
 

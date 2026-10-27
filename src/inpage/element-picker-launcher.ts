@@ -35,6 +35,8 @@ import { startPicker } from './element-picker'
 
 const HOST_ID = 'bc-element-picker-launcher'
 const FLOATING_HOST_ID = 'browser-copilot-floating-host'
+/** Sent by floating-button when its window mounts; kept in sync there. */
+const DOCK_REQUEST_EVENT = 'bc:floating-window-ready'
 const PICKER_ID = 'element-picker'
 const EDGE = 16
 const BUTTON_ICON =
@@ -103,6 +105,7 @@ function createHost(): HTMLElement {
         align-items: center;
         justify-content: center;
         transition: transform 0.12s ease, box-shadow 0.12s ease, color 0.12s ease;
+        touch-action: none;
       }
       button:hover {
         transform: scale(1.08);
@@ -177,6 +180,13 @@ function unmount(): void {
 new MutationObserver(() => {
   if (enabled) mount()
 }).observe(document.documentElement, { childList: true })
+
+// Answer the window's dock request synchronously. The window uses the answer to
+// tell a live crosshair (docks now) from one a dead script left behind (does
+// not answer, so it is dropped instead of staying stuck in the corner).
+document.addEventListener(DOCK_REQUEST_EVENT, () => {
+  if (enabled) mount()
+})
 
 /** Boot: the worker knows both the toggle and the storage area it lives in. */
 void chrome.runtime

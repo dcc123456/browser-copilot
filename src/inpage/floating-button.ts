@@ -20,7 +20,7 @@
  *  - Click sends `floating.expand`; the worker opens the side panel and only
  *    then clears the minimized mark and broadcasts `floating.hide` to every
  *    page of the window (the click gesture is what authorizes the open).
- *  - Dragging the icon moves the whole window; on drop the icon's center is
+ *  - Dragging either button moves the whole window; on drop the icon's center is
  *    persisted per window (`floating.move` → worker → chrome.storage) so every
  *    page of this window remounts it where it was dropped.
  *
@@ -29,12 +29,23 @@
  * find it by id). The overlay never intercepts page events outside the
  * buttons. It is a bundled static content script, so unlike the serialized
  * element picker it MAY import shared modules — keep this file
- * dependency-free anyway, it runs in every frame of every page.
+ * dependency-free anyway, it runs in every frame of every page. A crosshair
+ * that a dead picker script left behind is dropped when the window mounts (see
+ * adoptOrDropCrosshair), so an outdated tab cannot keep a stray second button.
  *
  * @module inpage/floating-button
  */
 
 const HOST_ID = 'browser-copilot-floating-host'
+/** Kept in sync with element-picker-launcher. */
+const CROSSHAIR_HOST_ID = 'bc-element-picker-launcher'
+/**
+ * Synchronous "dock into the window" request, answered by a live
+ * element-picker-launcher. A dead picker script (extension reloaded / updated
+ * while the tab stayed open) cannot answer, which is how this script tells its
+ * orphaned crosshair from a live one.
+ */
+const DOCK_REQUEST_EVENT = 'bc:floating-window-ready'
 const ICON_PATH = 'icons/icon-48.png'
 /** Square button edge in px (must match the shadow style below). */
 const BUTTON_SIZE = 40
@@ -123,6 +134,35 @@ function applyPos(host: HTMLElement, pos: ButtonPos): void {
   placeIcon(host, posToIcon(pos))
 }
 
+/**
+ * Where the icon actually sits, measured from the window's own box. Used to
+ * start a drag: the icon button's rect is inflated while it is hovered or
+ * pressed (`transform: scale`), which would offset the first drag.
+ */
+function iconBox(host: HTMLElement): IconRect {
+  const rect = host.getBoundingClientRect()
+  return {
+    left: rect.right - BUTTON_SIZE,
+    // The icon is the last stack item: the window's bottom edge, unless the
+    // stack is flipped.
+    top: host.classList.contains('flipped') ? rect.top : rect.bottom - BUTTON_SIZE,
+  }
+}
+
+/**
+ * A crosshair left by a dead picker script cannot dock itself: it would stay in
+ * the corner while the icon is dragged elsewhere. Ask the live picker to dock
+ * synchronously, then drop every crosshair still outside this window.
+ */
+function adoptOrDropCrosshair(host: HTMLElement): void {
+  const crosshairs = document.querySelectorAll(`#${CROSSHAIR_HOST_ID}`)
+  if (crosshairs.length === 0) return
+  document.dispatchEvent(new CustomEvent(DOCK_REQUEST_EVENT))
+  for (const crosshair of crosshairs) {
+    if (!host.contains(crosshair)) crosshair.remove()
+  }
+}
+
 let ownedHost: HTMLElement | null = null
 let detachCleanup: (() => void) | null = null
 
@@ -157,6 +197,7 @@ function mount(pos?: ButtonPos): void {
 
   if (ownedHost?.isConnected) {
     if (pos) applyPos(ownedHost, pos)
+    adoptOrDropCrosshair(ownedHost)
     return
   }
   // The previous window was removed by the page; drop its listeners before
@@ -250,31 +291,36 @@ function mount(pos?: ButtonPos): void {
   window.addEventListener('resize', onResize)
 
   // --- drag to move ----------------------------------------------------------
-  // pointerdown → capture on the button; travel beyond the threshold turns the
-  // press into a drag (reposition live, clamp inside the viewport); on drop the
-  // icon's center is persisted per window. A press that never crossed the
-  // threshold stays a click (expand). The click listener below swallows the
-  // click event that follows a real drag.
+  // Either button in the window is a drag handle: press → the whole box follows
+  // the pointer. Travel beyond the threshold turns the press into a drag
+  // (reposition live, clamp inside the viewport); on drop the icon's center is
+  // persisted per window. A press that never crossed the threshold stays a
+  // click on the button that was pressed.
   let dragPointerId: number | null = null
   let dragStart = { x: 0, y: 0 }
   let dragOrigin: IconRect = { left: 0, top: 0 }
+  let dragHandle: Element | null = null
   let dragged = false
 
-  button.addEventListener('pointerdown', (event) => {
+  host.addEventListener('pointerdown', (event) => {
     if (!event.isPrimary || event.button !== 0) return
-    const rect = button.getBoundingClientRect()
-    dragOrigin = { left: rect.left, top: rect.top }
+    const pressed = event.composedPath()[0]
+    if (!(pressed instanceof Element)) return
+    const handle = pressed.closest('button')
+    if (!handle) return
+    dragOrigin = currentPos ? posToIcon(currentPos) : iconBox(host)
     dragStart = { x: event.clientX, y: event.clientY }
+    dragHandle = handle
     dragged = false
     dragPointerId = event.pointerId
     try {
-      button.setPointerCapture(event.pointerId)
+      handle.setPointerCapture(event.pointerId)
     } catch {
       /* capture is best-effort; moves still arrive while the pointer stays */
     }
   })
 
-  button.addEventListener('pointermove', (event) => {
+  host.addEventListener('pointermove', (event) => {
     if (dragPointerId !== event.pointerId) return
     const dx = event.clientX - dragStart.x
     const dy = event.clientY - dragStart.y
@@ -292,10 +338,11 @@ function mount(pos?: ButtonPos): void {
     if (dragPointerId !== event.pointerId) return
     dragPointerId = null
     try {
-      button.releasePointerCapture(event.pointerId)
+      dragHandle?.releasePointerCapture(event.pointerId)
     } catch {
       /* already released or the pointer is gone */
     }
+    dragHandle = null
     if (!dragged) return
     button.classList.remove('dragging')
     if (currentPos) {
@@ -304,17 +351,24 @@ function mount(pos?: ButtonPos): void {
         .catch(() => {})
     }
   }
-  button.addEventListener('pointerup', endDrag)
-  button.addEventListener('pointercancel', endDrag)
+  host.addEventListener('pointerup', endDrag)
+  host.addEventListener('pointercancel', endDrag)
+
+  // A drag ends with a click on the pressed button — swallow it in the capture
+  // phase so dropping the window never reopens the panel or starts the picker.
+  host.addEventListener(
+    'click',
+    (event) => {
+      if (!dragged) return
+      dragged = false
+      event.stopPropagation()
+      event.preventDefault()
+    },
+    true,
+  )
 
   button.addEventListener('click', (event) => {
     event.stopPropagation()
-    // A drag ends with a click on the same element — swallow it so dropping
-    // the button never reopens the panel; the flag resets on the next press.
-    if (dragged) {
-      dragged = false
-      return
-    }
     // Do NOT unmount optimistically: the worker only retires the minimized
     // mark (and broadcasts `floating.hide`) once `sidePanel.open` actually
     // succeeded. If the open is rejected (e.g. the user-gesture race right
@@ -325,6 +379,7 @@ function mount(pos?: ButtonPos): void {
 
   document.documentElement.appendChild(host)
   ownedHost = host
+  adoptOrDropCrosshair(host)
   detachCleanup = () => {
     sizeWatch?.disconnect()
     window.removeEventListener('resize', onResize)

@@ -47,6 +47,20 @@ const launcherHost = (): HTMLElement | null => document.getElementById('bc-eleme
 /** MutationObserver callbacks in jsdom land on the microtask queue. */
 const settle = (): Promise<void> => new Promise((done) => setTimeout(done, 0))
 
+/** jsdom has no PointerEvent; the drag handlers only read these fields. */
+function pointer(target: Element, type: string, x: number, y: number): void {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    composed: true,
+    clientX: x,
+    clientY: y,
+    button: 0,
+  })
+  Object.defineProperty(event, 'isPrimary', { value: true })
+  Object.defineProperty(event, 'pointerId', { value: 7 })
+  target.dispatchEvent(event)
+}
+
 /** jsdom reports 0 for every box; the docked window is crosshair + 8 + icon. */
 function stubWindowHeight(host: HTMLElement): void {
   Object.defineProperty(host, 'offsetHeight', { value: 88, configurable: true })
@@ -154,5 +168,54 @@ describe('one floating window', () => {
     expect(launcher?.style.position).toBe('fixed')
     expect(launcher?.style.right).toBe('16px')
     expect(launcher?.style.bottom).toBe('16px')
+  })
+
+  it('drags the whole window from the crosshair, not just from the icon', () => {
+    deliver({ type: 'floating.show', pos: { x: 50, y: 50 } })
+    const windowHost = floatingHost()
+    const launcher = launcherHost()
+    if (!windowHost || !launcher) throw new Error('window did not mount')
+    expect(launcher.parentElement).toBe(windowHost)
+    stubWindowHeight(windowHost)
+
+    const leftBefore = windowHost.style.left
+    const crosshair = launcher.shadowRoot?.querySelector('button')
+    if (!crosshair) throw new Error('crosshair missing')
+    let crosshairClicks = 0
+    crosshair.addEventListener('click', () => {
+      crosshairClicks += 1
+    })
+
+    pointer(crosshair, 'pointerdown', 500, 500)
+    pointer(windowHost, 'pointermove', 560, 520)
+    pointer(windowHost, 'pointerup', 560, 520)
+
+    expect(parseFloat(windowHost.style.left) - parseFloat(leftBefore)).toBe(60)
+    expect(sent).toContainEqual({
+      type: 'floating.move',
+      x: expect.any(Number),
+      y: expect.any(Number),
+    })
+
+    // The click that follows the drag must not reach the crosshair, or dropping
+    // the window would start the picker instead.
+    crosshair.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    expect(crosshairClicks).toBe(0)
+  })
+
+  it('drops a crosshair left behind by a dead picker script', () => {
+    deliver({ type: 'elementPicker.set', enabled: false, locale: 'en', format: 'html' })
+    expect(launcherHost()).toBeNull()
+
+    const zombie = document.createElement('div')
+    zombie.id = 'bc-element-picker-launcher'
+    zombie.dataset.stale = '1'
+    document.documentElement.appendChild(zombie)
+
+    deliver({ type: 'floating.hide' })
+    deliver({ type: 'floating.show' })
+
+    expect(zombie.isConnected).toBe(false)
+    expect(launcherHost()).toBeNull()
   })
 })
