@@ -34,6 +34,12 @@ import {
   draftGoalGapNotice,
 } from '../lib/workflow/trial-run'
 import type { PageContextFingerprint } from '../lib/workflow/page-context'
+import {
+  goalFactsFromVerdict,
+  type GenerationAttemptRecord,
+  type ReplayFacts,
+} from '../lib/workflow/generation-attempt'
+import { recordGenerationAttempt } from '../lib/workflow/generation-attempt-store'
 import { intentOf, reliabilityModeOf } from '../lib/workflow/reliability'
 import type { WorkflowGoalSpec, WorkflowReliabilityMode } from '../lib/workflow/reliability'
 import { getWorkflow, saveWorkflow } from '../lib/workflow/storage'
@@ -230,6 +236,12 @@ export interface UnattendedGenerationResult {
   }
   /** Present on `repair_workflow`: what the repair loop was given and did. */
   repair?: RepairRunSummary
+  /**
+   * The scored record this call wrote (or merged into), echoed for the corpus
+   * runner. Absent only when the store itself is unreachable — the record is
+   * always built in memory first, so this is evidence, not a gate.
+   */
+  attempt?: GenerationAttemptRecord
   /** Present when the run opted into `closeTabsAtEnd`: tabs it opened and left closed. */
   tabsClosed?: number
 }
@@ -259,11 +271,20 @@ async function runGenerationTurn(
     ...(req.signal ? { signal: req.signal } : {}),
   })
   if (turn.cancelled) {
+    // A cancelled turn IS an attempt: counting only the ones that reached
+    // compose would silently drop every user who watched a bad graph forming.
+    const attempt = await recordGenerationAttempt({
+      attemptId: conversationId,
+      at: Date.now(),
+      stage: 'cancelled',
+      origin: 'chat-generate',
+    })
     return {
       ok: false,
       conversationId,
       error: 'Cancelled',
       ...(turn.answer ? { answer: turn.answer } : {}),
+      attempt,
     }
   }
 
@@ -330,12 +351,24 @@ async function runGenerationTurn(
   })
 
   if ('error' in composed) {
+    // The compose stage bailed before it could write its own record (no draft,
+    // failed save), so the attempt is recorded here — a compile failure is a
+    // measurement, not silence.
+    const attempt =
+      composed.attempt ??
+      (await recordGenerationAttempt({
+        attemptId: conversationId,
+        at: Date.now(),
+        stage: 'generate',
+        origin: 'chat-generate',
+      }))
     return {
       ok: false,
       conversationId,
       error: turn.ok ? composed.error : `${turn.error ?? composed.error}`,
       ...(composed.issues?.length ? { issues: composed.issues } : {}),
       ...(turn.answer ? { answer: turn.answer } : {}),
+      attempt,
       ...(continuation
         ? {
             terminalStepContinuation: {
@@ -367,6 +400,7 @@ async function runGenerationTurn(
         }
       : {}),
     workflow: summarize(composed.workflow, composed.saved),
+    ...(composed.attempt ? { attempt: composed.attempt } : {}),
   }
 }
 
@@ -648,11 +682,18 @@ async function replayOnce(
       }
     : updated
   await saveWorkflow(final)
+  const ok = !trialFailed(record)
+  const attempt = await recordGenerationAttempt({
+    attemptId: req.workflowId,
+    at: Date.now(),
+    replay: replayFactsOf(record, ok, goal),
+  })
 
   return {
-    ok: !trialFailed(record),
+    ok,
     conversationId,
     workflow: { ...summarize(final, true), ...(goal ? { goal } : {}) },
+    attempt,
   }
 }
 
@@ -739,32 +780,40 @@ async function repairOnce(
     ...(trial?.failureCode ? { failureCode: trial.failureCode } : {}),
   }
   if (first.ok) {
-    return {
-      ...first,
-      repair: {
-        attempted: false,
-        status: 'not-needed',
-        attempts: 0,
-        durationMs: 0,
-        committed: false,
-      },
+    const summary: RepairRunSummary = {
+      attempted: false,
+      status: 'not-needed',
+      attempts: 0,
+      durationMs: 0,
+      committed: false,
     }
+    const attempt = await recordRepairAttempt(req.workflowId, first, {
+      attempted: false,
+      status: 'not-needed',
+      attempts: 0,
+      committed: false,
+    })
+    return { ...first, repair: summary, attempt }
   }
 
   const stored = await getWorkflow(req.workflowId)
   if (!stored) {
-    return {
-      ...first,
-      repair: {
-        attempted: false,
-        status: 'blocked',
-        attempts: 0,
-        durationMs: 0,
-        committed: false,
-        reason: `No saved workflow with id ${req.workflowId}`,
-        ...failure,
-      },
+    const summary: RepairRunSummary = {
+      attempted: false,
+      status: 'blocked',
+      attempts: 0,
+      durationMs: 0,
+      committed: false,
+      reason: `No saved workflow with id ${req.workflowId}`,
+      ...failure,
     }
+    const attempt = await recordRepairAttempt(req.workflowId, first, {
+      attempted: false,
+      status: 'blocked',
+      attempts: 0,
+      committed: false,
+    })
+    return { ...first, repair: summary, attempt }
   }
 
   const runId = trial?.runId ?? ''
@@ -782,33 +831,90 @@ async function repairOnce(
     // No evidence for that run (a worker that restarted between the replay and
     // this call), or the repair loop threw. Either way the caller gets the
     // original failing replay back, with the reason it could not be repaired.
-    return {
-      ...first,
-      repair: {
-        attempted: false,
-        status: 'blocked',
-        attempts: 0,
-        durationMs: 0,
-        committed: false,
-        reason: error instanceof Error ? error.message : String(error),
-        ...failure,
-      },
+    const summary: RepairRunSummary = {
+      attempted: false,
+      status: 'blocked',
+      attempts: 0,
+      durationMs: 0,
+      committed: false,
+      reason: error instanceof Error ? error.message : String(error),
+      ...failure,
     }
+    const attempt = await recordRepairAttempt(req.workflowId, first, {
+      attempted: false,
+      status: 'blocked',
+      attempts: 0,
+      committed: false,
+    })
+    return { ...first, repair: summary, attempt }
   }
 
   const again = await replayOnce(req, conversationId)
-  return {
-    ...again,
-    repair: {
-      attempted: true,
-      status: outcome.status,
-      attempts: outcome.attempts,
-      durationMs: outcome.durationMs,
-      committed: outcome.committed,
-      ...(outcome.reason ? { reason: outcome.reason } : {}),
-      ...failure,
-    },
+  const summary: RepairRunSummary = {
+    attempted: true,
+    status: outcome.status,
+    attempts: outcome.attempts,
+    durationMs: outcome.durationMs,
+    committed: outcome.committed,
+    ...(outcome.reason ? { reason: outcome.reason } : {}),
+    ...failure,
   }
+  const attempt = await recordRepairAttempt(req.workflowId, again, {
+    attempted: true,
+    status: outcome.status,
+    attempts: outcome.attempts,
+    committed: outcome.committed,
+  })
+  return { ...again, repair: summary, attempt }
+}
+
+/**
+ * The replay block as the attempt store keeps it.
+ *
+ * `ran` is false only for a trial that never started, and `verified` follows
+ * the same rule as `workflow.verified`, so a report can never say the two
+ * disagree.
+ */
+function replayFactsOf(
+  record: TrialRunRecord,
+  ok: boolean,
+  goal: GenerationWorkflowSummary['goal'],
+  repair?: ReplayFacts['repair'],
+): ReplayFacts {
+  return {
+    ran: record.outcome !== 'skipped',
+    ok,
+    verified: trialCertifies(record),
+    outcome: record.outcome,
+    coveredSteps: record.coveredSteps,
+    totalSteps: record.totalSteps,
+    ...(record.failureCode ? { failureCode: record.failureCode } : {}),
+    ...(goal ? { goal: goalFactsFromVerdict(goal) } : {}),
+    ...(repair ? { repair } : {}),
+  }
+}
+
+/** Merge a repair verdict into the attempt the final replay wrote. */
+async function recordRepairAttempt(
+  workflowId: string,
+  result: UnattendedGenerationResult,
+  repair: NonNullable<ReplayFacts['repair']>,
+): Promise<GenerationAttemptRecord> {
+  const trial = result.workflow?.trialRun
+  const goal = result.workflow?.goal
+  const replay: ReplayFacts = trial
+    ? replayFactsOf(trial, result.ok, goal, repair)
+    : {
+        ran: false,
+        ok: result.ok,
+        verified: false,
+        outcome: 'skipped',
+        coveredSteps: 0,
+        totalSteps: 0,
+        ...(goal ? { goal: goalFactsFromVerdict(goal) } : {}),
+        repair,
+      }
+  return recordGenerationAttempt({ attemptId: workflowId, at: Date.now(), replay })
 }
 
 function summarize(workflow: Workflow, saved: boolean): GenerationWorkflowSummary {

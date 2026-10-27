@@ -31,8 +31,12 @@ function makeChromeMock() {
   }
 }
 
+let chromeStore: Map<string, unknown>
+
 beforeEach(() => {
-  vi.stubGlobal('chrome', makeChromeMock())
+  const mock = makeChromeMock()
+  chromeStore = mock.store
+  vi.stubGlobal('chrome', mock)
 })
 
 import {
@@ -284,6 +288,51 @@ describe('composeWorkflowFromDraft', () => {
     expect(out.workflow.settings.saveWarnings?.join('\n')).toContain('验证未通过')
     expect(out.workflow.settings.saveWarnings?.join('\n')).toContain('1/22')
     expect(out.workflow.settings.saveWarnings?.join('\n')).toContain('WRONG_ORIGIN')
+  })
+
+  it('records the attempt on the panel path too, keyed to the saved graph', async () => {
+    // The panel chat composes through this same function, so this is the only
+    // test that proves a panel generation leaves a record — not just the bridge.
+    const conversation = 'c-attempt-panel'
+    await append(conversation, 'wf_op_new-tab', { url: 'https://shop.test/list' })
+
+    const out = await composeWorkflowFromDraft(conversation, {
+      save: true,
+      trial: async (workflow) => ({
+        workflow,
+        record: { outcome: 'passed', at: 3, full: true, coveredSteps: 2, totalSteps: 2 },
+      }),
+    })
+    if ('error' in out) throw new Error(out.error)
+
+    expect(out.attempt).toMatchObject({
+      attemptId: out.workflow.id,
+      origin: 'chat-generate',
+      compose: {
+        saved: true,
+        staticOk: true,
+        nodeCount: out.workflow.drawflow.nodes.length,
+        trial: { outcome: 'passed', full: true, coveredSteps: 2, totalSteps: 2 },
+      },
+    })
+    expect(out.attempt?.score).toBeGreaterThan(0)
+
+    const stored = chromeStore.get('bc_generation_attempts') as unknown[] | undefined
+    expect(stored).toHaveLength(1)
+    expect(stored?.[0]).toEqual(out.attempt)
+  })
+
+  it('records nothing for a draft review that is not saved', async () => {
+    const conversation = 'c-attempt-review'
+    await append(conversation, 'wf_op_new-tab', { url: 'https://shop.test/list' })
+
+    const out = await composeWorkflowFromDraft(conversation, { save: false })
+
+    if ('error' in out) throw new Error(out.error)
+    // A review is a look at a draft, not an attempt: the save that follows is
+    // the one worth counting.
+    expect(out.attempt).toBeUndefined()
+    expect(chromeStore.get('bc_generation_attempts')).toBeUndefined()
   })
 
   it('derives the top-level trigger mirror from the graph trigger node', async () => {

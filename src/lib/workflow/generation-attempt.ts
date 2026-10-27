@@ -27,6 +27,7 @@ import {
   type WorkflowFailureKind,
 } from './failure-taxonomy'
 import type { GoalVerificationLevel } from './goal-verification-record'
+import type { TrialRunRecord } from './trial-run'
 
 /** Weights of the five score components. They sum to 1. */
 export const ATTEMPT_SCORE_WEIGHTS = {
@@ -295,6 +296,35 @@ function normalizeReplayFacts(raw: unknown): ReplayFacts | undefined {
     ...(readString(raw['failureCode']) ? { failureCode: raw['failureCode'] as string } : {}),
     ...(goal ? { goal } : {}),
     ...(repair ? { repair } : {}),
+  }
+}
+
+/** Reduce a trial record to the facts an attempt keeps. */
+export function trialFactsFromRecord(record: TrialRunRecord): TrialFacts {
+  return {
+    outcome: record.outcome,
+    full: record.full,
+    coveredSteps: record.coveredSteps,
+    totalSteps: record.totalSteps,
+    ...(record.failureCode ? { failureCode: record.failureCode } : {}),
+    ...(record.draftSaved !== undefined ? { draftSaved: record.draftSaved } : {}),
+    ...(record.degradedSteps !== undefined ? { degradedSteps: record.degradedSteps } : {}),
+  }
+}
+
+/** Reduce a goal verdict (persisted record or bridge summary) to attempt facts. */
+export function goalFactsFromVerdict(verdict: {
+  level: string
+  certified: boolean
+  unmet?: readonly string[]
+}): GoalFacts {
+  const level = GOAL_LEVELS.includes(verdict.level as GoalVerificationLevel)
+    ? (verdict.level as GoalVerificationLevel)
+    : 'NONE'
+  return {
+    level,
+    certified: verdict.certified,
+    unmetCount: verdict.unmet?.length ?? 0,
   }
 }
 

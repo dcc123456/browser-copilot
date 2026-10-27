@@ -66,6 +66,26 @@ vi.mock('../src/lib/workflow/storage', () => ({
   saveWorkflow: (...args: unknown[]) => saveWorkflow(...args),
 }))
 
+// The attempt store under an in-memory area: what the bridge wrote (and merged)
+// is part of what is under test, and a failing area must not change the answer.
+const attemptStore = vi.hoisted(() => ({ data: new Map<string, unknown>(), fail: false }))
+vi.mock('../src/lib/fs-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/lib/fs-store')>()
+  return {
+    ...actual,
+    fileStorageArea: () => ({
+      async get(key: string) {
+        if (attemptStore.fail) throw new Error('store offline')
+        return { [key]: attemptStore.data.get(key) }
+      },
+      async set(entries: Record<string, unknown>) {
+        if (attemptStore.fail) throw new Error('store offline')
+        for (const [key, value] of Object.entries(entries)) attemptStore.data.set(key, value)
+      },
+    }),
+  }
+})
+
 import {
   generateWorkflowUnattended,
   readGenerationRun,
@@ -76,8 +96,14 @@ import {
   VERIFY_BUDGET_MS,
   verifySavedWorkflowUnattended,
 } from '../src/background/workflow-generation-bridge'
+import type { GenerationAttemptRecord } from '../src/lib/workflow/generation-attempt'
 
 const trialRunner = vi.fn()
+
+/** What the attempt store currently holds for this suite. */
+function storedAttempts(): GenerationAttemptRecord[] {
+  return (attemptStore.data.get('bc_generation_attempts') as GenerationAttemptRecord[]) ?? []
+}
 
 function savedWorkflow(overrides: Partial<Workflow> = {}): Workflow {
   return {
@@ -139,7 +165,9 @@ function makeTabs(initial: FakeTab[]) {
 
 /** Let the background generation promise chain settle. */
 async function flush(): Promise<void> {
-  for (let i = 0; i < 12; i++) await Promise.resolve()
+  // The replay path now also awaits the attempt store (a storage read + write),
+  // so settling takes a few more microtask turns than the registry alone.
+  for (let i = 0; i < 40; i++) await Promise.resolve()
 }
 
 beforeEach(() => {
@@ -154,6 +182,8 @@ beforeEach(() => {
   autoRepairEvents.mockReset().mockReturnValue([])
   failureSnapshotForRun.mockReset().mockReturnValue({ nodeId: 'n2' } as never)
   verifyWorkflowGoal.mockReset()
+  attemptStore.data.clear()
+  attemptStore.fail = false
   // The tab janitor stubs `chrome`; a test that does not want it must not inherit
   // the previous one's browser.
   vi.unstubAllGlobals()
@@ -297,6 +327,15 @@ describe('generateWorkflowUnattended', () => {
 
     expect(out).toMatchObject({ ok: false, conversationId: 'external-gen:2', error: 'Cancelled' })
     expect(composeWorkflowFromDraft).not.toHaveBeenCalled()
+    // A turn the user stopped still counts as an attempt, or every abandoned
+    // generation disappears from the data.
+    expect(out.attempt).toMatchObject({
+      attemptId: 'external-gen:2',
+      stage: 'cancelled',
+      origin: 'chat-generate',
+      pass: false,
+    })
+    expect(storedAttempts()).toHaveLength(1)
   })
 
   it('carries compose failures back with their issues', async () => {
@@ -311,6 +350,32 @@ describe('generateWorkflowUnattended', () => {
     expect(out.ok).toBe(false)
     expect(out.error).toContain('missing a producer')
     expect(out.issues).toEqual(['missing producer: {{token}}'])
+    // No compose stage ran, so the failure is recorded here rather than lost.
+    expect(out.attempt).toMatchObject({ attemptId: 'external-gen:3', stage: 'generate' })
+    expect(storedAttempts()).toHaveLength(1)
+  })
+
+  it('echoes the compose record instead of writing a second one', async () => {
+    // The panel path composes through the same function and records its own
+    // attempt; the bridge must not duplicate it under the same conversation id.
+    const composed: GenerationAttemptRecord = {
+      at: 5,
+      attemptId: 'wf-1',
+      origin: 'chat-generate',
+      pass: false,
+      score: 0.4,
+    }
+    runUnattendedPrompt.mockResolvedValue({ ok: true, answer: 'done' })
+    composeWorkflowFromDraft.mockResolvedValue({
+      workflow: savedWorkflow(),
+      saved: true,
+      attempt: composed,
+    })
+
+    const out = await generateWorkflowUnattended({ prompt: 'x' }, 'external-gen:5')
+
+    expect(out.attempt).toEqual(composed)
+    expect(storedAttempts()).toHaveLength(0)
   })
 
   it('still saves a graph when the turn itself failed', async () => {
@@ -646,6 +711,44 @@ describe('verifySavedWorkflowUnattended', () => {
     expect(persisted.settings.trialRun).toMatchObject({ outcome: 'passed', coveredSteps: 3, at: 9 })
   })
 
+  it('keeps one attempt per workflow across repeated verifies', async () => {
+    getWorkflow.mockResolvedValue(savedWorkflow())
+    trialRunner.mockResolvedValue({
+      workflow: savedWorkflow(),
+      record: record({ outcome: 'passed', full: true, coveredSteps: 3, totalSteps: 3 }),
+    })
+
+    await verifySavedWorkflowUnattended({ workflowId: 'wf-1' }, 'external-verify:20')
+    await verifySavedWorkflowUnattended({ workflowId: 'wf-1' }, 'external-verify:21')
+
+    // Replaying is not a second attempt: it is the same graph measured again,
+    // and appending would inflate the corpus with the same saved workflow.
+    expect(storedAttempts()).toHaveLength(1)
+    expect(storedAttempts()[0]).toMatchObject({
+      attemptId: 'wf-1',
+      pass: true,
+      score: 0.35,
+      replay: { ran: true, ok: true, verified: true, coveredSteps: 3, totalSteps: 3 },
+    })
+  })
+
+  it('still hands back the replay verdict when the attempt store is unreachable', async () => {
+    getWorkflow.mockResolvedValue(savedWorkflow())
+    trialRunner.mockResolvedValue({
+      workflow: savedWorkflow(),
+      record: record({ outcome: 'passed', full: true, coveredSteps: 3, totalSteps: 3 }),
+    })
+    attemptStore.fail = true
+
+    const out = await verifySavedWorkflowUnattended({ workflowId: 'wf-1' }, 'external-verify:22')
+
+    // Measurement is best-effort; the caller's answer is not.
+    expect(out.ok).toBe(true)
+    expect(out.workflow).toMatchObject({ id: 'wf-1', verified: true })
+    expect(out.attempt).toMatchObject({ attemptId: 'wf-1', pass: true })
+    expect(storedAttempts()).toHaveLength(0)
+  })
+
   it('hands the replay the declared inputs the caller supplied', async () => {
     // A graph that searches for `{{keyword}}` is parameterised: the panel asks a
     // human, an unattended replay has to be told. One field covers a repair too,
@@ -690,6 +793,13 @@ describe('verifySavedWorkflowUnattended', () => {
     expect(out.workflow?.verification).toContain('failed READINESS_TIMEOUT(present)')
     expect(out.workflow?.verification).toContain('1/22')
     expect(out.workflow?.verification).toContain('元素未出现')
+    // The attempt keeps the failure behind the verdict, so a report can group it.
+    expect(out.attempt).toMatchObject({
+      attemptId: 'wf-1',
+      pass: false,
+      failureKind: 'readiness',
+      replay: { ran: true, ok: false, verified: false, failureCode: 'READINESS_TIMEOUT(present)' },
+    })
   })
 
   it('reads a replay that stopped at the unsafe cutoff as unproven, not as broken', async () => {
@@ -863,6 +973,17 @@ describe('repairSavedWorkflowUnattended', () => {
     })
     expect(out.workflow?.trialRun).toMatchObject({ outcome: 'passed' })
     expect(out.workflow?.verified).toBe(true)
+    // Both replays and the repair land in ONE attempt: the first failure, the
+    // verdict measured after the fix, and what the repair was given.
+    expect(storedAttempts()).toHaveLength(1)
+    expect(storedAttempts()[0]).toMatchObject({
+      attemptId: 'wf-1',
+      pass: true,
+      replay: {
+        verified: true,
+        repair: { attempted: true, status: 'success', attempts: 2, committed: true },
+      },
+    })
   })
 
   it('says so when the repair ran out of candidates', async () => {

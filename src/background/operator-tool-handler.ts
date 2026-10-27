@@ -22,7 +22,7 @@
  * @module background/operator-tool-handler
  */
 
-import { newId } from '../lib/storage'
+import { getSettings, newId } from '../lib/storage'
 import { isTriggerNode, triggerFromNodes } from '../lib/workflow/migrate'
 import { deleteDraft, loadDraft, saveDraft } from '../lib/workflow/draft-storage'
 import { TRIGGER_BLOCK_ID } from '../lib/workflow/draft-types'
@@ -84,8 +84,21 @@ import {
 import { isAiComposedFill } from '../lib/workflow/ai-prefill'
 import type { Workflow, WorkflowNode } from '../lib/workflow/types'
 import type { TrialRunRecord } from '../lib/workflow/trial-run'
-import { trialCertifies, trialFailed, draftGoalGapNotice } from '../lib/workflow/trial-run'
+import {
+  draftSaveExecuted,
+  draftGoalGapNotice,
+  goalAsksForDraftSave,
+  trialCertifies,
+  trialFailed,
+} from '../lib/workflow/trial-run'
 import type { WorkflowGoalVerification } from '../lib/workflow/goal-verification-record'
+import {
+  goalFactsFromVerdict,
+  trialFactsFromRecord,
+  type ComposeFacts,
+  type GenerationAttemptRecord,
+} from '../lib/workflow/generation-attempt'
+import { recordGenerationAttempt } from '../lib/workflow/generation-attempt-store'
 import { recordedPageContext } from '../lib/workflow/page-context'
 import { withTrialRecord } from './workflow-engine/repair/generation-trial'
 import type { TrialRunner } from './workflow-engine/repair/generation-trial'
@@ -674,7 +687,10 @@ export async function composeWorkflowFromDraft(
      */
     scope?: ScopeWindow
   } = {},
-): Promise<{ workflow: Workflow; saved: boolean } | { error: string; issues?: string[] }> {
+): Promise<
+  | { workflow: Workflow; saved: boolean; attempt?: GenerationAttemptRecord }
+  | { error: string; issues?: string[]; attempt?: GenerationAttemptRecord }
+> {
   const draft = draftStore.get(conversationId) ?? (await hydrateDraft(conversationId))
   if (actionNodesOf(draft).length === 0) {
     return { error: 'No draft to compose. Call wf_op_* tools first.' }
@@ -807,6 +823,9 @@ export async function composeWorkflowFromDraft(
   const saveWarnings: string[] = []
   let runErrorCount = 0
   let generatedErrorCount = 0
+  let generatedWarningCount = 0
+  let staticCodes: string[] = []
+  let coverageGap = 0
   {
     const runIssues = validateWorkflowForRun(workflow)
     runErrorCount = runIssues.errors.length
@@ -816,6 +835,10 @@ export async function composeWorkflowFromDraft(
     if (isGeneratedStrict(workflow)) {
       const report = validateGeneratedWorkflow(workflow)
       generatedErrorCount = report.errors.length
+      generatedWarningCount = report.warnings.length
+      staticCodes = [
+        ...new Set([...report.errors, ...report.warnings].map((issue) => issue.code)),
+      ].sort()
       if (!report.ok) {
         for (const issue of report.errors.slice(0, 8)) {
           saveWarnings.push(
@@ -835,8 +858,12 @@ export async function composeWorkflowFromDraft(
     // the graph (a later successful call recovered it) is not a hole — the
     // graph is not missing the step. Only report blocks with no node at all.
     const draftBlocks = new Set(actionNodesOf(draft).map(blockIdOfNode))
+    const unrecoveredBlockIds = failedBlockIdsOf(conversationId).filter(
+      (id) => !draftBlocks.has(id),
+    )
+    coverageGap = unrecoveredBlockIds.length
     const coverage = coverageWarningLines({
-      failedBlockIds: failedBlockIdsOf(conversationId).filter((id) => !draftBlocks.has(id)),
+      failedBlockIds: unrecoveredBlockIds,
       recordOnlyBlockIds: actionNodesOf(draft).map(blockIdOfNode).filter(isRecordOnlyBlock),
       fromHistory: draft.source === 'chat-history',
     })
@@ -904,7 +931,64 @@ export async function composeWorkflowFromDraft(
       return { error: err instanceof Error ? err.message : String(err) }
     }
   }
-  return { workflow, saved }
+  // The one place both the panel chat and the local-agent bridge compose, so
+  // the one place a generation attempt is recorded for both. A draft review
+  // (`save: false`) is not an attempt — it gets no record, and the save call
+  // that follows is the one that counts.
+  let attempt: GenerationAttemptRecord | undefined
+  if (opts.save !== false) {
+    const terminalStepMissing =
+      goalAsksForDraftSave(workflow.settings.goalSpec?.summary) && !draftSaveExecuted(workflow)
+    const blockCounts: Record<string, number> = {}
+    for (const node of workflow.drawflow.nodes) {
+      const blockId = node.data?.['blockId']
+      if (typeof blockId === 'string' && blockId !== '') {
+        blockCounts[blockId] = (blockCounts[blockId] ?? 0) + 1
+      }
+    }
+    const composeFacts: ComposeFacts = {
+      saved,
+      nodeCount: workflow.drawflow.nodes.length,
+      staticOk: runErrorCount === 0 && generatedErrorCount === 0,
+      staticCodes,
+      staticErrorCount: runErrorCount + generatedErrorCount,
+      staticWarningCount: generatedWarningCount,
+      ...(terminalStepMissing ? { terminalStepMissing: true } : {}),
+      ...(coverageGap > 0 ? { coverageGap } : {}),
+      ...(Object.keys(blockCounts).length > 0 ? { blockCounts } : {}),
+      ...(trialRecord ? { trial: trialFactsFromRecord(trialRecord) } : {}),
+      ...(goalVerification ? { goal: goalFactsFromVerdict(goalVerification) } : {}),
+    }
+    const model = await generationModelFacts()
+    attempt = await recordGenerationAttempt({
+      attemptId: saved ? workflow.id : conversationId,
+      at: Date.now(),
+      ...(workflow.settings.provenance ? { origin: workflow.settings.provenance } : {}),
+      ...(model ? { model } : {}),
+      compose: composeFacts,
+    })
+  }
+  return { workflow, saved, ...(attempt ? { attempt } : {}) }
+}
+
+/** The active provider's model facts, when the settings are readable. */
+async function generationModelFacts(): Promise<
+  { name?: string; temperature?: number } | undefined
+> {
+  try {
+    const settings = await getSettings()
+    const provider =
+      settings.providers.find((profile) => profile.id === settings.activeProviderId) ??
+      settings.providers[0]
+    if (!provider) return undefined
+    const facts = {
+      ...(provider.model ? { name: provider.model } : {}),
+      ...(typeof provider.temperature === 'number' ? { temperature: provider.temperature } : {}),
+    }
+    return Object.keys(facts).length > 0 ? facts : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**
