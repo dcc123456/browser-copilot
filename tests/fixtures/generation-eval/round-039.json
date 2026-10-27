@@ -1,0 +1,41 @@
+{
+  "at": 0,
+  "attemptId": "round-039",
+  "pass": false,
+  "score": 0.25,
+  "round": 39,
+  "buildStampHash": "03b601c38090",
+  "origin": "chat-generate",
+  "stage": "generate",
+  "compose": {
+    "saved": true,
+    "nodeCount": 24,
+    "staticOk": false,
+    "staticCodes": [
+      "DATA_UNWRITTEN_VARIABLE",
+      "LOCATOR_POSITIONAL"
+    ],
+    "staticErrorCount": 4,
+    "staticWarningCount": 0,
+    "terminalStepMissing": true,
+    "blockCounts": {
+      "new-tab": 2,
+      "read-page": 2,
+      "javascript-code": 4,
+      "event-click": 3,
+      "delay": 3,
+      "upload-file": 3,
+      "set-variable": 1,
+      "ai-agent": 3,
+      "forms": 2
+    },
+    "trial": {
+      "outcome": "failed",
+      "full": true,
+      "coveredSteps": 23,
+      "totalSteps": 23,
+      "degradedSteps": 1
+    }
+  },
+  "failureKind": "intent"
+}

@@ -1,0 +1,55 @@
+{
+  "at": 0,
+  "attemptId": "round-049",
+  "pass": false,
+  "score": 0.182,
+  "round": 49,
+  "buildStampHash": "f308a706bf51",
+  "origin": "chat-generate",
+  "stage": "verify",
+  "compose": {
+    "saved": true,
+    "nodeCount": 12,
+    "staticOk": false,
+    "staticCodes": [
+      "LOCATOR_POSITIONAL"
+    ],
+    "staticErrorCount": 1,
+    "staticWarningCount": 0,
+    "terminalStepMissing": true,
+    "coverageGap": 1,
+    "blockCounts": {
+      "new-tab": 2,
+      "read-page": 1,
+      "set-variable": 1,
+      "ai-agent": 1,
+      "javascript-code": 2,
+      "event-click": 1,
+      "save-local": 3
+    },
+    "trial": {
+      "outcome": "failed",
+      "full": true,
+      "coveredSteps": 6,
+      "totalSteps": 11,
+      "failureCode": "READINESS_TIMEOUT(present)"
+    }
+  },
+  "replay": {
+    "ran": true,
+    "ok": false,
+    "verified": false,
+    "proven": false,
+    "outcome": "failed",
+    "coveredSteps": 6,
+    "totalSteps": 11,
+    "failureCode": "READINESS_TIMEOUT(present)",
+    "repair": {
+      "attempted": true,
+      "status": "exhausted",
+      "attempts": 6,
+      "committed": false
+    }
+  },
+  "failureKind": "readiness"
+}

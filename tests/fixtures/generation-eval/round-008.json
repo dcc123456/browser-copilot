@@ -1,0 +1,45 @@
+{
+  "at": 0,
+  "attemptId": "round-008",
+  "pass": false,
+  "score": 0.188,
+  "round": 8,
+  "buildStampHash": "ccb3b7d4c793",
+  "origin": "chat-generate",
+  "stage": "verify",
+  "compose": {
+    "saved": true,
+    "nodeCount": 13,
+    "staticOk": false,
+    "staticCodes": [
+      "LOCATOR_POSITIONAL"
+    ],
+    "staticErrorCount": 2,
+    "staticWarningCount": 0,
+    "coverageGap": 1,
+    "trial": {
+      "outcome": "failed",
+      "full": true,
+      "coveredSteps": 7,
+      "totalSteps": 12,
+      "failureCode": "UNRESOLVED_INPUT"
+    }
+  },
+  "replay": {
+    "ran": true,
+    "ok": false,
+    "verified": false,
+    "proven": false,
+    "outcome": "failed",
+    "coveredSteps": 7,
+    "totalSteps": 12,
+    "failureCode": "UNRESOLVED_INPUT",
+    "repair": {
+      "attempted": true,
+      "status": "exhausted",
+      "attempts": 6,
+      "committed": false
+    }
+  },
+  "failureKind": "dataflow"
+}

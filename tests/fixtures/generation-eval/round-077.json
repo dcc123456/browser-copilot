@@ -1,0 +1,60 @@
+{
+  "at": 0,
+  "attemptId": "round-077",
+  "pass": true,
+  "score": 1,
+  "round": 77,
+  "buildStampHash": "a675638e8164",
+  "origin": "chat-generate",
+  "stage": "ok",
+  "compose": {
+    "saved": true,
+    "nodeCount": 14,
+    "staticOk": true,
+    "staticCodes": [],
+    "staticErrorCount": 0,
+    "staticWarningCount": 0,
+    "blockCounts": {
+      "new-tab": 1,
+      "read-page": 1,
+      "switch-tab": 1,
+      "javascript-code": 6,
+      "wait-connections": 1,
+      "ai-agent": 1,
+      "forms": 1,
+      "event-click": 1
+    },
+    "trial": {
+      "outcome": "passed",
+      "full": true,
+      "coveredSteps": 13,
+      "totalSteps": 13,
+      "draftSaved": true
+    },
+    "goal": {
+      "level": "L3",
+      "certified": true,
+      "unmetCount": 0
+    }
+  },
+  "replay": {
+    "ran": true,
+    "ok": true,
+    "verified": true,
+    "proven": true,
+    "outcome": "passed",
+    "coveredSteps": 13,
+    "totalSteps": 13,
+    "goal": {
+      "level": "L3",
+      "certified": true,
+      "unmetCount": 0
+    },
+    "repair": {
+      "attempted": false,
+      "status": "not-needed",
+      "attempts": 0,
+      "committed": false
+    }
+  }
+}

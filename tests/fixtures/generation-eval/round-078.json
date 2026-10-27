@@ -1,0 +1,50 @@
+{
+  "at": 0,
+  "attemptId": "round-078",
+  "pass": false,
+  "score": 0.388,
+  "round": 78,
+  "buildStampHash": "3712fd4291e1",
+  "origin": "chat-generate",
+  "stage": "cutoff",
+  "compose": {
+    "saved": true,
+    "nodeCount": 14,
+    "staticOk": true,
+    "staticCodes": [],
+    "staticErrorCount": 0,
+    "staticWarningCount": 0,
+    "blockCounts": {
+      "new-tab": 1,
+      "read-page": 1,
+      "switch-tab": 1,
+      "javascript-code": 6,
+      "wait-connections": 1,
+      "ai-agent": 1,
+      "forms": 1,
+      "event-click": 1
+    },
+    "trial": {
+      "outcome": "partial",
+      "full": false,
+      "coveredSteps": 12,
+      "totalSteps": 13
+    }
+  },
+  "replay": {
+    "ran": true,
+    "ok": true,
+    "verified": false,
+    "proven": false,
+    "outcome": "partial",
+    "coveredSteps": 12,
+    "totalSteps": 13,
+    "repair": {
+      "attempted": false,
+      "status": "not-needed",
+      "attempts": 0,
+      "committed": false
+    }
+  },
+  "failureKind": "side-effect"
+}

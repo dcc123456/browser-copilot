@@ -1,0 +1,61 @@
+{
+  "at": 0,
+  "attemptId": "round-076",
+  "pass": false,
+  "score": 0.84,
+  "round": 76,
+  "buildStampHash": "bc0f47679a1b",
+  "origin": "chat-generate",
+  "stage": "goal",
+  "compose": {
+    "saved": true,
+    "nodeCount": 14,
+    "staticOk": true,
+    "staticCodes": [],
+    "staticErrorCount": 0,
+    "staticWarningCount": 0,
+    "blockCounts": {
+      "new-tab": 1,
+      "read-page": 1,
+      "switch-tab": 1,
+      "javascript-code": 6,
+      "wait-connections": 1,
+      "ai-agent": 1,
+      "forms": 1,
+      "event-click": 1
+    },
+    "trial": {
+      "outcome": "passed",
+      "full": true,
+      "coveredSteps": 13,
+      "totalSteps": 13,
+      "draftSaved": true
+    },
+    "goal": {
+      "level": "L2",
+      "certified": false,
+      "unmetCount": 0
+    }
+  },
+  "replay": {
+    "ran": true,
+    "ok": true,
+    "verified": true,
+    "proven": true,
+    "outcome": "passed",
+    "coveredSteps": 13,
+    "totalSteps": 13,
+    "goal": {
+      "level": "L2",
+      "certified": false,
+      "unmetCount": 0
+    },
+    "repair": {
+      "attempted": false,
+      "status": "not-needed",
+      "attempts": 0,
+      "committed": false
+    }
+  },
+  "failureKind": "goal-verification"
+}

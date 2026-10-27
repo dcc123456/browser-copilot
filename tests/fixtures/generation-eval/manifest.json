@@ -1,0 +1,77 @@
+{
+  "source": "tmp/selftest-round{2..83}.json",
+  "rounds": {
+    "from": 2,
+    "to": 83
+  },
+  "count": 82,
+  "missing": [
+    1
+  ],
+  "excluded": {
+    "from": 84,
+    "to": 112,
+    "reason": "429 quota + concurrent src edits"
+  },
+  "golden": {
+    "total": 82,
+    "pass": 9,
+    "passRate": 0.1098,
+    "l3Certified": 3,
+    "verifiedAndProven": 19,
+    "coverageGapRounds": 40,
+    "meanScore": 0.331,
+    "passInterval": {
+      "low": 0.0588,
+      "high": 0.1956
+    },
+    "l3Interval": {
+      "low": 0.0125,
+      "high": 0.1021
+    },
+    "meanScoreInterval": {
+      "low": 0.2769,
+      "high": 0.3862
+    },
+    "byGoalLevel": {
+      "L1": 0,
+      "L2": 0,
+      "L3": 3,
+      "NONE": 0
+    },
+    "byFailureKind": [
+      {
+        "kind": "graph",
+        "count": 29
+      },
+      {
+        "kind": "goal-verification",
+        "count": 15
+      },
+      {
+        "kind": "intent",
+        "count": 14
+      },
+      {
+        "kind": "readiness",
+        "count": 6
+      },
+      {
+        "kind": "environment",
+        "count": 4
+      },
+      {
+        "kind": "dataflow",
+        "count": 2
+      },
+      {
+        "kind": "unknown",
+        "count": 2
+      },
+      {
+        "kind": "side-effect",
+        "count": 1
+      }
+    ]
+  }
+}

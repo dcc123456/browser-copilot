@@ -1,0 +1,38 @@
+{
+  "at": 0,
+  "attemptId": "round-079",
+  "pass": false,
+  "score": 0.225,
+  "round": 79,
+  "buildStampHash": "3712fd4291e1",
+  "origin": "chat-generate",
+  "stage": "harness",
+  "compose": {
+    "saved": true,
+    "nodeCount": 19,
+    "staticOk": false,
+    "staticCodes": [
+      "LOCATOR_POSITIONAL"
+    ],
+    "staticErrorCount": 2,
+    "staticWarningCount": 0,
+    "blockCounts": {
+      "new-tab": 3,
+      "get-text": 1,
+      "read-page": 1,
+      "event-click": 3,
+      "javascript-code": 3,
+      "ai-agent": 3,
+      "upload-file": 3,
+      "forms": 1
+    },
+    "trial": {
+      "outcome": "timeout",
+      "full": false,
+      "coveredSteps": 15,
+      "totalSteps": 18,
+      "degradedSteps": 1
+    }
+  },
+  "failureKind": "graph"
+}

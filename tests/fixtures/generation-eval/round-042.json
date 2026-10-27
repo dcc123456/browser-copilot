@@ -1,0 +1,31 @@
+{
+  "at": 0,
+  "attemptId": "round-042",
+  "pass": false,
+  "score": 0.4,
+  "round": 42,
+  "buildStampHash": "fc6abb61776e",
+  "origin": "chat-generate",
+  "stage": "generate",
+  "compose": {
+    "saved": true,
+    "nodeCount": 4,
+    "staticOk": true,
+    "staticCodes": [],
+    "staticErrorCount": 0,
+    "staticWarningCount": 0,
+    "terminalStepMissing": true,
+    "blockCounts": {
+      "new-tab": 1,
+      "read-page": 1,
+      "ai-agent": 1
+    },
+    "trial": {
+      "outcome": "failed",
+      "full": true,
+      "coveredSteps": 3,
+      "totalSteps": 3
+    }
+  },
+  "failureKind": "intent"
+}

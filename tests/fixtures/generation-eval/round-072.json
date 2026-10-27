@@ -1,0 +1,56 @@
+{
+  "at": 0,
+  "attemptId": "round-072",
+  "pass": false,
+  "score": 0.25,
+  "round": 72,
+  "buildStampHash": "c8050c910069",
+  "origin": "chat-generate",
+  "stage": "verify",
+  "compose": {
+    "saved": true,
+    "nodeCount": 30,
+    "staticOk": false,
+    "staticCodes": [
+      "LOCATOR_MISSING",
+      "LOCATOR_POSITIONAL"
+    ],
+    "staticErrorCount": 8,
+    "staticWarningCount": 0,
+    "coverageGap": 1,
+    "blockCounts": {
+      "new-tab": 2,
+      "read-page": 2,
+      "element-scroll": 4,
+      "event-click": 4,
+      "javascript-code": 13,
+      "delay": 1,
+      "take-screenshot": 1,
+      "save-local": 1,
+      "set-variable": 1
+    },
+    "trial": {
+      "outcome": "failed",
+      "full": true,
+      "coveredSteps": 29,
+      "totalSteps": 29,
+      "degradedSteps": 1
+    }
+  },
+  "replay": {
+    "ran": true,
+    "ok": false,
+    "verified": false,
+    "proven": false,
+    "outcome": "failed",
+    "coveredSteps": 29,
+    "totalSteps": 29,
+    "repair": {
+      "attempted": true,
+      "status": "exhausted",
+      "attempts": 6,
+      "committed": false
+    }
+  },
+  "failureKind": "graph"
+}

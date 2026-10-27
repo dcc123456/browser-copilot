@@ -1,0 +1,10 @@
+{
+  "at": 0,
+  "attemptId": "round-004",
+  "pass": false,
+  "score": 0,
+  "round": 4,
+  "buildStampHash": "ad28bf433822",
+  "stage": "harness",
+  "failureKind": "environment"
+}

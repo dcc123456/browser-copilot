@@ -1,0 +1,34 @@
+{
+  "at": 0,
+  "attemptId": "round-036",
+  "pass": false,
+  "score": 0.4,
+  "round": 36,
+  "buildStampHash": "0927aec3f211",
+  "origin": "chat-generate",
+  "stage": "generate",
+  "compose": {
+    "saved": true,
+    "nodeCount": 12,
+    "staticOk": true,
+    "staticCodes": [],
+    "staticErrorCount": 0,
+    "staticWarningCount": 0,
+    "terminalStepMissing": true,
+    "blockCounts": {
+      "new-tab": 2,
+      "read-page": 1,
+      "ai-agent": 2,
+      "wait-connections": 2,
+      "javascript-code": 1,
+      "upload-file": 3
+    },
+    "trial": {
+      "outcome": "passed",
+      "full": true,
+      "coveredSteps": 11,
+      "totalSteps": 11
+    }
+  },
+  "failureKind": "intent"
+}

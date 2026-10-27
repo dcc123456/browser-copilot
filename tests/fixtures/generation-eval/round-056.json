@@ -1,0 +1,57 @@
+{
+  "at": 0,
+  "attemptId": "round-056",
+  "pass": false,
+  "score": 0.175,
+  "round": 56,
+  "buildStampHash": "d9988593effd",
+  "origin": "chat-generate",
+  "stage": "verify",
+  "compose": {
+    "saved": true,
+    "nodeCount": 21,
+    "staticOk": false,
+    "staticCodes": [
+      "LOCATOR_POSITIONAL"
+    ],
+    "staticErrorCount": 4,
+    "staticWarningCount": 0,
+    "coverageGap": 1,
+    "blockCounts": {
+      "new-tab": 1,
+      "read-page": 1,
+      "ai-agent": 1,
+      "javascript-code": 6,
+      "switch-tab": 1,
+      "upload-file": 2,
+      "delay": 2,
+      "forms": 2,
+      "event-click": 3,
+      "trigger-event": 1
+    },
+    "trial": {
+      "outcome": "failed",
+      "full": true,
+      "coveredSteps": 10,
+      "totalSteps": 20,
+      "failureCode": "UNRESOLVED_INPUT"
+    }
+  },
+  "replay": {
+    "ran": true,
+    "ok": false,
+    "verified": false,
+    "proven": false,
+    "outcome": "failed",
+    "coveredSteps": 10,
+    "totalSteps": 20,
+    "failureCode": "UNRESOLVED_INPUT",
+    "repair": {
+      "attempted": true,
+      "status": "exhausted",
+      "attempts": 6,
+      "committed": false
+    }
+  },
+  "failureKind": "dataflow"
+}

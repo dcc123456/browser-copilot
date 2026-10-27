@@ -1,0 +1,66 @@
+{
+  "at": 0,
+  "attemptId": "round-057",
+  "pass": false,
+  "score": 0.69,
+  "round": 57,
+  "buildStampHash": "5f978691eb23",
+  "origin": "chat-generate",
+  "stage": "goal",
+  "compose": {
+    "saved": true,
+    "nodeCount": 21,
+    "staticOk": false,
+    "staticCodes": [
+      "LOCATOR_POSITIONAL"
+    ],
+    "staticErrorCount": 4,
+    "staticWarningCount": 0,
+    "coverageGap": 1,
+    "blockCounts": {
+      "new-tab": 1,
+      "read-page": 1,
+      "ai-agent": 1,
+      "javascript-code": 6,
+      "switch-tab": 1,
+      "upload-file": 2,
+      "delay": 2,
+      "forms": 2,
+      "event-click": 3,
+      "trigger-event": 1
+    },
+    "trial": {
+      "outcome": "passed",
+      "full": true,
+      "coveredSteps": 20,
+      "totalSteps": 20,
+      "draftSaved": true
+    },
+    "goal": {
+      "level": "L2",
+      "certified": false,
+      "unmetCount": 0
+    }
+  },
+  "replay": {
+    "ran": true,
+    "ok": true,
+    "verified": true,
+    "proven": true,
+    "outcome": "passed",
+    "coveredSteps": 20,
+    "totalSteps": 20,
+    "goal": {
+      "level": "L2",
+      "certified": false,
+      "unmetCount": 0
+    },
+    "repair": {
+      "attempted": false,
+      "status": "not-needed",
+      "attempts": 0,
+      "committed": false
+    }
+  },
+  "failureKind": "goal-verification"
+}

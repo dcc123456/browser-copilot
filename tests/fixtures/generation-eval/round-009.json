@@ -1,0 +1,42 @@
+{
+  "at": 0,
+  "attemptId": "round-009",
+  "pass": true,
+  "score": 0.45,
+  "round": 9,
+  "buildStampHash": "f87809f8a5bb",
+  "origin": "chat-generate",
+  "stage": "ok",
+  "compose": {
+    "saved": true,
+    "nodeCount": 13,
+    "staticOk": false,
+    "staticCodes": [
+      "LOCATOR_POSITIONAL"
+    ],
+    "staticErrorCount": 2,
+    "staticWarningCount": 0,
+    "coverageGap": 1,
+    "trial": {
+      "outcome": "passed",
+      "full": true,
+      "coveredSteps": 13,
+      "totalSteps": 12
+    }
+  },
+  "replay": {
+    "ran": true,
+    "ok": true,
+    "verified": true,
+    "proven": true,
+    "outcome": "passed",
+    "coveredSteps": 13,
+    "totalSteps": 12,
+    "repair": {
+      "attempted": false,
+      "status": "not-needed",
+      "attempts": 0,
+      "committed": false
+    }
+  }
+}

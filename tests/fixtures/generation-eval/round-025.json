@@ -1,0 +1,27 @@
+{
+  "at": 0,
+  "attemptId": "round-025",
+  "pass": false,
+  "score": 0.325,
+  "round": 25,
+  "buildStampHash": "10a7855dd196",
+  "origin": "chat-generate",
+  "stage": "generate",
+  "compose": {
+    "saved": true,
+    "nodeCount": 23,
+    "staticOk": true,
+    "staticCodes": [],
+    "staticErrorCount": 0,
+    "staticWarningCount": 0,
+    "terminalStepMissing": true,
+    "coverageGap": 1,
+    "trial": {
+      "outcome": "timeout",
+      "full": false,
+      "coveredSteps": 11,
+      "totalSteps": 22
+    }
+  },
+  "failureKind": "intent"
+}
