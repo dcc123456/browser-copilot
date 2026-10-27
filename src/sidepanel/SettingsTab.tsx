@@ -670,6 +670,175 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </div>
       )}
 
+      {/* --- Download directory --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsDownloadDir}</div>
+        <p className="hint">{t.settingsDownloadDirIntro}</p>
+        <p className="hint">
+          {downloadDirName
+            ? t.settingsDownloadDirFolder({ name: downloadDirName })
+            : t.settingsDownloadDirNone}
+        </p>
+        {downloadNotice && (
+          <p className={downloadNotice.kind === 'ok' ? 'hint ok' : 'hint error'}>
+            {downloadNotice.text}
+          </p>
+        )}
+        <div className="actions">
+          {downloadDirName ? (
+            <>
+              <button
+                disabled={downloadBusy}
+                onClick={() => void chooseDownloadDir()}
+                type="button"
+              >
+                {t.settingsChangeFolder}
+              </button>
+              <button
+                disabled={downloadBusy}
+                onClick={() => void removeDownloadDir()}
+                type="button"
+              >
+                {t.settingsDownloadDirDisconnect}
+              </button>
+            </>
+          ) : (
+            <button disabled={downloadBusy} onClick={() => void chooseDownloadDir()} type="button">
+              {t.settingsChooseFolder}
+            </button>
+          )}
+        </div>
+        <label className="checkbox">
+          <input
+            checked={settings.downloadAutoSave}
+            disabled={!downloadDirName}
+            onChange={(event) =>
+              void mutate({
+                type: 'settings.set',
+                patch: { downloadAutoSave: event.target.checked },
+              })
+            }
+            type="checkbox"
+          />
+          {t.settingsDownloadAutoSave}
+        </label>
+      </div>
+
+      {/* --- Local agent (WebSocket + MCP adapter) --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsLocalAgent}</div>
+        <p className="hint">{t.settingsLocalAgentIntro}</p>
+        <Switch
+          checked={settings.localAgentEnabled}
+          label={t.settingsLocalAgentEnable}
+          onChange={(localAgentEnabled) =>
+            void mutate({
+              type: 'settings.set',
+              patch: { localAgentEnabled },
+            })
+          }
+        />
+        {settings.localAgentEnabled && (
+          <>
+            {/* Compact status badge; errors surface as a red dot + short hint. */}
+            {agentStatus && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 0 10px' }}>
+                <span
+                  className={`status-badge ${
+                    agentStatus.state === 'connected'
+                      ? 'ok'
+                      : agentStatus.state === 'connecting'
+                        ? 'skip'
+                        : agentStatus.error
+                          ? 'err'
+                          : 'skip'
+                  }`}
+                >
+                  {agentStatus.state === 'connected'
+                    ? t.settingsLocalAgentStatusConnected
+                    : agentStatus.state === 'connecting'
+                      ? t.settingsLocalAgentStatusConnecting
+                      : t.settingsLocalAgentStatusDisconnected}
+                </span>
+                {agentStatus.error && (
+                  <span
+                    className="hint error"
+                    style={{
+                      margin: 0,
+                      flex: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title={
+                      /ERR_CONNECTION_REFUSED|ECONNREFUSED|CONNECTION_REFUSED/i.test(
+                        agentStatus.error,
+                      )
+                        ? t.settingsLocalAgentErrorRefused
+                        : t.settingsLocalAgentStatusError({ error: agentStatus.error })
+                    }
+                  >
+                    {'● '}
+                    {/ERR_CONNECTION_REFUSED|ECONNREFUSED|CONNECTION_REFUSED/i.test(
+                      agentStatus.error,
+                    )
+                      ? t.settingsLocalAgentErrorRefused
+                      : t.settingsLocalAgentStatusError({ error: agentStatus.error })}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Per-connection window assignment: each connected agent can be
+                bound to one window, so several agents drive SEPARATE windows
+                concurrently. Usable independently in every window's panel;
+                assignments are global settings synced via storage events. */}
+            {(agentStatus?.agents ?? []).length >= 1 && (
+              <AgentBindingsCard
+                t={t}
+                agents={agentStatus!.agents}
+                windows={pluginWindows}
+                bindings={settings.localAgentBindings ?? {}}
+                myWindowId={myWindowId}
+                onAssign={(agentId, agentName, windowId) =>
+                  void mutate({ type: 'agent.bindings.set', agentId, agentName, windowId })
+                }
+              />
+            )}
+
+            {/* Connection editing moved into the dialog (button below); this
+                card stays a status surface: enable switch, live state, and —
+                for a multi-agent setup — per-window connection assignment. */}
+            <div className="actions">
+              <button
+                onClick={() => {
+                  setAgentNotice(null)
+                  setOpenDialog('agent')
+                }}
+                type="button"
+              >
+                {t.settingsLocalAgentConfigure}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <TeamSharingCard />
+
+      {/* --- Element picker --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsElementPicker}</div>
+        <p className="hint">{t.settingsElementPickerIntro}</p>
+        <Switch
+          checked={settings.elementPickerEnabled}
+          label={t.settingsElementPickerEnable}
+          onChange={(elementPickerEnabled) =>
+            void mutate({ type: 'settings.set', patch: { elementPickerEnabled } })
+          }
+        />
+      </div>
+
       {/* --- Unattended window policy --- */}
       <div className="card">
         <div className="card-title">{t.settingsWindowPolicyLabel}</div>
@@ -1026,161 +1195,6 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </div>
       </div>
 
-      {/* --- Download directory --- */}
-      <div className="card">
-        <div className="card-title">{t.settingsDownloadDir}</div>
-        <p className="hint">{t.settingsDownloadDirIntro}</p>
-        <p className="hint">
-          {downloadDirName
-            ? t.settingsDownloadDirFolder({ name: downloadDirName })
-            : t.settingsDownloadDirNone}
-        </p>
-        {downloadNotice && (
-          <p className={downloadNotice.kind === 'ok' ? 'hint ok' : 'hint error'}>
-            {downloadNotice.text}
-          </p>
-        )}
-        <div className="actions">
-          {downloadDirName ? (
-            <>
-              <button
-                disabled={downloadBusy}
-                onClick={() => void chooseDownloadDir()}
-                type="button"
-              >
-                {t.settingsChangeFolder}
-              </button>
-              <button
-                disabled={downloadBusy}
-                onClick={() => void removeDownloadDir()}
-                type="button"
-              >
-                {t.settingsDownloadDirDisconnect}
-              </button>
-            </>
-          ) : (
-            <button disabled={downloadBusy} onClick={() => void chooseDownloadDir()} type="button">
-              {t.settingsChooseFolder}
-            </button>
-          )}
-        </div>
-        <label className="checkbox">
-          <input
-            checked={settings.downloadAutoSave}
-            disabled={!downloadDirName}
-            onChange={(event) =>
-              void mutate({
-                type: 'settings.set',
-                patch: { downloadAutoSave: event.target.checked },
-              })
-            }
-            type="checkbox"
-          />
-          {t.settingsDownloadAutoSave}
-        </label>
-      </div>
-
-      {/* --- Local agent (WebSocket + MCP adapter) --- */}
-      <div className="card">
-        <div className="card-title">{t.settingsLocalAgent}</div>
-        <p className="hint">{t.settingsLocalAgentIntro}</p>
-        <Switch
-          checked={settings.localAgentEnabled}
-          label={t.settingsLocalAgentEnable}
-          onChange={(localAgentEnabled) =>
-            void mutate({
-              type: 'settings.set',
-              patch: { localAgentEnabled },
-            })
-          }
-        />
-        {settings.localAgentEnabled && (
-          <>
-            {/* Compact status badge; errors surface as a red dot + short hint. */}
-            {agentStatus && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '2px 0 10px' }}>
-                <span
-                  className={`status-badge ${
-                    agentStatus.state === 'connected'
-                      ? 'ok'
-                      : agentStatus.state === 'connecting'
-                        ? 'skip'
-                        : agentStatus.error
-                          ? 'err'
-                          : 'skip'
-                  }`}
-                >
-                  {agentStatus.state === 'connected'
-                    ? t.settingsLocalAgentStatusConnected
-                    : agentStatus.state === 'connecting'
-                      ? t.settingsLocalAgentStatusConnecting
-                      : t.settingsLocalAgentStatusDisconnected}
-                </span>
-                {agentStatus.error && (
-                  <span
-                    className="hint error"
-                    style={{
-                      margin: 0,
-                      flex: 1,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                    title={
-                      /ERR_CONNECTION_REFUSED|ECONNREFUSED|CONNECTION_REFUSED/i.test(
-                        agentStatus.error,
-                      )
-                        ? t.settingsLocalAgentErrorRefused
-                        : t.settingsLocalAgentStatusError({ error: agentStatus.error })
-                    }
-                  >
-                    {'● '}
-                    {/ERR_CONNECTION_REFUSED|ECONNREFUSED|CONNECTION_REFUSED/i.test(
-                      agentStatus.error,
-                    )
-                      ? t.settingsLocalAgentErrorRefused
-                      : t.settingsLocalAgentStatusError({ error: agentStatus.error })}
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Per-connection window assignment: each connected agent can be
-                bound to one window, so several agents drive SEPARATE windows
-                concurrently. Usable independently in every window's panel;
-                assignments are global settings synced via storage events. */}
-            {(agentStatus?.agents ?? []).length >= 1 && (
-              <AgentBindingsCard
-                t={t}
-                agents={agentStatus!.agents}
-                windows={pluginWindows}
-                bindings={settings.localAgentBindings ?? {}}
-                myWindowId={myWindowId}
-                onAssign={(agentId, agentName, windowId) =>
-                  void mutate({ type: 'agent.bindings.set', agentId, agentName, windowId })
-                }
-              />
-            )}
-
-            {/* Connection editing moved into the dialog (button below); this
-                card stays a status surface: enable switch, live state, and —
-                for a multi-agent setup — per-window connection assignment. */}
-            <div className="actions">
-              <button
-                onClick={() => {
-                  setAgentNotice(null)
-                  setOpenDialog('agent')
-                }}
-                type="button"
-              >
-                {t.settingsLocalAgentConfigure}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <TeamSharingCard />
       <UpdateSettingsCard />
 
       {openDialog === 'agent' && (

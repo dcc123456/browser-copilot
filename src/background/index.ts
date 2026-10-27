@@ -1,5 +1,5 @@
 import { effectiveLocale, messagesFor } from '../lib/i18n'
-import type { Messages } from '../lib/i18n'
+import type { LocaleSetting, Messages } from '../lib/i18n'
 /**
  * Service worker entry point.
  *
@@ -46,6 +46,7 @@ import {
   type Command,
   type CommandResponse,
   type CommandResult,
+  type ElementPickerControl,
   type WindowPickRequest,
   notifyAgentsChanged,
   notifySkillsChanged,
@@ -938,7 +939,7 @@ async function broadcastFloating(
           try {
             await chrome.scripting.executeScript({
               target: { tabId },
-              files: [floatingButtonScriptFile()],
+              files: [contentScriptFile('floating-button')],
             })
           } catch {
             /* page cannot host content scripts */
@@ -949,15 +950,57 @@ async function broadcastFloating(
 }
 
 /**
- * The built (content-hashed) floating-button script file, resolved from the
+ * Pushes the element-picker toggle to every open tab. The copy locale rides
+ * along so the launcher's tooltip matches the panel language.
+ *
+ * Tabs without the launcher content script reject the send. When the toggle
+ * just turned ON, inject the file so its boot-time `elementPicker.status`
+ * query mounts the button (the floating button's fallback, reused). Turning OFF
+ * needs no injection: a page without the script has nothing to remove.
+ */
+async function broadcastElementPicker(enabled: boolean, locale: 'en' | 'zh'): Promise<void> {
+  const tabs = await chrome.tabs.query({}).catch(() => [])
+  await Promise.all(
+    tabs
+      .filter((tab) => typeof tab.id === 'number')
+      .map(async (tab) => {
+        const tabId = tab.id as number
+        try {
+          await chrome.tabs.sendMessage(tabId, {
+            type: 'elementPicker.set',
+            enabled,
+            locale,
+          } satisfies ElementPickerControl)
+        } catch {
+          if (!enabled) return
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId },
+              files: [contentScriptFile('element-picker-launcher')],
+            })
+          } catch {
+            /* page cannot host content scripts */
+          }
+        }
+      }),
+  )
+}
+
+/** Picker copy locale: the panel locale, resolved against the browser. */
+function pickerLocale(setting: LocaleSetting): 'en' | 'zh' {
+  return effectiveLocale(setting, navigator.language) === 'zh-CN' ? 'zh' : 'en'
+}
+
+/**
+ * A built (content-hashed) static content-script file, resolved from the
  * manifest's own declaration so no build-time path is duplicated here.
  */
-function floatingButtonScriptFile(): string {
+function contentScriptFile(fragment: string): string {
   for (const entry of chrome.runtime.getManifest().content_scripts ?? []) {
-    const file = entry.js?.find((name) => name.includes('floating-button'))
+    const file = entry.js?.find((name) => name.includes(fragment))
     if (file) return file
   }
-  throw new Error('floating-button content script is not declared in the manifest')
+  throw new Error(`${fragment} content script is not declared in the manifest`)
 }
 
 // --- Message channel ---------------------------------------------------------
@@ -1123,6 +1166,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     sendResponse({ ok: true })
     return
+  }
+
+  if (message?.type === 'elementPicker.status') {
+    // Content scripts cannot read settings when the user keeps them in a
+    // folder, so the worker answers the toggle state (the floating.status
+    // contract). No click gesture depends on this reply.
+    void getSettings()
+      .then((settings) => {
+        sendResponse({
+          enabled: settings.elementPickerEnabled,
+          locale: pickerLocale(settings.locale),
+        })
+      })
+      .catch(() => sendResponse({ enabled: false, locale: 'en' }))
+    return true
   }
 
   // Storage folder switched/removed from a panel. Every context caches the
@@ -1358,9 +1416,16 @@ async function handleCommand(
       return { type: 'settings', settings: await getSettings() }
 
     case 'settings.set': {
+      const previous = await getSettings()
       const settings = await setSettings(command.patch)
       // The local-agent bridge reads settings: reconcile the connection now.
       void agentClient.sync()
+      if (
+        previous.elementPickerEnabled !== settings.elementPickerEnabled ||
+        previous.locale !== settings.locale
+      ) {
+        void broadcastElementPicker(settings.elementPickerEnabled, pickerLocale(settings.locale))
+      }
       return { type: 'settings', settings }
     }
 

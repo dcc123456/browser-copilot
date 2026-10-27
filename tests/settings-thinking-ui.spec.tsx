@@ -58,6 +58,7 @@ function settingsWith(model: string, baseUrl: string): Settings {
     takeoverModel: { providerId: '', model: '' },
     takeoverOnRun: false,
     autoRepairOnRun: false,
+    elementPickerEnabled: false,
   } as Settings
 }
 

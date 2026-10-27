@@ -187,6 +187,7 @@ describe('normalizeStoredSettings', () => {
         takeoverModel: { providerId: '', model: '' },
         takeoverOnRun: false,
         autoRepairOnRun: false,
+        elementPickerEnabled: false,
       })
     }
   })
@@ -215,6 +216,7 @@ describe('normalizeStoredSettings', () => {
       takeoverModel: { providerId: '', model: '' },
       takeoverOnRun: false,
       autoRepairOnRun: false,
+      elementPickerEnabled: false,
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -265,6 +267,7 @@ describe('normalizeStoredSettings', () => {
       takeoverModel: { providerId: '', model: '' },
       takeoverOnRun: false,
       autoRepairOnRun: false,
+      elementPickerEnabled: false,
     })
   })
 

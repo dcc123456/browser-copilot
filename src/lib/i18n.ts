@@ -1254,6 +1254,9 @@ export interface Messages {
   settingsCheckTab: string
   settingsPageReadable: (params: { title: string }) => string
   settingsPageBlocked: (params: { reason: string }) => string
+  settingsElementPicker: string
+  settingsElementPickerIntro: string
+  settingsElementPickerEnable: string
 
   // Settings · storage location
   settingsStorage: string
@@ -2842,6 +2845,10 @@ const en: Messages = {
   settingsCheckTab: 'Check active tab',
   settingsPageReadable: ({ title }) => `The active tab can be read: ${title}`,
   settingsPageBlocked: ({ reason }) => `The active tab cannot be read. ${reason}`,
+  settingsElementPicker: 'Element picker',
+  settingsElementPickerIntro:
+    "Show a crosshair button on web pages. Click it, pick an element, and that element's HTML (children included) is copied to the clipboard so you can paste it into the chat.",
+  settingsElementPickerEnable: 'Show the picker button on pages',
 
   settingsStorage: 'Storage location',
   settingsStorageIntro:
@@ -4396,6 +4403,10 @@ const zhCN: Messages = {
   settingsCheckTab: '检测当前标签页',
   settingsPageReadable: ({ title }) => `当前标签页可以读取：${title}`,
   settingsPageBlocked: ({ reason }) => `当前标签页无法读取。${reason}`,
+  settingsElementPicker: '元素选择器',
+  settingsElementPickerIntro:
+    '在网页上显示一个十字准星按钮。点击后在页面中选择元素，该元素及其子元素的 HTML 会复制到剪贴板，粘贴到对话里即可。',
+  settingsElementPickerEnable: '在网页上显示元素选择按钮',
 
   settingsStorage: '存储位置',
   settingsStorageIntro:

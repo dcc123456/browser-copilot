@@ -35,7 +35,7 @@
 
 export interface PickerArgs {
   pickerId: string
-  mode: 'select' | 'verify'
+  mode: 'select' | 'verify' | 'html'
   /**
    * `text` captures the aimed element's visible text instead of a selector:
    * the workflow engine resolves it through the kernel's text strategy.
@@ -168,6 +168,25 @@ export const startPicker: PickerStart = async (args) => {
     verifyEsc: locale === 'zh' ? '按 Esc 关闭' : 'Press Esc to close',
     textOption: locale === 'zh' ? '文本' : 'Text',
     noText: locale === 'zh' ? '（无可读文本）' : '(no visible text)',
+    copyHtml: locale === 'zh' ? '复制 HTML' : 'Copy HTML',
+    targetPlaceholder: locale === 'zh' ? '（点击一个元素）' : '(click an element)',
+    htmlHint:
+      locale === 'zh'
+        ? '点击元素锁定，按 Enter 或点“复制 HTML”'
+        : 'Click an element, then press Enter or Copy HTML',
+    htmlLockHint:
+      locale === 'zh'
+        ? '点击页面上的元素以测量 HTML 大小'
+        : 'Click an element on the page to measure its HTML',
+    htmlChars: (size: string): string =>
+      locale === 'zh' ? `HTML · ${size} 个字符` : `HTML · ${size} chars`,
+    htmlLarge: (size: string): string =>
+      locale === 'zh'
+        ? `HTML 较大（${size} 个字符），粘贴后可能超出模型上下文`
+        : `Large HTML (${size} chars) — pasting may exceed the model context`,
+    copied: (size: string, tag: string): string =>
+      locale === 'zh' ? `已复制 <${tag}> 的 ${size} 个字符` : `Copied ${size} chars of <${tag}>`,
+    copyFailed: locale === 'zh' ? '复制失败，请重试' : 'Copy failed — please retry',
   }
 
   // --- selector builder (mirrors build-selector.ts; inlined for injection) ---
@@ -476,6 +495,14 @@ export const startPicker: PickerStart = async (args) => {
   root.appendChild(rootEl)
   document.documentElement.appendChild(host)
 
+  // The picker launcher is another extension control parked on the page. Hide
+  // it while picking so the press interceptor cannot lock onto our own button;
+  // cleanup() restores it. Verify mode never mounts this card, so it leaves the
+  // launcher alone.
+  const launcherHost =
+    mode === 'verify' ? null : document.getElementById('bc-element-picker-launcher')
+  if (launcherHost instanceof HTMLElement) launcherHost.style.display = 'none'
+
   const $ = <T extends HTMLElement = HTMLElement>(sel: string) => root.querySelector(sel) as T
   const findBySel = $<HTMLSelectElement>('[data-role="findby"]')
   const selectorEl = $('[data-role="selector"]')
@@ -485,7 +512,21 @@ export const startPicker: PickerStart = async (args) => {
   const hintEl = $('[data-role="hint"]')
   const noteEl = $('[data-role="note"]')
   const confirmBtn = $<HTMLButtonElement>('[data-act="confirm"]')
+  const verifyBtn = $<HTMLButtonElement>('[data-act="verify"]')
+  const settingsEl = card.querySelector('.pick-settings') as HTMLElement | null
   findBySel.value = findBy
+
+  // html mode drops everything that builds a selector: only the target, its
+  // subtree size and the copy action remain.
+  if (mode === 'html') {
+    findBySel.style.display = 'none'
+    verifyBtn.style.display = 'none'
+    if (settingsEl) settingsEl.style.display = 'none'
+    selectorEl.textContent = STRINGS.targetPlaceholder
+    confirmBtn.textContent = STRINGS.copyHtml
+    hintEl.textContent = STRINGS.htmlHint
+    countEl.textContent = STRINGS.htmlLockHint
+  }
 
   let locked: Element | null = null
   let hovered: Element | null = null
@@ -524,7 +565,52 @@ export const startPicker: PickerStart = async (args) => {
     if (!matchGroup) return
     matchLabelEl.textContent = STRINGS.matchNav(matchGroup.index + 1, matchGroup.members.length)
   }
+
+  /** Serializing a large subtree is expensive; warn above this size. */
+  const HTML_WARN_CHARS = 100_000
+
+  /** Compact `<tag#id.class>` label for the html-mode card. */
+  const describeTarget = (el: Element): string => {
+    const tag = el.tagName.toLowerCase()
+    const id = el.id ? `#${el.id}` : ''
+    const cls = el.classList.length ? `.${Array.from(el.classList).slice(0, 2).join('.')}` : ''
+    return `<${tag}${id}${cls}>`
+  }
+
+  /** html mode: the target and its subtree size, no selector machinery. */
+  function refreshHtml() {
+    const el = target()
+    if (!el) {
+      selectorEl.textContent = STRINGS.targetPlaceholder
+      countEl.textContent = ''
+      confirmBtn.disabled = true
+      matchNavEl.style.display = 'none'
+      highlightEl(null)
+      updateHint()
+      return
+    }
+    selectorEl.textContent = describeTarget(el)
+    // Only the locked target is measured: outerHTML on every mousemove would
+    // re-serialize huge containers dozens of times per second.
+    if (locked) {
+      const size = locked.outerHTML.length
+      const isLarge = size > HTML_WARN_CHARS
+      countEl.textContent = isLarge
+        ? STRINGS.htmlLarge(size.toLocaleString())
+        : STRINGS.htmlChars(size.toLocaleString())
+      countEl.style.color = isLarge ? '#dc2626' : '#6b7280'
+    } else {
+      countEl.textContent = STRINGS.htmlLockHint
+      countEl.style.color = '#6b7280'
+    }
+    confirmBtn.disabled = false
+    matchNavEl.style.display = 'none'
+    highlightEl(el)
+    updateHint()
+  }
+
   function refresh() {
+    if (mode === 'html') return refreshHtml()
     const el = target()
     if (!el) return
     const dialect = findBySel.value
@@ -724,11 +810,73 @@ export const startPicker: PickerStart = async (args) => {
     // A click with no press at all (a synthetic `el.click()`) still picks.
     if (!pressed) lockTo(e)
   }
+  /**
+   * Mirrors src/lib/clipboard.ts. This function is serialized into the page, so
+   * it cannot import the shared helper; execCommand runs inside the click
+   * gesture and needs no clipboardWrite permission.
+   */
+  function copyPlainText(value: string): boolean {
+    const field = document.createElement('textarea')
+    field.value = value
+    field.setAttribute('readonly', '')
+    field.style.position = 'fixed'
+    field.style.top = '0'
+    field.style.opacity = '0'
+    ;(document.body ?? document.documentElement).appendChild(field)
+    field.select()
+    try {
+      return document.execCommand('copy')
+    } catch {
+      return false
+    } finally {
+      field.remove()
+    }
+  }
+
+  /** Brief confirmation after the card (and overlay) are gone. */
+  function showCopiedToast(text: string): void {
+    document.getElementById('bc-element-picker-toast')?.remove()
+    const toastHost = document.createElement('div')
+    toastHost.id = 'bc-element-picker-toast'
+    toastHost.style.all = 'initial'
+    const toastRoot = toastHost.attachShadow({ mode: 'open' })
+    toastRoot.innerHTML = `
+      <style>
+        :host { all: initial; }
+        .toast { position: fixed; left: 50%; top: 16px; transform: translateX(-50%);
+          display: flex; align-items: center; gap: 8px; background: #111827; color: #fff;
+          font: 13px -apple-system, "Segoe UI", Roboto, sans-serif; padding: 10px 14px;
+          border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+          pointer-events: none; z-index: 2147483648; max-width: 70vw; }
+        .check { color: #a7f3d0; display: inline-flex; flex: none; }
+      </style>
+      <div class="toast"><span class="check">${ICON.check}</span><span data-role="toast-text"></span></div>`
+    const label = toastRoot.querySelector('[data-role="toast-text"]')
+    if (label) label.textContent = text
+    document.documentElement.appendChild(toastHost)
+    setTimeout(() => toastHost.remove(), 1800)
+  }
+
   /** The one commit path: shared by the card button and the Enter key. */
   function confirmPick() {
     // The button's disabled state is the single authority on what is pickable
     // (an empty selector, or one matching nothing, must not be committed).
     if (confirmBtn.disabled) return
+    if (mode === 'html') {
+      const el = target()
+      if (!el) return
+      const html = el.outerHTML
+      if (!copyPlainText(html)) {
+        noteEl.style.display = 'block'
+        noteEl.style.color = '#dc2626'
+        noteEl.textContent = STRINGS.copyFailed
+        return
+      }
+      const tag = el.tagName.toLowerCase()
+      cleanup()
+      showCopiedToast(STRINGS.copied(html.length.toLocaleString(), tag))
+      return
+    }
     void chrome.runtime.sendMessage({
       type: 'picker:result',
       pickerId,
@@ -738,10 +886,16 @@ export const startPicker: PickerStart = async (args) => {
     })
     cleanup()
   }
+  /** html mode is a local copy action: closing it must not message an editor. */
+  function cancelPick() {
+    cleanup()
+    if (mode !== 'html') {
+      void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId })
+    }
+  }
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
-      cleanup()
-      void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId })
+      cancelPick()
       return
     }
     // Enter commits without ever pressing the page — the click-free path for a
@@ -757,8 +911,7 @@ export const startPicker: PickerStart = async (args) => {
     if (!btn) return
     const act = btn.dataset.act
     if (act === 'cancel') {
-      cleanup()
-      void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId })
+      cancelPick()
       return
     }
     if (act === 'confirm') {
@@ -842,6 +995,9 @@ export const startPicker: PickerStart = async (args) => {
     window.removeEventListener('click', onClick, true)
     window.removeEventListener('keydown', onKey, true)
     host.remove()
+    if (launcherHost instanceof HTMLElement && launcherHost.isConnected) {
+      launcherHost.style.display = ''
+    }
   }
   // Hover stays on document (mousemove must reach the page to highlight, and a
   // hover cannot close a click-outside popover); only the press is intercepted,

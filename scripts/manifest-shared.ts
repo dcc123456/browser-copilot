@@ -51,6 +51,12 @@ export const CONTENT_SCRIPT_SOURCES = [
     all_frames: false,
     run_at: 'document_idle',
   },
+  {
+    root: 'element-picker-launcher',
+    source: 'src/inpage/element-picker-launcher.ts',
+    all_frames: false,
+    run_at: 'document_idle',
+  },
 ]
 
 export const CONTENT_SCRIPT_MATCHES = ['http://*/*', 'https://*/*']

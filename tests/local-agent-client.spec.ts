@@ -140,6 +140,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     takeoverModel: { providerId: '', model: '' },
     takeoverOnRun: false,
     autoRepairOnRun: false,
+    elementPickerEnabled: false,
     localAgentEnabled: true,
     localAgentToken: '',
     localAgentUrl: 'ws://127.0.0.1:8765',

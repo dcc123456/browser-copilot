@@ -119,6 +119,7 @@ export const DEFAULT_SETTINGS: Settings = {
   takeoverModel: { providerId: '', model: '' },
   takeoverOnRun: false,
   autoRepairOnRun: false,
+  elementPickerEnabled: false,
 }
 
 /**
@@ -270,6 +271,8 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     takeoverModel,
     takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
     autoRepairOnRun: typeof value.autoRepairOnRun === 'boolean' ? value.autoRepairOnRun : false,
+    elementPickerEnabled:
+      typeof value.elementPickerEnabled === 'boolean' ? value.elementPickerEnabled : false,
   }
 }
 

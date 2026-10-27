@@ -1179,6 +1179,24 @@ export interface FloatingStatusResponse {
   pos?: FloatingButtonPos
 }
 
+// --- On-page element picker launcher -----------------------------------------
+
+/** Messages from the launcher content script to the service worker. */
+export type ElementPickerLauncherMessage = { type: 'elementPicker.status' }
+
+/** Worker → launcher content script: current toggle state and copy locale. */
+export type ElementPickerControl = {
+  type: 'elementPicker.set'
+  enabled: boolean
+  locale: 'en' | 'zh'
+}
+
+/** Reply to `elementPicker.status`. */
+export interface ElementPickerStatusResponse {
+  enabled: boolean
+  locale: 'en' | 'zh'
+}
+
 // --- Multi-window picker (unattended window policy = "ask") --------------------
 
 /** One selectable browser window in the multi-window picker. */

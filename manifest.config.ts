@@ -37,11 +37,12 @@ type ManifestParam = Parameters<typeof defineManifest>[0]
  *   implement the debugger API; those features degrade on Firefox (see
  *   specs/2026-10-15-firefox-support-design.md).
  *
- * One static content script IS declared (see `content_scripts` below): it only
- * parks the in-page kernel on each frame and is inert until an op arrives, so
- * the extension still reads and acts on a page only when the user asks it to.
- * (The scheduler and Feishu bot run entirely in the background and inject
- * nothing into pages unless a task explicitly does.)
+ * Static content scripts (see `content_scripts` below) are inert until the user
+ * acts: the in-page kernel waits for an op, the floating button renders only
+ * when the panel is minimized, and the element-picker launcher renders only
+ * while its setting is on. The extension never reads or acts on a page unless
+ * the user asks it to. (The scheduler and Feishu bot run entirely in the
+ * background and inject nothing into pages unless a task explicitly does.)
  *
  * `icons` and `action.default_icon` are both required. Without them Chrome shows
  * a generic placeholder, which makes a pinned toolbar button impossible to tell

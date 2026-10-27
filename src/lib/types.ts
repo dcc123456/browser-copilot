@@ -246,6 +246,12 @@ export interface Settings {
    * 开启此项让修复自动开始（修复过程中仍可取消）。
    */
   autoRepairOnRun: boolean
+  /**
+   * When on, every http(s) page shows a crosshair button that opens the element
+   * picker; picking an element copies its outerHTML (descendants included) to
+   * the clipboard so the user can paste it into the chat. Default off.
+   */
+  elementPickerEnabled: boolean
 }
 
 /** 无人值守运行的窗口选择策略（见 {@link Settings.unattendedWindowPolicy}）。 */

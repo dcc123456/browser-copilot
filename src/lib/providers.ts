@@ -411,6 +411,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   takeoverModel: { providerId: string; model: string }
   takeoverOnRun: boolean
   autoRepairOnRun: boolean
+  elementPickerEnabled: boolean
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -508,5 +509,7 @@ export function normalizeSettingsPayload(raw: unknown): {
     takeoverModel,
     takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
     autoRepairOnRun: typeof value.autoRepairOnRun === 'boolean' ? value.autoRepairOnRun : false,
+    elementPickerEnabled:
+      typeof value.elementPickerEnabled === 'boolean' ? value.elementPickerEnabled : false,
   }
 }

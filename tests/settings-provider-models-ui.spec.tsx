@@ -58,6 +58,7 @@ function settingsWith(provider: Partial<ProviderProfile>): Settings {
     takeoverModel: { providerId: '', model: '' },
     takeoverOnRun: false,
     autoRepairOnRun: false,
+    elementPickerEnabled: false,
   } as Settings
 }
 

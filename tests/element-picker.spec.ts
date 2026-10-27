@@ -111,6 +111,7 @@ afterEach(() => {
     entry.target.removeEventListener(entry.type, entry.fn, entry.capture)
   }
   document.getElementById('bc-element-picker')?.remove()
+  document.getElementById('bc-element-picker-toast')?.remove()
   document.body.innerHTML = ''
 })
 
@@ -490,5 +491,132 @@ describe('element picker: verify outlines the matches', () => {
     await vi.advanceTimersByTimeAsync(HOLD_MS)
 
     expect(results()[0]!.count).toBe(1)
+  })
+})
+
+describe('element picker: html mode copies the subtree', () => {
+  const mountHtml = (args: Partial<PickerArgs> = {}) =>
+    startPicker({ pickerId: 'h1', mode: 'html', ...args })
+  const countText = () => field('[data-role="count"]').textContent
+  const note = () => field('[data-role="note"]')
+  let copied = ''
+  let execCommand: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    copied = ''
+    execCommand = vi.fn(() => {
+      // Read inside the call: the helper removes its textarea before returning.
+      copied = (document.querySelector('textarea') as HTMLTextAreaElement | null)?.value ?? ''
+      return true
+    })
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      writable: true,
+      value: execCommand,
+    })
+  })
+
+  afterEach(() => {
+    document.getElementById('bc-element-picker-toast')?.remove()
+    Reflect.deleteProperty(document, 'execCommand')
+  })
+
+  it('copies the locked element outerHTML, descendants included, and sends nothing', async () => {
+    await mountHtml()
+    const shop = document.getElementById('shop')!
+
+    clickGesture(shop)
+    dispatchMouse(confirmBtn(), 'click')
+
+    expect(copied).toBe(shop.outerHTML)
+    expect(copied).toContain('<button id="buy"')
+    expect(sent).toEqual([])
+    expect(document.getElementById('bc-element-picker')).toBeNull()
+    const toast = document.getElementById('bc-element-picker-toast')
+    expect(toast?.shadowRoot?.textContent).toContain('Copied')
+    expect(toast?.shadowRoot?.textContent).toContain('chars')
+  })
+
+  it('retargets the copied subtree with the parent pill', async () => {
+    await mountHtml()
+
+    clickGesture(document.getElementById('buy')!)
+    dispatchMouse(field('[data-act="parent"]'), 'click')
+    expect(selectorText()).toBe('<div#shop>')
+    dispatchMouse(confirmBtn(), 'click')
+
+    expect(copied).toBe(document.getElementById('shop')!.outerHTML)
+  })
+
+  it('measures the HTML size only after the element is locked', async () => {
+    await mountHtml()
+
+    dispatchMouse(document.getElementById('shop')!, 'mousemove')
+    expect(countText()).toContain('Click an element')
+
+    clickGesture(document.getElementById('shop')!)
+    expect(countText()).toContain('chars')
+  })
+
+  it('warns about huge HTML but still copies it', async () => {
+    document.body.innerHTML = '<div id="huge"></div>'
+    document.getElementById('huge')!.textContent = 'x'.repeat(120_000)
+    await mountHtml()
+
+    clickGesture(document.getElementById('huge')!)
+    expect(countText()).toContain('Large HTML')
+    expect(field('[data-role="count"]').style.color).toBe('rgb(220, 38, 38)')
+
+    dispatchMouse(confirmBtn(), 'click')
+
+    expect(copied.length).toBeGreaterThan(120_000)
+  })
+
+  it('keeps the card open with an error when the browser refuses the copy', async () => {
+    execCommand.mockReturnValueOnce(false)
+    await mountHtml()
+
+    clickGesture(document.getElementById('shop')!)
+    dispatchMouse(confirmBtn(), 'click')
+
+    expect(document.getElementById('bc-element-picker')).not.toBeNull()
+    expect(document.getElementById('bc-element-picker-toast')).toBeNull()
+    expect(note().style.display).toBe('block')
+    expect(note().textContent).toContain('Copy failed')
+  })
+
+  it('closes without messaging an editor', async () => {
+    await mountHtml()
+
+    dispatchKey('Escape')
+
+    expect(sent).toEqual([])
+    expect(document.getElementById('bc-element-picker')).toBeNull()
+  })
+
+  it('hides the page launcher while picking and restores it afterwards', async () => {
+    const launcher = document.createElement('div')
+    launcher.id = 'bc-element-picker-launcher'
+    document.documentElement.appendChild(launcher)
+
+    await mountHtml()
+    expect(launcher.style.display).toBe('none')
+
+    dispatchKey('Escape')
+    expect(launcher.style.display).toBe('')
+
+    launcher.remove()
+  })
+
+  it('localizes the copy action', async () => {
+    await mountHtml({ locale: 'zh' })
+
+    expect(confirmBtn().textContent).toBe('复制 HTML')
+
+    clickGesture(document.getElementById('shop')!)
+    dispatchMouse(confirmBtn(), 'click')
+
+    const toast = document.getElementById('bc-element-picker-toast')
+    expect(toast?.shadowRoot?.textContent).toContain('已复制')
   })
 })
