@@ -182,11 +182,17 @@ void chrome.runtime
   })
   .catch(() => {})
 
-chrome.runtime.onMessage.addListener((message: unknown) => {
-  const msg = message as Partial<ElementPickerControl> | undefined
-  if (msg?.type !== 'elementPicker.set') return
-  locale = msg.locale === 'zh' ? 'zh' : 'en'
-  copyFormat = copyFormatOf(msg.format)
-  if (msg.enabled) mount()
-  else unmount()
-})
+chrome.runtime.onMessage.addListener(
+  (message: unknown, _sender, sendResponse: (response?: unknown) => void) => {
+    const msg = message as Partial<ElementPickerControl> | undefined
+    if (msg?.type !== 'elementPicker.set') return
+    locale = msg.locale === 'zh' ? 'zh' : 'en'
+    copyFormat = copyFormatOf(msg.format)
+    if (msg.enabled) mount()
+    else unmount()
+    // Receipt for the worker's injection fallback: the floating button's
+    // listener would otherwise make `sendMessage` look delivered in a tab
+    // where this script was never injected.
+    sendResponse({ ok: true })
+  },
+)

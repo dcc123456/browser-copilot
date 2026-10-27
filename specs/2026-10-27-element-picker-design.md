@@ -44,6 +44,9 @@
 1. 设置开关写入 `settings.elementPickerEnabled`、复制格式写入 `settings.elementPickerFormat`；
    后台在 `settings.set` 后向所有标签页广播 `elementPicker.set { enabled, locale, format }`；
    对没有内容脚本的旧标签页，开启时补注入 launcher 文件。
+   两个内容脚本都对自己的控制消息回 `{ ok: true }` 回执：同一扩展的每个内容脚本都会收到所有标签页消息，
+   「sendMessage 成功」只证明“有某个监听者”，不能证明目标脚本存在——旧判定因此漏注入悬浮按钮
+   （只剩准星）。现在回执缺失才补注入，方向双向生效。
 2. launcher 启动时询问 `elementPicker.status`，按 `{ enabled, locale, format }` 决定是否挂载；
    点击按钮 → `startPicker({ mode: 'copy', copyFormat: format, locale })`。
 3. copy 模式卡片只保留父/子与复制按钮（按钮文案随格式变化）：悬停显示标签，锁定后显示标签/选择器
@@ -53,7 +56,7 @@
 
 ## 4. 已知边界
 
-- 扩展重载前就打开的标签页，要等下一次切换开关才会出现按钮（与最小化悬浮按钮一致，不做自愈轮询）。
+- 扩展重载前就打开的标签页，要等下一次切换开关（launcher）或最小化（悬浮按钮）才补注入，不做自愈轮询。
 - 跨域 iframe、`chrome://` 等不可注入页面没有按钮。
 - 所选元素位于开放 Shadow Root 内时，复制的是该元素自身的 HTML，不含宿主边界。
 - 超大元素复制可能被浏览器拒绝，此时卡片显示失败提示，不假装成功。

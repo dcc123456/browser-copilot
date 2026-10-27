@@ -259,8 +259,18 @@ void chrome.runtime
   })
   .catch(() => {})
 
-chrome.runtime.onMessage.addListener((message: unknown) => {
-  const msg = message as { type?: string; pos?: ButtonPos } | undefined
-  if (msg?.type === 'floating.show') mount(msg.pos)
-  else if (msg?.type === 'floating.hide') unmount()
-})
+chrome.runtime.onMessage.addListener(
+  (message: unknown, _sender, sendResponse: (response?: unknown) => void) => {
+    const msg = message as { type?: string; pos?: ButtonPos } | undefined
+    if (msg?.type === 'floating.show') mount(msg.pos)
+    else if (msg?.type === 'floating.hide') unmount()
+    else return
+    // Every content script of this extension hears each tab message, so a
+    // resolved send only proves SOME listener exists. The worker reinjects
+    // this script on a missing receipt; answering marks this as the receiver.
+    sendResponse({ ok: true })
+  },
+)
+
+// Import-free by design, but a module so tests can import its listeners.
+export {}

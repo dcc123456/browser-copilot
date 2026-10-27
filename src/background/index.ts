@@ -89,6 +89,7 @@ import {
   whenRestoreSettled,
 } from './panel-minimize'
 import { releaseWindowAutomationState, warmupOcr } from './driver'
+import { deliverToContentScript } from './content-script-delivery'
 import { handlePickerMessage } from './picker-bridge'
 import {
   startRecording,
@@ -926,26 +927,17 @@ async function broadcastFloating(
       .filter((tab) => typeof tab.id === 'number')
       .map(async (tab) => {
         const tabId = tab.id as number
-        try {
-          await chrome.tabs.sendMessage(tabId, { type, ...(pos ? { pos } : {}) })
-        } catch {
-          if (type !== 'floating.show') return
-          // No receiver: the tab was open before the extension (re)loaded, so
-          // the manifest-declared content script was never injected there and
-          // the broadcast silently no-ops — leaving the minimized plugin
-          // invisible on that page. Inject the script on demand: it queries
-          // `floating.status` on boot and mounts by itself. A rejection here
-          // (chrome:// pages, discarded tabs, no host access) just means the
-          // toolbar icon remains the expand fallback for that page.
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId },
-              files: [contentScriptFile('floating-button')],
-            })
-          } catch {
-            /* page cannot host content scripts */
-          }
-        }
+        // A resolved send only proves SOME extension listener is in the tab:
+        // the picker launcher (or any other content script) answers for
+        // messages it ignores. Requiring this script's own receipt is what
+        // tells "delivered" from "never injected".
+        await deliverToContentScript(
+          tabId,
+          { type, ...(pos ? { pos } : {}) },
+          // `floating.hide` needs no injection: a page without the script
+          // has nothing to remove.
+          type === 'floating.show' ? contentScriptFile('floating-button') : undefined,
+        )
       }),
   )
 }
@@ -970,24 +962,20 @@ async function broadcastElementPicker(
       .filter((tab) => typeof tab.id === 'number')
       .map(async (tab) => {
         const tabId = tab.id as number
-        try {
-          await chrome.tabs.sendMessage(tabId, {
+        // Same receipt rule as the floating button: another content script's
+        // listener makes the send resolve even when the launcher is absent.
+        // Turning OFF needs no injection: a page without the script has
+        // nothing to remove.
+        await deliverToContentScript(
+          tabId,
+          {
             type: 'elementPicker.set',
             enabled,
             locale,
             format,
-          } satisfies ElementPickerControl)
-        } catch {
-          if (!enabled) return
-          try {
-            await chrome.scripting.executeScript({
-              target: { tabId },
-              files: [contentScriptFile('element-picker-launcher')],
-            })
-          } catch {
-            /* page cannot host content scripts */
-          }
-        }
+          } satisfies ElementPickerControl,
+          enabled ? contentScriptFile('element-picker-launcher') : undefined,
+        )
       }),
   )
 }
