@@ -20,11 +20,11 @@
 
 按实际存在的 1–83 区间（**82 轮，round 1 缺失**）复算的基线：
 
-| 指标 | 值 |
-| --- | --- |
-| `verdict.pass` | 9/82 (11.0%) |
-| `goalCertified`（L3） | 3/82 (3.7%) |
-| `verified && proven` | 19/82 (23.2%) |
+| 指标                    | 值            |
+| ----------------------- | ------------- |
+| `verdict.pass`          | 9/82 (11.0%)  |
+| `goalCertified`（L3）   | 3/82 (3.7%)   |
+| `verified && proven`    | 19/82 (23.2%) |
 | generation coverage gap | 40/82 (48.8%) |
 
 stage 分布：verify 28 · goal 15 · generate 14 · cutoff 11 · ok 9 · harness 5。
@@ -52,15 +52,15 @@ stage 分布：verify 28 · goal 15 · generate 14 · cutoff 11 · ok 9 · harne
 
 ## 3. 现状取证 · Current state
 
-| 事实 | 锚点 |
-| --- | --- |
+| 事实                                      | 锚点                                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | 面板聊天与 bridge 共用同一个 compose 落点 | `src/background/agent.ts:4256` → `composeWorkflowFromDraft`；`workflow-generation-bridge.ts:318` 同函数 |
-| compose 已算静态校验、试跑、目标判定 | `operator-tool-handler.ts:805-890`；`workflow.settings.goalVerification` 在 :890 |
-| replay/verify 已算 trial + L1/L2/L3 | `workflow-generation-bridge.ts:612-700` |
-| 历史轮次带 trialRun / nodes / buildStamp | 77/111 有 trialRun；72/111 有 nodes；111/111 有 buildStamp |
-| bridge-only 工具不进 round-1 预算 | `tests/agent-payload-size.spec.ts:58-72` |
-| 失败分类已有 16 类与两套旧词表适配器 | `src/lib/workflow/failure-taxonomy.ts` |
-| capped-log 存储先例 | `src/lib/workflow/repair-metrics.ts`、`takeover-stats.ts` |
+| compose 已算静态校验、试跑、目标判定      | `operator-tool-handler.ts:805-890`；`workflow.settings.goalVerification` 在 :890                        |
+| replay/verify 已算 trial + L1/L2/L3       | `workflow-generation-bridge.ts:612-700`                                                                 |
+| 历史轮次带 trialRun / nodes / buildStamp  | 77/111 有 trialRun；72/111 有 nodes；111/111 有 buildStamp                                              |
+| bridge-only 工具不进 round-1 预算         | `tests/agent-payload-size.spec.ts:58-72`                                                                |
+| 失败分类已有 16 类与两套旧词表适配器      | `src/lib/workflow/failure-taxonomy.ts`                                                                  |
+| capped-log 存储先例                       | `src/lib/workflow/repair-metrics.ts`、`takeover-stats.ts`                                               |
 
 ---
 
@@ -71,27 +71,57 @@ stage 分布：verify 28 · goal 15 · generate 14 · cutoff 11 · ok 9 · harne
 `src/lib/workflow/generation-attempt.ts`（chrome-free，纯函数）：
 
 ```ts
-interface GoalFacts { level: 'L1' | 'L2' | 'L3' | 'NONE'; certified: boolean; unmetCount: number }
+interface GoalFacts {
+  level: 'L1' | 'L2' | 'L3' | 'NONE'
+  certified: boolean
+  unmetCount: number
+}
 interface TrialFacts {
-  outcome: string; full: boolean; coveredSteps: number; totalSteps: number
-  failureCode?: string; draftSaved?: boolean; degradedSteps?: number
+  outcome: string
+  full: boolean
+  coveredSteps: number
+  totalSteps: number
+  failureCode?: string
+  draftSaved?: boolean
+  degradedSteps?: number
 }
 interface ComposeFacts {
-  saved: boolean; nodeCount: number; staticOk: boolean; staticCodes: string[]
-  staticErrorCount: number; staticWarningCount: number
-  terminalStepMissing?: boolean; coverageGap?: number
-  blockCounts?: Record<string, number>; trial?: TrialFacts; goal?: GoalFacts
+  saved: boolean
+  nodeCount: number
+  staticOk: boolean
+  staticCodes: string[]
+  staticErrorCount: number
+  staticWarningCount: number
+  terminalStepMissing?: boolean
+  coverageGap?: number
+  blockCounts?: Record<string, number>
+  trial?: TrialFacts
+  goal?: GoalFacts
 }
 interface ReplayFacts {
-  ran: boolean; ok: boolean; verified: boolean; proven?: boolean; outcome: string
-  coveredSteps: number; totalSteps: number; failureCode?: string; goal?: GoalFacts
+  ran: boolean
+  ok: boolean
+  verified: boolean
+  proven?: boolean
+  outcome: string
+  coveredSteps: number
+  totalSteps: number
+  failureCode?: string
+  goal?: GoalFacts
   repair?: { attempted: boolean; status: string; attempts: number; committed: boolean }
 }
 interface GenerationAttemptRecord {
-  at: number; attemptId: string; round?: number; buildStampHash?: string
-  model?: { name?: string; temperature?: number }; origin?: string
-  compose?: ComposeFacts; replay?: ReplayFacts
-  failureKind?: WorkflowFailureKind; pass: boolean; score: number
+  at: number
+  attemptId: string
+  round?: number
+  buildStampHash?: string
+  model?: { name?: string; temperature?: number }
+  origin?: string
+  compose?: ComposeFacts
+  replay?: ReplayFacts
+  failureKind?: WorkflowFailureKind
+  pass: boolean
+  score: number
 }
 ```
 
@@ -101,13 +131,13 @@ interface GenerationAttemptRecord {
 
 ### 4.2 分数
 
-| 项 | 权重 | 条件 |
-| --- | --- | --- |
-| 保存 | 0.10 | `compose.saved` |
-| 静态校验 | 0.15 | `compose.staticOk` |
+| 项       | 权重 | 条件                                                                   |
+| -------- | ---- | ---------------------------------------------------------------------- |
+| 保存     | 0.10 | `compose.saved`                                                        |
+| 静态校验 | 0.15 | `compose.staticOk`                                                     |
 | 试跑进度 | 0.15 | `coveredSteps / totalSteps`（有 replay 用 replay，否则 compose trial） |
-| 回放通过 | 0.20 | `replay.verified`（干净、完整、非 cutoff） |
-| 目标达成 | 0.40 | 仅在 `replay.verified` 时计：L3=1 · L2=0.6 · L1=0.3 · NONE=0 |
+| 回放通过 | 0.20 | `replay.verified`（干净、完整、非 cutoff）                             |
+| 目标达成 | 0.40 | 仅在 `replay.verified` 时计：L3=1 · L2=0.6 · L1=0.3 · NONE=0           |
 
 - `score = round(value * 1000) / 1000`，保证离线复算严格相等。
 - `pass = replay.ok && replay.verified && (goal === undefined || goal.certified)`；
@@ -179,13 +209,13 @@ harness / 配额 / 网络 → `environment` → ok 无标签。
 
 ## 7. 风险
 
-| 风险 | 缓解 |
-| --- | --- |
-| 共享工作树有他人改动 | 隔离 worktree；只 add 明确路径 |
-| 语料泄漏 | 只留结构字段；`assertFixtureSafe` + 全量扫描 |
-| legacy 字段稀疏 | static 用已记录警告而非重跑；跨时代分数不可比 |
-| 过度解读 n=82 | 文档 + Wilson / bootstrap 区间；只作回归与排序 |
-| 权重变化 | 有意让 fixture 回归失败，必须显式重生成 manifest |
+| 风险                 | 缓解                                             |
+| -------------------- | ------------------------------------------------ |
+| 共享工作树有他人改动 | 隔离 worktree；只 add 明确路径                   |
+| 语料泄漏             | 只留结构字段；`assertFixtureSafe` + 全量扫描     |
+| legacy 字段稀疏      | static 用已记录警告而非重跑；跨时代分数不可比    |
+| 过度解读 n=82        | 文档 + Wilson / bootstrap 区间；只作回归与排序   |
+| 权重变化             | 有意让 fixture 回归失败，必须显式重生成 manifest |
 
 ---
 
@@ -194,3 +224,67 @@ harness / 配额 / 网络 → `environment` → ok 无标签。
 - Best-of-N、课程学习、prompt 进化、`policy-tuner` 接线。
 - 面板运行按钮的 auto-repair 运行遥测。
 - UI / i18n / 任何 RL 或微调。
+
+---
+
+## 9. 已提交的基线 · Measured baseline
+
+下表的每个数字都由 committed fixtures 离线复算得到，`tests/generation-eval.spec.ts` 会把它与
+`manifest.json` 的 `golden` 块逐字段比对：任何评分或语料改动都会让 CI 直接变红，而不是悄悄漂移。
+
+```
+generation eval corpus — 82 attempts (rounds 2–83)
+
+pass                9/82      11.0%  Wilson 95% [5.9%, 19.6%]
+goal-certified L3   3/82      3.7%  Wilson 95% [1.3%, 10.2%]
+verified && proven  19/82     23.2%
+coverage gaps       40/82     48.8%
+mean score          0.331     bootstrap 95% [27.7%, 38.6%]
+
+certified tiers               L1 0 · L2 0 · L3 3 · NONE 0
+
+failures by kind:
+  graph               29
+  goal-verification   15
+  intent              14
+  readiness           6
+  environment         4
+  dataflow            2
+  unknown             2
+  side-effect         1
+```
+
+对应的 `manifest.json` golden：
+
+```json
+{
+  "count": 82,
+  "missing": [1],
+  "excluded": { "from": 84, "to": 112, "reason": "429 quota + concurrent src edits" },
+  "golden": {
+    "total": 82,
+    "pass": 9,
+    "passRate": 0.1098,
+    "l3Certified": 3,
+    "verifiedAndProven": 19,
+    "coverageGapRounds": 40,
+    "meanScore": 0.331,
+    "passInterval": { "low": 0.0588, "high": 0.1956 },
+    "l3Interval": { "low": 0.0125, "high": 0.1021 },
+    "meanScoreInterval": { "low": 0.2769, "high": 0.3862 },
+    "byGoalLevel": { "L1": 0, "L2": 0, "L3": 3, "NONE": 0 }
+  }
+}
+```
+
+读法（不要把 `mean score` 当成功率）：
+
+- `pass 11.0%` 的 Wilson 上界只有 19.6%，所以「11% → 20%」这种量级的改善在这个样本量下**无法**
+  与噪声区分；下一刀若声称提升，必须先给出同协议的新轮次。
+- 73 个失败里有 29 个是 `graph`、15 个 `goal-verification`、14 个 `intent`：这三类就是下一刀要瞄准的
+  「可修」表面，其余 15 个（readiness / environment / dataflow / side-effect / unknown）多数不是单次提示词
+  能解决的。
+- `mean score 0.331` 高于 `pass 11%` 是设计使然：序数分给保存、静态校验和试跑进度部分信用，它排序尝试，
+  不预测通过。
+- 跨时代不可比：82 轮全部来自 legacy selftest 协议，部分轮次没有 nodes / replay 明细，
+  新协议的轮次只能与同协议轮次比较。
