@@ -86,8 +86,8 @@ export async function saveWorkflowGroup(group: {
   })
 }
 
-/** Removes a group. The workflows that pointed at it keep their records; the
- *  caller clears their `folderId` so they fall back to the ungrouped section. */
+/** Removes a group record. Membership lives on the workflows themselves, so the
+ *  caller decides their fate — the background deletes the filed workflows. */
 export async function deleteWorkflowGroup(id: string): Promise<void> {
   await withKeyLock(KEY_WORKFLOW_GROUPS, async () => {
     const list = await listWorkflowGroups()

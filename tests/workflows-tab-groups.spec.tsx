@@ -82,6 +82,8 @@ beforeEach(() => {
         }
       case 'workflows.assignGroup':
         return { type: 'workflows.assignGroup' }
+      case 'workflowGroups.delete':
+        return { type: 'workflowGroups.delete' }
       case 'record.status':
         return { type: 'record.status', recording: false }
       default:
@@ -349,5 +351,44 @@ describe('workflow groups', () => {
     )
     expect(assign?.ids).toEqual(['wf-1'])
     expect(assign?.groupId).toBe('g1')
+  })
+
+  it('confirms with the member count before deleting a group and its workflows', async () => {
+    const container = await render()
+    const prompts: string[] = []
+    const confirmSpy = vi.spyOn(window, 'confirm').mockImplementation((message?: string) => {
+      if (message) prompts.push(message)
+      return true
+    })
+    try {
+      const daily = sectionTitled(container, 'Daily')
+      const deleteButton = daily.querySelector(`[aria-label="${t.workflowsGroupDelete}"]`)
+      await click(deleteButton)
+      await flush()
+    } finally {
+      confirmSpy.mockRestore()
+    }
+
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain('Daily')
+    expect(prompts[0]).toContain('1 workflow')
+    expect(seen.find((command) => command.type === 'workflowGroups.delete')).toEqual({
+      type: 'workflowGroups.delete',
+      id: 'g1',
+    })
+  })
+
+  it('keeps the group when the deletion prompt is dismissed', async () => {
+    const container = await render()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    try {
+      const daily = sectionTitled(container, 'Daily')
+      await click(daily.querySelector(`[aria-label="${t.workflowsGroupDelete}"]`))
+      await flush()
+    } finally {
+      confirmSpy.mockRestore()
+    }
+
+    expect(seen.some((command) => command.type === 'workflowGroups.delete')).toBe(false)
   })
 })

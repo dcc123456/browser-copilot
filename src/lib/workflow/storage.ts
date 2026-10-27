@@ -295,10 +295,17 @@ export function carryStoredWorkflowFields(update: Workflow, stored: Workflow): W
 }
 
 export async function deleteWorkflow(id: string): Promise<void> {
+  await deleteWorkflows([id])
+}
+
+/** Removes several workflows in one write; unknown ids are ignored. */
+export async function deleteWorkflows(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
   await withKeyLock(KEY_WORKFLOWS, async () => {
+    const wanted = new Set(ids)
     const list = await listWorkflows()
     await area.set({
-      [KEY_WORKFLOWS]: list.filter((workflow) => workflow.id !== id),
+      [KEY_WORKFLOWS]: list.filter((workflow) => !wanted.has(workflow.id)),
     })
   })
 }

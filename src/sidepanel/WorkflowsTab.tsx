@@ -926,10 +926,10 @@ export default function WorkflowsTab() {
     }
   }
 
-  const removeGroup = async (group: WorkflowGroup): Promise<void> => {
+  const removeGroup = async (group: WorkflowGroup, memberCount: number): Promise<void> => {
     const ok = await confirmDialog({
       title: t.dialogDeleteTitle,
-      message: t.workflowsGroupDeleteConfirm({ name: group.name }),
+      message: t.workflowsGroupDeleteConfirm({ name: group.name, count: memberCount }),
       confirmText: t.delete,
       cancelText: t.cancel,
       danger: true,
@@ -1553,7 +1553,7 @@ export default function WorkflowsTab() {
                       aria-label={t.workflowsGroupDelete}
                       className="flex! h-6! w-6! items-center! justify-center! rounded-md! border! border-border! bg-transparent! p-0! text-muted! hover:bg-hover! hover:text-ink! danger"
                       disabled={busy}
-                      onClick={() => void removeGroup(group)}
+                      onClick={() => void removeGroup(group, section.workflows.length)}
                       title={t.workflowsGroupDelete}
                       type="button"
                     >

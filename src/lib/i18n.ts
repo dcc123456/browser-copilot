@@ -468,8 +468,8 @@ export interface Messages {
   workflowsGroupDelete: string
   /** Drag handle on a group header that reorders groups top-to-bottom. */
   workflowsGroupReorder: string
-  /** Confirm dialog body for deleting a group (its workflows are kept). */
-  workflowsGroupDeleteConfirm: (params: { name: string }) => string
+  /** Confirm dialog body for deleting a group and the workflows filed into it. */
+  workflowsGroupDeleteConfirm: (params: { name: string; count: number }) => string
   /** Success banner after moving workflows into a group. */
   workflowsGroupMoveDone: (params: { count: number }) => string
   /** Placeholder name of a freshly created group. */
@@ -2170,8 +2170,10 @@ const en: Messages = {
   workflowsGroupRename: 'Rename group',
   workflowsGroupDelete: 'Delete group',
   workflowsGroupReorder: 'Drag to reorder groups',
-  workflowsGroupDeleteConfirm: ({ name }) =>
-    `Delete the group "${name}"? Its workflows are kept and move back to the ungrouped list.`,
+  workflowsGroupDeleteConfirm: ({ name, count }) =>
+    count > 0
+      ? `Delete the group "${name}" and its ${count} workflow(s)? This cannot be undone.`
+      : `Delete the group "${name}"? This cannot be undone.`,
   workflowsGroupMoveDone: ({ count }) => `Moved ${count} workflow(s).`,
   workflowsGroupDefaultName: ({ index }) => `Group ${index}`,
   workflowsRunFailedHint: 'Run failed — click to view details in history',
@@ -3773,8 +3775,10 @@ const zhCN: Messages = {
   workflowsGroupRename: '重命名分组',
   workflowsGroupDelete: '删除分组',
   workflowsGroupReorder: '拖动可调整分组顺序',
-  workflowsGroupDeleteConfirm: ({ name }) =>
-    `确定删除分组「${name}」？组内的工作流会保留并回到未分组列表。`,
+  workflowsGroupDeleteConfirm: ({ name, count }) =>
+    count > 0
+      ? `确定删除分组「${name}」及其中的 ${count} 个工作流？此操作不可撤销。`
+      : `确定删除分组「${name}」？此操作不可撤销。`,
   workflowsGroupMoveDone: ({ count }) => `已移动 ${count} 个工作流。`,
   workflowsGroupDefaultName: ({ index }) => `分组 ${index}`,
   workflowsRunFailedHint: '运行失败 — 点击查看历史详情',

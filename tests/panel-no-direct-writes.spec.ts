@@ -22,7 +22,12 @@ const UI_DIRS = ['src/sidepanel', 'src/workflow-editor']
 
 /** module specifier → function names that must never be imported by UI code. */
 const FORBIDDEN_IMPORTS: Record<string, readonly string[]> = {
-  '../lib/workflow/storage': ['saveWorkflow', 'deleteWorkflow', 'duplicateWorkflow'],
+  '../lib/workflow/storage': [
+    'saveWorkflow',
+    'deleteWorkflow',
+    'deleteWorkflows',
+    'duplicateWorkflow',
+  ],
   '../lib/task-store': ['saveTask', 'deleteTask', 'recordTaskRun'],
   '../lib/storage': [
     'setSettings',

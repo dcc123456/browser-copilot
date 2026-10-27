@@ -177,6 +177,7 @@ import {
   saveWorkflow,
   carryStoredWorkflowFields,
   deleteWorkflow,
+  deleteWorkflows,
   duplicateWorkflow,
   setWorkflowGroup,
 } from '../lib/workflow/storage'
@@ -1810,13 +1811,15 @@ async function handleCommand(
       return { type: 'workflowGroups.reorder', groups: await reorderWorkflowGroups(command.ids) }
 
     case 'workflowGroups.delete': {
-      await deleteWorkflowGroup(command.id)
-      // The workflows that pointed at the group keep their records; they only
-      // lose the pointer, so they fall back to the ungrouped section.
-      const orphans = (await listWorkflows())
+      // Deleting a group deletes what was filed into it: the panel's confirm
+      // spells that out, and leaving the workflows behind would resurrect them
+      // in the ungrouped list after the user approved their removal.
+      const members = (await listWorkflows())
         .filter((workflow) => workflow.folderId === command.id)
         .map((workflow) => workflow.id)
-      await setWorkflowGroup(orphans, null)
+      await deleteWorkflows(members)
+      await deleteWorkflowGroup(command.id)
+      if (members.length > 0) await rescheduleAllWorkflowTriggers()
       return { type: 'workflowGroups.delete' }
     }
 

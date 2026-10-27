@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   carryStoredWorkflowFields,
   deleteWorkflow,
+  deleteWorkflows,
   duplicateWorkflow,
   getWorkflow,
   listWorkflows,
@@ -319,6 +320,16 @@ describe('workflow storage', () => {
     const list = await listWorkflows()
     expect(list.map((w) => w.id)).toEqual(['b'])
     expect(await getWorkflow('a')).toBeUndefined()
+  })
+
+  it('removes several workflows in one write and ignores unknown ids', async () => {
+    await saveWorkflow(makeWorkflow({ id: 'a' }))
+    await saveWorkflow(makeWorkflow({ id: 'b' }))
+    await saveWorkflow(makeWorkflow({ id: 'c' }))
+
+    await deleteWorkflows(['a', 'c', 'missing'])
+
+    expect((await listWorkflows()).map((w) => w.id)).toEqual(['b'])
   })
 
   it('serializes concurrent saves so neither is lost', async () => {
