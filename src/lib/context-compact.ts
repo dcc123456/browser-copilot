@@ -5,21 +5,28 @@ import type { WireMessage, WireToolCall } from './llm'
  *
  * Every prior message is re-sent on each model request, so an accumulating
  * transcript eventually approaches the model's context window. When the last
- * reported input-token count reaches 80% of the 256K window, the conversation
+ * reported input-token count reaches 90% of that window, the conversation
  * history is compacted BEFORE the next request: older turns (assistant answers
  * AND their tool exchanges) are replaced by a single LLM-written summary
  * message, while user messages and the most recent turns stay verbatim.
+ *
+ * The window is the one the host knows: the provider's own stated limit once it
+ * has been seen (`compactThresholdFor`), otherwise the assumed 256K below.
  *
  * The summarizer is injected so this module stays free of LLM/network wiring;
  * the agent passes a `streamCompletion`-backed implementation with a mechanical
  * digest as the failure fallback.
  */
 
-/** Assumed model context window (tokens). */
+/** Assumed model context window (tokens) — used until the provider states its own. */
 export const CONTEXT_WINDOW_TOKENS = 256_000
-/** Compaction trigger: a fraction of the window, leaving headroom for the next answer. */
-export const COMPACT_THRESHOLD_RATIO = 0.8
-export const COMPACT_THRESHOLD_TOKENS = CONTEXT_WINDOW_TOKENS * COMPACT_THRESHOLD_RATIO
+/**
+ * Compaction trigger: a fraction of the window, leaving headroom for the next
+ * answer. The estimate this is compared against covers the OUTGOING request
+ * (system prompt + history + tool schemas), never the reply about to be written.
+ */
+export const COMPACT_THRESHOLD_RATIO = 0.9
+export const COMPACT_THRESHOLD_TOKENS = Math.floor(CONTEXT_WINDOW_TOKENS * COMPACT_THRESHOLD_RATIO)
 /** Turns kept verbatim (the current turn plus this many previous ones). */
 export const COMPACT_KEEP_RECENT_TURNS = 2
 
@@ -30,8 +37,21 @@ const SUMMARY_TOTAL_CHARS = 60_000
 /** Fallback digest: first chars kept per removed message when the LLM fails. */
 const DIGEST_PER_MESSAGE_CHARS = 200
 
-export function shouldCompact(lastInputTokens: number): boolean {
-  return lastInputTokens >= COMPACT_THRESHOLD_TOKENS
+/**
+ * Trigger point for a model whose real window is known. Passing no window keeps
+ * the assumed 256K, so every caller that never learned a limit behaves exactly
+ * as before.
+ */
+export function compactThresholdFor(contextWindowTokens?: number): number {
+  const window =
+    typeof contextWindowTokens === 'number' && contextWindowTokens > 1_000
+      ? contextWindowTokens
+      : CONTEXT_WINDOW_TOKENS
+  return Math.floor(window * COMPACT_THRESHOLD_RATIO)
+}
+
+export function shouldCompact(lastInputTokens: number, contextWindowTokens?: number): boolean {
+  return lastInputTokens >= compactThresholdFor(contextWindowTokens)
 }
 
 // --- Token estimation (for requests that never reported usage) ---------------------

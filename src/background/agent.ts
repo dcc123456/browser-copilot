@@ -35,7 +35,7 @@ import {
 } from '../lib/llm'
 import {
   compactHistory,
-  COMPACT_THRESHOLD_TOKENS,
+  compactThresholdFor,
   estimateInputTokens,
   hardCapHistory,
   shouldCompact,
@@ -1748,6 +1748,33 @@ function recordLastInputTokens(conversationId: string, tokens: number): void {
 
 function lastKnownInputTokens(conversationId: string): number {
   return lastInputStore.get(conversationId) ?? 0
+}
+
+/**
+ * Input-token window per conversation, learned from the provider's own
+ * over-length error — the only first-hand fact about a model's real limit that
+ * exists before a request has succeeded. With it the compaction threshold stops
+ * being an assumption: a 128K model compacts at 115,200 tokens instead of never
+ * reaching the assumed 256K and only reacting to a 400.
+ *
+ * In-memory like {@link lastInputStore}: a service-worker restart forgets the
+ * window, the next over-length request takes the existing reactive path and
+ * re-learns it.
+ */
+const contextWindowStore = new Map<string, number>()
+
+function rememberContextWindow(conversationId: string, tokens: number): void {
+  contextWindowStore.delete(conversationId)
+  contextWindowStore.set(conversationId, tokens)
+  while (contextWindowStore.size > LAST_INPUT_STORE_CAP) {
+    const oldest = contextWindowStore.keys().next().value
+    if (oldest === undefined) break
+    contextWindowStore.delete(oldest)
+  }
+}
+
+function knownContextWindow(conversationId: string): number | undefined {
+  return contextWindowStore.get(conversationId)
 }
 
 export interface ToolAdvertiseOptions {
@@ -5112,8 +5139,8 @@ export async function runAgentTurn(
       retireOldPageReads(history, false)
     }
 
-    // Context compaction: when the last request's prompt_tokens reached 80% of
-    // the 256K window, replace older turns with an LLM summary before this
+    // Context compaction: when the last request's prompt_tokens reached 90% of
+    // the model's window, replace older turns with an LLM summary before this
     // request. Runs BEFORE building the request so the compacted history is
     // what goes out. Once per turn (compactedThisTurn), and decided from the
     // conversation-scoped last-input store so a conversation that crossed the
@@ -5121,10 +5148,14 @@ export async function runAgentTurn(
     // here: every round boundary leaves each tool_call paired with its result.
     // Specialist sub-agents are skipped — their transcripts are short-lived
     // and bounded by the delegation budget.
+    // The window is the provider's own stated limit once a 400 has revealed it,
+    // so a 128K model compacts at 115,200 tokens instead of never.
+    const contextWindow = knownContextWindow(deps.conversationId)
+    const compactThreshold = compactThresholdFor(contextWindow)
     if (
       !deps.subAgent &&
       !compactedThisTurn &&
-      shouldCompact(lastKnownInputTokens(deps.conversationId))
+      shouldCompact(lastKnownInputTokens(deps.conversationId), contextWindow)
     ) {
       compactedThisTurn = true
       deps.send({ type: 'status', text: compactionText.status })
@@ -5133,8 +5164,6 @@ export async function runAgentTurn(
         summarize: (transcript) => summarizeTranscript(summarizerConfig, transcript),
       })
     }
-
-    const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
 
     // Recomputed per round: a `load_tools` or `use_operators` call in this turn
     // must change the advertised set from the very next request on.
@@ -5163,14 +5192,14 @@ export async function runAgentTurn(
     // prior request reported prompt_tokens. Here we ESTIMATE the full outgoing
     // request (system prompt + history + serialised tool schemas) and compact
     // before sending, so a conversation whose usage was never reported cannot
-    // hit the provider's input-length 400. Threshold = the same 80% of the
-    // assumed window; the emergency hard cap is the backstop.
+    // hit the provider's input-length 400. Threshold = the same 90% of this
+    // conversation's window; the emergency hard cap is the backstop.
     if (!deps.subAgent) {
       const requestTokens = (): number =>
         estimateInputTokens([{ role: 'system', content: systemPrompt }, ...history], {
           text: JSON.stringify(tools ?? []),
         })
-      if (shouldCompact(requestTokens()) && !compactedThisTurn) {
+      if (requestTokens() >= compactThreshold && !compactedThisTurn) {
         compactedThisTurn = true
         deps.send({ type: 'status', text: compactionText.status })
         await compactHistory(history, {
@@ -5181,10 +5210,15 @@ export async function runAgentTurn(
       // Final backstop regardless of the turn flag: if the estimate still
       // crosses the threshold (compaction returned null or was not enough),
       // truncate message content in place so the request physically fits.
-      if (requestTokens() >= COMPACT_THRESHOLD_TOKENS) {
-        hardCapHistory(history, COMPACT_THRESHOLD_TOKENS - 4_096)
+      if (requestTokens() >= compactThreshold) {
+        hardCapHistory(history, compactThreshold - 4_096)
       }
     }
+
+    // Built from the history the guards above may have just rewritten: compacting
+    // an array that had already been copied into the request would summarize the
+    // transcript and then send it anyway.
+    const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
 
     // "Thinking" covers the request in flight until either text starts streaming
     // or a tool call is announced. The first text delta flips it to "Responding";
@@ -5294,20 +5328,19 @@ export async function runAgentTurn(
       ) {
         lengthErrorRetried = true
         const providerLimit = inputLimitFromError(error.message)!
+        // Remember it: from the next round on, this conversation's 90% is
+        // measured against the window the provider just stated, so the request
+        // that 400s here is the last one that has to.
+        rememberContextWindow(deps.conversationId, providerLimit)
         deps.send({ type: 'status', text: compactionText.status })
-        const outcome = await compactHistory(history, {
+        await compactHistory(history, {
           marker: compactionText.marker,
           keepRecentTurns: 1,
           summarize: (transcript) => summarizeTranscript(summarizerConfig, transcript),
         })
         // Leave headroom (80%) for the system prompt, schemas and the answer.
         const budget = Math.floor(providerLimit * 0.8)
-        if (!outcome) {
-          // Nothing was summary-compactable: truncate content directly.
-          hardCapHistory(history, budget - 4_096)
-        } else {
-          hardCapHistory(history, budget - 4_096)
-        }
+        hardCapHistory(history, budget - 4_096)
         recordLastInputTokens(deps.conversationId, budget)
         continue
       }

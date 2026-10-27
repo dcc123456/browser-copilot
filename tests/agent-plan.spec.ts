@@ -531,7 +531,7 @@ describe('context compaction hook (runAgentTurn)', () => {
     totalTokens: inputTokens + 10,
   })
 
-  it('compacts older turns once the reported prompt_tokens cross 80% of 256K', async () => {
+  it('compacts older turns once the reported prompt_tokens cross 90% of 256K', async () => {
     const conversationId = `conv-${Math.random().toString(36).slice(2)}`
     // Three prior turns so compaction has something to fold.
     const history: { role: string; name?: string; content?: string }[] = [
@@ -541,13 +541,13 @@ describe('context compaction hook (runAgentTurn)', () => {
       { role: 'assistant', content: 'turn B long answer' },
       { role: 'user', content: 'current request' },
     ]
-    // Round 0 reports 210k prompt tokens (>= 80% of 256K) and calls a tool.
+    // Round 0 reports 240k prompt tokens (>= 90% of 256K) and calls a tool.
     // Round 1 then starts with compaction: the summarizer consumes the middle
     // request before the real round-1 request goes out.
     streamMock
       .mockResolvedValueOnce({
         content: '',
-        usage: usage(210_000),
+        usage: usage(240_000),
         toolCalls: [toolCall('c1', 'present_plan', PLAN_ARGS)],
       } as never)
       .mockResolvedValueOnce({ content: 'SUMMARY TEXT', toolCalls: [] } as never)

@@ -41,6 +41,18 @@ forever. A chat request now aborts after 120 seconds of total silence and
 reconnects, the same window the assistant already used — a reply that keeps
 streaming is never cut, however long it runs.
 
+### Changed — Context compaction follows the model's real window
+
+The compaction trigger used to be 80% of an assumed 256K context window, which
+has nothing to do with the model actually configured: a 32K or 128K model never
+reached it, so the conversation kept growing until the provider rejected the
+request. A conversation now remembers the limit its own provider stated in that
+rejection and compacts at 90% of _that_ window from the next turn on, before the
+request can fail again. Fixing this also exposed a second bug: the request was
+assembled before the size check that compacts it, so that one compaction pass
+summarized the transcript and then sent it anyway — the summary now reaches the
+outgoing request.
+
 _To be released._
 
 ## [0.6.12] - 2026-10-26

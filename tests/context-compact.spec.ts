@@ -3,6 +3,7 @@ import {
   COMPACT_KEEP_RECENT_TURNS,
   COMPACT_THRESHOLD_TOKENS,
   compactHistory,
+  compactThresholdFor,
   shouldCompact,
   type CompactOptions,
 } from '../src/lib/context-compact'
@@ -10,8 +11,10 @@ import type { WireMessage, WireToolCall } from '../src/lib/llm'
 
 /**
  * Compaction replaces older turns (assistant answers + tool exchanges) with a
- * single summary message once the context crosses 80% of the 256K window.
- * User messages and the most recent turns must always survive verbatim.
+ * single summary message once the context crosses 90% of the model's window —
+ * the provider's stated window when the host has learned one, otherwise the
+ * assumed 256K. User messages and the most recent turns must always survive
+ * verbatim.
  */
 
 const MARKER = '[上下文已压缩]'
@@ -52,11 +55,27 @@ function seeded(): WireMessage[] {
 }
 
 describe('shouldCompact', () => {
-  it('triggers at 80% of the 256K window and never below', () => {
-    expect(COMPACT_THRESHOLD_TOKENS).toBe(204_800)
+  it('triggers at 90% of the assumed window and never below', () => {
+    expect(COMPACT_THRESHOLD_TOKENS).toBe(230_400)
     expect(shouldCompact(COMPACT_THRESHOLD_TOKENS - 1)).toBe(false)
     expect(shouldCompact(COMPACT_THRESHOLD_TOKENS)).toBe(true)
     expect(shouldCompact(0)).toBe(false)
+  })
+
+  it('triggers at 90% of a window the provider stated', () => {
+    // The point of the parameter: a 128K model never reaches the assumed window,
+    // so without it that conversation only ever compacts after a 400.
+    expect(compactThresholdFor(128_000)).toBe(115_200)
+    expect(shouldCompact(115_200)).toBe(false)
+    expect(shouldCompact(115_200, 128_000)).toBe(true)
+    expect(shouldCompact(115_199, 128_000)).toBe(false)
+  })
+
+  it('ignores an implausible window', () => {
+    // A botched parse must not make every single turn compact.
+    expect(compactThresholdFor(0)).toBe(COMPACT_THRESHOLD_TOKENS)
+    expect(compactThresholdFor(900)).toBe(COMPACT_THRESHOLD_TOKENS)
+    expect(compactThresholdFor(Number.NaN)).toBe(COMPACT_THRESHOLD_TOKENS)
   })
 })
 
