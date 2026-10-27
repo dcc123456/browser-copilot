@@ -8,11 +8,12 @@
  * @module sidepanel/update/UpdateCenter
  */
 
-import { useState, type ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import { Download, RotateCw, X } from 'lucide-react'
 import { useT } from '../i18n'
 import IconButton from './IconButton'
 import UpdateDialog from './UpdateDialog'
+import { cleanUpUpdateBackups } from './cleanup'
 import { useUpdateSnapshot } from './use-update-snapshot'
 
 const BAR =
@@ -22,6 +23,13 @@ export default function UpdateCenter(): ReactElement {
   const t = useT()
   const snapshot = useUpdateSnapshot({ autoCheck: true })
   const [dialogOpen, setDialogOpen] = useState(false)
+
+  // The panel opening on the new version is the proof the reload worked, so
+  // its backups can go. Before that the panel still runs the old build and the
+  // cleanup keeps them.
+  useEffect(() => {
+    void cleanUpUpdateBackups(chrome.runtime.getManifest().version)
+  }, [])
 
   const pending = snapshot.pendingVersion
   const available = snapshot.availableVersion

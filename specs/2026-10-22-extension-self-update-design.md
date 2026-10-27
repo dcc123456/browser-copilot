@@ -150,7 +150,7 @@ interface UpdateState {
 - 解压上限复用通用 ZIP reader：单文件 64 MiB、总计 128 MiB、条目数上限；超过即中止。
 - 覆盖前先备份：在安装目录内创建 `browser-copilot-backup-<旧版本>-<ISO 时间>/`，把本次将被替换的现存文件按原相对路径复制进去；根 `manifest.json` 存为 `manifest.json.bak`，这样备份目录**不能被当作第二个扩展加载**（避免扩展管理里出现重复条目）。备份失败（`backup-failed`）即中止，保证“没有备份就不覆盖”。
 - 写入使用 `createWritable()`（写入 swap 文件，close 时提交）；所有内容文件成功后才写 manifest，失败时旧 manifest 仍指向旧文件。
-- 不删除旧文件；不触碰 `browser-copilot/` 数据目录。备份目录由用户在更新确认可用后手动删除。
+- 不删除旧文件；不触碰 `browser-copilot/` 数据目录。备份目录不在覆盖后立即删除：应用成功时把 `{ folder, version }` 追加到 `chrome.storage.local` 的 `update.backups`；面板每次打开时，若当前运行版本 ≥ 目标版本（即重载已经发生、新版本确实能打开），用保存的安装目录句柄 `removeEntry(folder, { recursive: true })` 删除并清除该条记录。运行版本仍更旧（未重载）或目录权限为 `prompt` 时保留；`NotFoundError`（用户已手动删除）视为完成，其他错误保留下次打开重试。
 - 用户必须点击 Update 并（首次）选择/授权目录；没有任何后台自动写入。
 
 ## 5. UI
@@ -191,7 +191,7 @@ interface UpdateState {
 - Chrome unpacked 专属；Firefox / CWS / 企业安装不覆盖。
 - 浏览器没有“读取自身安装目录”的 API，首次更新必须由用户手动选一次目录；句柄保存后可复用，浏览器重启后可能需要重新授权（点击 Update 时 `requestPermission`）。
 - 安装目录在只读位置（如 `/Applications`）会写入失败。
-- 不清理旧文件；目录会随版本累积带 hash 的旧资源。每次更新的备份目录（`browser-copilot-backup-*`）需要用户确认新版本正常后手动删除。
+- 不清理旧文件；目录会随版本累积带 hash 的旧资源。每次更新的备份目录（`browser-copilot-backup-*`）在新版本重载后首次打开面板时自动删除；删除失败（权限未授予）时保留，后续打开面板重试。
 - **扩展管理出现两个同名插件的排查**：每次 “Load unpacked” 都按目录注册一个扩展。若在扩展管理看到两个同名条目，通常是同时加载了旧目录与新目录（例如 `dist/` 与解压出的另一个文件夹）；打开任一卡片的 “详情 → 来源/已加载自” 对比路径，移除多余的那个即可。更新器只覆盖用户选定的那个目录，不会注册新扩展；备份目录里的根 manifest 已改名为 `manifest.json.bak`，本身也不会被 Chrome 当作扩展加载。
 - 不解决供应链信任：GitHub 账号/Release 被攻破时，SHA-256 也只能证明“下载与 GitHub 发布的一致”。这是与手动下载 ZIP 相同的信任边界。
 - 若未来上架 CWS，必须删除此路径；CWS 的静默更新才是普通用户的正确方案。

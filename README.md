@@ -156,8 +156,11 @@ creates a second, empty extension.
    as a second extension), then writes the new build. Chrome keeps running the
    old version until you choose **Reload now**; **Later** leaves the files in
    place and the banner reminds you.
-4. Delete the backup folder once the new version works. The updater keeps your
-   variant (ocr or no-ocr) and never touches stored data.
+4. The backup is deleted automatically the next time the panel opens on the new
+   version — that open is the proof the reload worked. (Deleting needs the
+   folder permission granted in that browser session; otherwise it stays and is
+   retried on a later open.) You can still delete the folder by hand sooner. The
+   updater keeps your variant (ocr or no-ocr) and never touches stored data.
 
 **From 0.6.7 or earlier — one manual swap, then automatic:** builds before
 0.6.8 have no updater, so replace the files in place once:

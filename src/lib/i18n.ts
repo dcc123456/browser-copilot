@@ -3251,7 +3251,7 @@ Keep the whole report dense and within the message size cap.`,
   updateDoneBody: ({ version }) =>
     `Version ${version} is on disk. Reload the extension to start using it.`,
   updateBackupNote: ({ folder }) =>
-    `The replaced files were backed up to "${folder}" inside the install folder. You can delete it once the update works.`,
+    `The replaced files were backed up to "${folder}" inside the install folder. The backup is deleted automatically the next time the panel opens on the new version.`,
   updateManualHint:
     'This installation cannot update itself in place. Download the release from GitHub and load it manually.',
   updateProgressDownloading: ({ percent }) => `Downloading… ${percent}%`,
@@ -4710,7 +4710,7 @@ const zhCN: Messages = {
   updateDoneTitle: '更新已写入',
   updateDoneBody: ({ version }) => `版本 ${version} 已写入磁盘。重新加载扩展后即可使用。`,
   updateBackupNote: ({ folder }) =>
-    `被替换的文件已备份到安装目录内的「${folder}」，确认更新正常后可手动删除。`,
+    `被替换的文件已备份到安装目录内的「${folder}」，新版本重新加载后再次打开面板会自动删除该备份。`,
   updateManualHint: '当前安装方式无法直接更新。请从 GitHub 下载新版本并手动加载。',
   updateProgressDownloading: ({ percent }) => `正在下载…… ${percent}%`,
   updateProgressVerifying: '正在校验 SHA-256 摘要……',

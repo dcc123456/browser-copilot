@@ -38,7 +38,7 @@ function writeOrder(files: readonly ZipEntryInfo[]): ZipEntryInfo[] {
   return [...files.filter((file) => !isBootstrap(file)), ...files.filter(isBootstrap)]
 }
 
-const BACKUP_PREFIX = 'browser-copilot-backup-'
+export const BACKUP_FOLDER_PREFIX = 'browser-copilot-backup-'
 /**
  * Deliberately not `manifest.json`: the backup folder lives inside the install
  * folder, and a valid root manifest there could be loaded as a second extension
@@ -142,7 +142,15 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<ApplyUpd
 
 function backupFolderName(currentVersion: string, now: number): string {
   const version = currentVersion.replace(/[^0-9A-Za-z._-]/g, '-')
-  return `${BACKUP_PREFIX}${version}-${new Date(now).toISOString().replace(/[:.]/g, '-')}`
+  return `${BACKUP_FOLDER_PREFIX}${version}-${new Date(now).toISOString().replace(/[:.]/g, '-')}`
+}
+
+/** Removes one backup folder the update left behind. */
+export async function removeBackupFolder(
+  directory: FileSystemDirectoryHandle,
+  folder: string,
+): Promise<void> {
+  await directory.removeEntry(folder, { recursive: true })
 }
 
 async function backupExistingFiles(

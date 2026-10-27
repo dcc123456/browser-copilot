@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed — Update backups delete themselves after the reload
+
+An in-place update backs up the files it replaces inside the install folder.
+That backup is now recorded when the update is written and deleted
+automatically the next time the panel opens on the new version — opening the
+panel proves the reload worked. A backup is kept while the old version is still
+running, and while the folder permission is not granted, so the rollback copy is
+never lost before it is safe to remove.
+
 _To be released._
 
 ## [0.6.12] - 2026-10-26

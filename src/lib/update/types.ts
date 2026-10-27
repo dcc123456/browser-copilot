@@ -18,6 +18,18 @@ export const UPDATE_ASSET_URL_PREFIX = `https://github.com/${UPDATE_REPO_OWNER}/
 export const UPDATE_STATE_KEY = 'update.state'
 export const UPDATE_DISMISSED_KEY = 'update.dismissedVersion'
 export const UPDATE_PENDING_KEY = 'update.pendingReloadVersion'
+/** Backups the updater must remove once the new build is running. */
+export const UPDATE_BACKUP_KEY = 'update.backups'
+
+/**
+ * A folder `applyUpdate` created inside the install directory. It is only
+ * deleted after the panel opens on the version it belongs to: until the
+ * reload, it is the only way back to a working build.
+ */
+export interface UpdateBackup {
+  folder: string
+  version: string
+}
 export const UPDATE_CHECK_ALARM = 'update-check'
 export const UPDATE_CHECK_INTERVAL_MINUTES = 12 * 60
 /** One-shot alarm used to retry a transient failure before the next 12h tick. */

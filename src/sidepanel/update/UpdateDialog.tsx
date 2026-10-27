@@ -20,7 +20,7 @@ import {
   verifyInstallDirectory,
   type SavedInstallDirectory,
 } from '../../lib/update/directory'
-import { markPendingReload } from '../../lib/update/state'
+import { addUpdateBackup, markPendingReload } from '../../lib/update/state'
 import {
   UpdateApplyError,
   type UpdateAssetInfo,
@@ -170,6 +170,7 @@ export default function UpdateDialog({
         onProgress: setProgress,
       })
       await markPendingReload(target.version)
+      await addUpdateBackup({ folder: result.backupFolder, version: target.version })
       setDoneVersion(target.version)
       setBackupFolder(result.backupFolder)
       setPhase('done')

@@ -9,9 +9,11 @@
  */
 
 import {
+  UPDATE_BACKUP_KEY,
   UPDATE_DISMISSED_KEY,
   UPDATE_PENDING_KEY,
   UPDATE_STATE_KEY,
+  type UpdateBackup,
   type UpdateState,
 } from './types'
 import { isNewerVersion } from './version'
@@ -45,6 +47,37 @@ export async function markPendingReload(version: string): Promise<void> {
 
 export async function clearPendingReload(): Promise<void> {
   await chrome.storage.local.remove(UPDATE_PENDING_KEY)
+}
+
+export async function readUpdateBackups(): Promise<UpdateBackup[]> {
+  try {
+    const stored = await chrome.storage.local.get(UPDATE_BACKUP_KEY)
+    const list = stored[UPDATE_BACKUP_KEY]
+    if (!Array.isArray(list)) return []
+    return list.filter(
+      (item): item is UpdateBackup =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as UpdateBackup).folder === 'string' &&
+        typeof (item as UpdateBackup).version === 'string',
+    )
+  } catch {
+    return []
+  }
+}
+
+/** Records a backup to delete once `version` is the build that is running. */
+export async function addUpdateBackup(backup: UpdateBackup): Promise<void> {
+  const list = await readUpdateBackups()
+  const next = [...list.filter((item) => item.folder !== backup.folder), backup]
+  await chrome.storage.local.set({ [UPDATE_BACKUP_KEY]: next })
+}
+
+export async function removeUpdateBackup(folder: string): Promise<void> {
+  const list = await readUpdateBackups()
+  const next = list.filter((item) => item.folder !== folder)
+  if (next.length === 0) await chrome.storage.local.remove(UPDATE_BACKUP_KEY)
+  else await chrome.storage.local.set({ [UPDATE_BACKUP_KEY]: next })
 }
 
 /**
