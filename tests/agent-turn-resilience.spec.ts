@@ -151,13 +151,17 @@ describe('round budget', () => {
     )
 
     // Round 3 runs on the extended budget (2 was the configured batch), and the
-    // request still offers tools — this is a continuation, not a wrap-up.
+    // request still offers tools — this is a continuation, not a wrap-up. The
+    // checkpoint is silent: chat must not show step counts.
     expect(streamMock).toHaveBeenCalledTimes(4)
     expect(streamMock.mock.calls[2]![0].tools?.length).toBeGreaterThan(0)
     expect(history.at(-1)).toMatchObject({ role: 'assistant', content: 'RESULT: task finished' })
     expect(
-      sent.some((message) => message.type === 'status' && /another batch/.test(message.text)),
-    ).toBe(true)
+      sent.some(
+        (message) =>
+          message.type === 'status' && /batch|budget|step|\d+ (tool )?rounds/i.test(message.text),
+      ),
+    ).toBe(false)
     expect(
       sent.some((message) => message.type === 'status' && /Stopped after/.test(message.text)),
     ).toBe(false)
@@ -188,6 +192,24 @@ describe('round budget', () => {
     expect(lastMessage?.role).toBe('user')
     expect(String(lastMessage?.content)).toMatch(/All 10 tool rounds/)
     expect(history.at(-1)).toMatchObject({ role: 'assistant' })
+  })
+
+  it('ends a silent panel ceiling with a count-free reason', async () => {
+    successfulJs()
+    // Even the tools-off wrap-up returns nothing: the status line is all the
+    // user gets, and it must not leak the step numbers.
+    streamMock.mockResolvedValue({ content: '', toolCalls: [jsCall('c1')] } as never)
+
+    const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
+    await runAgentTurn(
+      history as never,
+      deps({ takeInterjections: () => [], getMaxToolRounds: async () => 1 }) as never,
+    )
+
+    const stopTexts = sent.flatMap((message) => (message.type === 'status' ? [message.text] : []))
+    const stopStatus = stopTexts.find((text) => /Stopped/.test(text))
+    expect(stopStatus).toBe('Stopped this reply to avoid an endless loop.')
+    expect(stopStatus).not.toMatch(/\d/)
   })
 
   it('keeps the hard cap and status line for unattended turns', async () => {

@@ -5133,10 +5133,7 @@ export async function runAgentTurn(
     continuing: messages.chatContinuingTruncated,
     stillTruncated: messages.chatReplyStillTruncated,
   }
-  // And the round-budget extension line, same shadowing rule.
-  const roundBudgetText = {
-    extended: messages.chatRoundBudgetExtended,
-  }
+  const stoppedToAvoidLoopText = messages.chatStoppedToAvoidLoop
 
   // Filter the advertised tools per round (see advertiseTools): the core set
   // plus any on-demand group the model has loaded so far this conversation.
@@ -5325,13 +5322,10 @@ export async function runAgentTurn(
   }
 
   for (let round = 0; round < roundsCeiling; round += 1) {
-    // One batch spent: say so and keep going. A checkpoint, not a stop — the
-    // panel's Stop button is how the user ends a run early.
+    // One batch spent: keep going silently — the user asked not to see step
+    // counts in chat, and the running indicator already shows progress. A
+    // checkpoint, not a stop; the panel's Stop button ends a run early.
     if (extendRoundBudget && round > 0 && round % roundsCap === 0) {
-      deps.send({
-        type: 'status',
-        text: roundBudgetText.extended({ rounds: round, budget: roundsCeiling }),
-      })
       // A batch is also a context window: without re-arming, a turn that
       // compacted in batch 1 would run the remaining batches with no
       // compaction available at all.
@@ -5565,7 +5559,12 @@ export async function runAgentTurn(
   }
   deps.send({
     type: 'status',
-    text: `Stopped after ${roundsCeiling} tool rounds to avoid a loop.`,
+    // Unattended callers classify on this exact English line; a panel turn only
+    // needs a localized, count-free reason (the user asked for no step numbers
+    // in chat).
+    text: extendRoundBudget
+      ? stoppedToAvoidLoopText
+      : `Stopped after ${roundsCeiling} tool rounds to avoid a loop.`,
   })
   return totalUsage.totalTokens > 0 ? totalUsage : null
 }

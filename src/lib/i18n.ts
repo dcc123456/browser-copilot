@@ -654,11 +654,10 @@ export interface Messages {
   /** Terminal status line when the cap was reached despite those continuations. */
   chatReplyStillTruncated: string
   /**
-   * Status line when a chat turn has spent its configured round budget and is
-   * extended by another batch instead of stopping. `rounds` is what was spent,
-   * `budget` the absolute ceiling this turn will never pass.
+   * Panel-only status when even the extended ceiling is spent with no answer.
+   * Deliberately count-free: chat shows no step numbers.
    */
-  chatRoundBudgetExtended: (params: { rounds: number; budget: number }) => string
+  chatStoppedToAvoidLoop: string
   /** Composer `/compact` command description (it replaced a toolbar button). */
   chatCompactContext: string
   /** Transient phase line while the manual compaction request runs. */
@@ -2339,8 +2338,7 @@ const en: Messages = {
     `The answer reached the model's per-reply output limit — continuing it (${continuation}/${continuations})…`,
   chatReplyStillTruncated:
     "The reply reached the model's output limit and may be incomplete — send “continue” to get the rest.",
-  chatRoundBudgetExtended: ({ rounds, budget }) =>
-    `Used the ${rounds}-step budget — continuing for another batch so the task can finish (hard limit ${budget} steps). Press Stop to end it now.`,
+  chatStoppedToAvoidLoop: 'Stopped this reply to avoid an endless loop.',
   chatCompactContext: 'Compress context',
   chatCompactRunning: 'Compressing the context…',
   chatCompactDone: ({ removed }) =>
@@ -3962,8 +3960,7 @@ const zhCN: Messages = {
     `回复达到了模型单次输出上限，正在自动续写（第 ${continuation}/${continuations} 次）…`,
   chatReplyStillTruncated:
     '回复已达到模型单次输出上限，内容可能仍不完整；发送「继续」即可获取剩余部分。',
-  chatRoundBudgetExtended: ({ rounds, budget }) =>
-    `已用完 ${rounds} 步预算——自动续期继续执行，让任务跑出结果（本回合上限 ${budget} 步）。需要提前结束可点「停止」。`,
+  chatStoppedToAvoidLoop: '为避免死循环，本次回复已停止。',
   chatCompactContext: '压缩上下文',
   chatCompactRunning: '正在压缩上下文…',
   chatCompactDone: ({ removed }) => `上下文已压缩：较早的 ${removed} 条消息已合并为一段摘要。`,
