@@ -159,6 +159,11 @@ function mount(pos?: ButtonPos): void {
     if (pos) applyPos(ownedHost, pos)
     return
   }
+  // The previous window was removed by the page; drop its listeners before
+  // building the replacement.
+  detachCleanup?.()
+  detachCleanup = null
+  ownedHost = null
 
   const host = createHost()
   const shadow = host.attachShadow({ mode: 'open' })
