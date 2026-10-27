@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+_To be released._
+
+## [0.6.13] - 2026-10-27
+
 ### Added — Type `/` in the composer to run commands and skills
 
 The composer is command-driven: typing `/` opens the same picker that summons
@@ -22,7 +26,10 @@ dropped from the short identity prompt. Typing `@` opens the file picker (the
 character itself never enters the draft), replacing the paperclip button, and
 the placeholder names both gestures. The model picker opens its list above the
 control now, so it no longer covers the model it is about to change, and a new
-chat is started with a plus icon.
+chat is started with a plus icon. The picker's highlighted row is a soft tint
+with an accent rule instead of a saturated band, the focused field draws a
+single blue frame rather than a frame inside a frame, and the action row (mode,
+model, new chat, send) stays on one line at the panel's narrowest.
 
 ### Added — Pick the chat model from the composer
 
@@ -56,6 +63,21 @@ panel proves the reload worked. A backup is kept while the old version is still
 running, and while the folder permission is not granted, so the rollback copy is
 never lost before it is safe to remove.
 
+### Changed — Deleting a group takes its workflows with it
+
+Removing a workflow group used to leave its workflows behind, resurfacing them
+in the ungrouped list. The delete now removes them too, and its confirmation
+names the group and counts the workflows that go with it, so the cascade is
+visible before anything is removed.
+
+### Fixed — The MiniMax international endpoint is recognised
+
+The MiniMax preset offers `api.minimax.io`, but the vendor lookup only knew the
+`.minimaxi.com`, `.minimax.cn` and `.minimax.chat` hosts, so that endpoint read as
+an unknown vendor: every thinking level was offered, and "off" became the
+generic `reasoning_effort: "none"`, which MiniMax answers with a 400 on M3.1.
+The host is mapped now, pinned by a test built on live API answers.
+
 ### Fixed — A reply that stops half-way is finished, not silently dropped
 
 Two ways an answer ended mid-sentence with no explanation. The common one is the
@@ -81,15 +103,16 @@ assembled before the size check that compacts it, so that one compaction pass
 summarized the transcript and then sent it anyway — the summary now reaches the
 outgoing request.
 
-### Added — Compress the context whenever you want
+### Added — `/compact` compresses the context on demand
 
-The chat composer has a compress-context button next to the attachment clip. It
-runs exactly the compaction the automatic trigger does — the older rounds'
-answers and tool results fold into one summary, while everything you typed stays
-verbatim — so a long thread can be slimmed down before the window fills instead
-of waiting for the threshold or starting a new conversation. A toast reports how
-many messages were replaced, and says so when there is nothing to compress yet
-or a reply is still running; the reply being streamed is never rewritten.
+Typing `/compact` in the composer runs exactly the compaction the automatic
+trigger does — the older rounds' answers and tool results fold into one summary,
+while everything you typed stays verbatim — so a long thread can be slimmed down
+before the window fills instead of waiting for the threshold or starting a new
+conversation. A toast reports how many messages were replaced, and says so when
+there is nothing to compress yet or a reply is still running; the reply being
+streamed is never rewritten. The command only appears once the conversation has
+something to compress.
 
 _To be released._
 
