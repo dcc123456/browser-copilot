@@ -1057,6 +1057,7 @@ textarea:focus-visible {
   left: 8px;
   right: 8px;
   margin-bottom: 6px;
+  padding: 4px;
   max-height: 220px;
   overflow-y: auto;
   border: 1px solid var(--border);
@@ -1072,18 +1073,34 @@ textarea:focus-visible {
   flex-direction: column;
   gap: 2px;
   width: 100%;
-  padding: 7px 10px;
+  padding: 6px 8px;
   border: 0;
-  border-radius: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--text);
   text-align: left;
   cursor: pointer;
 }
 
+/*
+  The highlighted row keeps the body text colour on a soft accent wash (same
+  idiom as the model picker and the workflow variable menu). A saturated fill
+  made the dimmed description unreadable and turned the row into a block that
+  looked like a text selection rather than a menu highlight.
+*/
 .slash-item[data-active='true'] {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--accent-soft);
+  /* Left rule: the wash alone is easy to miss against panel-2 on wide rows. */
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text);
+}
+
+.slash-item[data-active='true'] .slash-item-name {
+  color: var(--accent);
+}
+
+.slash-item[data-active='true'] .slash-item-desc {
+  opacity: 1;
 }
 
 .slash-item-name {

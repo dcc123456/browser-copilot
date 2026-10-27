@@ -101,6 +101,15 @@ pin 的技能说明**从未进入模型**——而 `wrapSkillDirective` 写进�
 原有的「chat 模式 < 260 字符」用例不变。这是既有缺陷（chat 模式自 `da041f8`
 起如此），本次把它变成可用的技能通道。
 
+**D8 菜单选中态用软底 + 左侧色条，而不是整行实心 accent。** 首版 `.slash-item[data-active]`
+直接 `background: var(--accent)`，整行铺满饱和蓝：描述文字只靠 `opacity: .75` 压暗，在蓝底上
+几乎读不清，整块高亮也像"文本被选中"而不是菜单焦点。改法是沿用仓库另两处菜单已有的idiom
+（模型选择 `bg-accent-soft text-ink`、工作流变量菜单同款）：选中行 `background: var(--accent-soft)`、
+正文 `var(--text)`、命令名 `var(--accent)`、描述恢复 `opacity: 1`，再叠一条 `inset 2px 0 0 var(--accent)`
+左色条——软底在宽行上单靠自己不够显眼，色条把焦点说清楚。菜单容器加 `padding: 4px`、行 `border-radius: 6px`，
+高亮成为内嵌圆角块而非压满整行的色带。深浅两套主题都用真机探针读 computed style 验过：
+浅色 `rgba(40,96,207,.1)` 底 + `#18202c` 字 + `#2860cf` 名，深色 `rgba(110,163,255,.14)` 底 + `#e9ecf2` 字。
+
 ## 4. 测试与验收
 
 - `tests/slash.spec.ts`：`takeAttachTrigger` 在开头/空白后触发并返回去掉 `@` 的文本与光标；
@@ -121,3 +130,6 @@ pin 的技能说明**从未进入模型**——而 `wrapSkillDirective` 写进�
 - 浏览器实证：Chrome for Testing 加载 `dist/`，截图确认（a）`/` 菜单同时列出 `compact` 与技能、
   （b）tag 与正文同一行且在框内、（c）模型弹层在选择框上方、（d）placeholder 含 `@`；
   用探针确认 `/compact` 真的改写了 transcript、发送后的用户气泡带 `/trans` tag。
+  同一探针读选中行的 computed style：底色等于 `--accent-soft`（不是 `--accent`）、正文色等于
+  `--bc-text`、命令名等于 `--bc-accent`、描述 `opacity: 1`，并截图存档 `tmp/menu-light.png` /
+  `tmp/menu-dark.png`（深浅两套主题各一张）。
