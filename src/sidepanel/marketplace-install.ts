@@ -22,7 +22,8 @@ import {
   type PublishedDependency,
 } from '../lib/marketplace/apply'
 import { assetRepoPath } from '../lib/marketplace/meta'
-import { fetchPublishedWorkflow, fetchWorkflowAt } from '../lib/marketplace/raw'
+import { fetchRepoWorkflow, fetchRepoWorkflowAt, type RepoReadAccess } from '../lib/marketplace/raw'
+import { PUBLIC_REPO, repoFullName, type RepoRef } from '../lib/marketplace/repo'
 import { MarketplaceError, type MarketplaceCard } from '../lib/marketplace/types'
 import type { PasswordEntry } from '../lib/types'
 import type { Workflow } from '../lib/workflow/types'
@@ -75,18 +76,30 @@ async function localCredentials(): Promise<PasswordEntry[]> {
   return listing.entries
 }
 
+export interface InstallSource {
+  /** Repository the card was listed from. */
+  repo: RepoRef
+  /** Token-backed client; required when the repo is private. */
+  access?: RepoReadAccess
+}
+
 export async function installFromCard(
   card: MarketplaceCard,
   existing: Workflow | undefined,
   library: readonly Workflow[],
+  source: InstallSource = { repo: PUBLIC_REPO },
 ): Promise<ApplyPlan> {
-  const published = await fetchPublishedWorkflow(card.meta.slug)
+  const published = await fetchRepoWorkflow(source.repo, card.meta.slug, source.access)
   if (published === null) {
     throw new MarketplaceError('not-found', `The published file for ${card.meta.slug} is missing`)
   }
   const dependencies = await Promise.all(
     (card.meta.dependencies ?? []).map(async (entry): Promise<PublishedDependency> => {
-      const body = await fetchWorkflowAt(assetRepoPath(card.meta.slug, entry.path))
+      const body = await fetchRepoWorkflowAt(
+        source.repo,
+        assetRepoPath(card.meta.slug, entry.path),
+        source.access,
+      )
       if (body === null) {
         throw new MarketplaceError('not-found', `The bundled workflow "${entry.name}" is missing`)
       }
@@ -95,7 +108,16 @@ export async function installFromCard(
   )
   const credentials = card.meta.secrets?.length ? await localCredentials() : []
   const plan = await fileIntoBundleGroup(
-    planApplyBundle(card, published, dependencies, library, existing, Date.now(), credentials),
+    planApplyBundle(
+      card,
+      published,
+      dependencies,
+      library,
+      existing,
+      Date.now(),
+      credentials,
+      repoFullName(source.repo),
+    ),
   )
   // The vault goes first: every get-secret step in the records below points at
   // these ids, so a workflow saved against a missing credential cannot run.

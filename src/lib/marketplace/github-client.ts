@@ -26,6 +26,8 @@ export interface GitHubUser {
 export interface GitHubRepo {
   full_name: string
   default_branch: string
+  private?: boolean
+  permissions?: { admin?: boolean; maintain?: boolean; push?: boolean; pull?: boolean }
 }
 
 export interface GitHubRef {
@@ -108,20 +110,21 @@ export class GitHubClient {
     return !!this.token
   }
 
-  async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  private authHeaders(accept: string): Record<string, string> {
     const headers: Record<string, string> = {
-      Accept: 'application/vnd.github+json',
+      Accept: accept,
       'X-GitHub-Api-Version': API_VERSION,
     }
     if (this.token) headers.Authorization = `Bearer ${this.token}`
-    if (options.body !== undefined) headers['Content-Type'] = 'application/json'
+    return headers
+  }
 
-    let response: Response
+  private async send(path: string, init: RequestOptions & { headers: Record<string, string> }) {
     try {
-      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        method: options.method ?? 'GET',
-        headers,
-        ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      return await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method: init.method ?? 'GET',
+        headers: init.headers,
+        ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
       })
     } catch (error) {
       throw new MarketplaceError(
@@ -129,10 +132,54 @@ export class GitHubClient {
         `GitHub request failed: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
+  }
 
+  async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    const headers = this.authHeaders('application/vnd.github+json')
+    if (options.body !== undefined) headers['Content-Type'] = 'application/json'
+
+    const response = await this.send(path, { ...options, headers })
     if (!response.ok) throw await toMarketplaceError(response)
     if (response.status === 204) return undefined as T
     return (await response.json()) as T
+  }
+
+  /**
+   * Raw file bytes at a path on a branch, or null when absent (404).
+   *
+   * Private repositories cannot be read from `raw.githubusercontent.com` — the
+   * raw host ignores `Authorization` — so content goes through the API with the
+   * raw media type, one call per file against the authenticated quota.
+   */
+  private async requestContent(
+    owner: string,
+    repo: string,
+    path: string,
+    ref: string,
+  ): Promise<Response | null> {
+    const response = await this.send(
+      `/repos/${owner}/${repo}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`,
+      { headers: this.authHeaders('application/vnd.github.raw+json') },
+    )
+    // 404 covers both "no such file" and "no access" — callers treat them alike.
+    if (response.status === 404) return null
+    if (!response.ok) throw await toMarketplaceError(response)
+    return response
+  }
+
+  async getFileText(
+    owner: string,
+    repo: string,
+    path: string,
+    ref: string,
+  ): Promise<string | null> {
+    const response = await this.requestContent(owner, repo, path, ref)
+    return response ? response.text() : null
+  }
+
+  async getFileBlob(owner: string, repo: string, path: string, ref: string): Promise<Blob | null> {
+    const response = await this.requestContent(owner, repo, path, ref)
+    return response ? response.blob() : null
   }
 
   getUser(): Promise<GitHubUser> {

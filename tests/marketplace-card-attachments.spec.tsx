@@ -21,6 +21,12 @@ vi.mock('../src/lib/store-events', () => ({ onStoreChanged: () => () => {} }))
 vi.mock('../src/lib/marketplace/token', () => ({
   getAuth: async () => null,
   clearAuth: async () => {},
+  readAuth: async () => null,
+}))
+vi.mock('../src/lib/marketplace/team', () => ({
+  getTeamRepo: async () => null,
+  getTeamAuth: async () => null,
+  teamRepoRef: () => null,
 }))
 
 const { default: MarketplaceTab } = await import('../src/sidepanel/MarketplaceTab')

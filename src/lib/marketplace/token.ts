@@ -1,14 +1,16 @@
 /**
- * The one credential the marketplace stores: a classic GitHub PAT.
+ * The GitHub tokens the marketplace stores: classic PATs, one per source.
  *
- * Publishing writes through a fork, so the token must be able to create and
- * push to the user's own public repositories. Classic tokens with `public_repo`
- * are the only kind with a stable permission model for that; fine-grained
- * tokens cannot reliably open a PR against a repository the user does not own,
- * so they are rejected up front instead of failing halfway through a publish.
+ * The public marketplace token publishes through a fork, so it must be able to
+ * create and push to the user's own public repositories. A team token reads
+ * (and, for members with write access, pushes branches to) a private repo, so
+ * it needs the `repo` scope. Classic tokens are the only kind with a stable
+ * permission model for that; fine-grained tokens cannot reliably open a PR
+ * against a repository the user does not own, so they are rejected up front
+ * instead of failing halfway through a publish.
  *
- * The token lives in `chrome.storage.local` (never in the user's data folder),
- * is masked in the UI, and is never exported or logged.
+ * Tokens live in `chrome.storage.local` (never in the user's data folder), are
+ * masked in the UI, and are never exported or logged.
  *
  * @module lib/marketplace/token
  */
@@ -40,9 +42,10 @@ export function maskToken(token: string): string {
   return `••••${token.slice(-4)}`
 }
 
-export async function getAuth(): Promise<MarketplaceAuth | null> {
-  const stored = await chrome.storage.local.get(MARKETPLACE_AUTH_KEY)
-  const raw = stored[MARKETPLACE_AUTH_KEY]
+/** Reads a token record under `key`; null when absent or no longer classic. */
+export async function readAuth(key: string): Promise<MarketplaceAuth | null> {
+  const stored = await chrome.storage.local.get(key)
+  const raw = stored[key]
   if (!raw || typeof raw !== 'object') return null
   const { token, login } = raw as Partial<MarketplaceAuth>
   if (typeof token !== 'string' || !isClassicToken(token)) return null
@@ -50,17 +53,30 @@ export async function getAuth(): Promise<MarketplaceAuth | null> {
   return { token, login }
 }
 
-/** Validates and stores a token; callers resolve `login` with `GET /user` first. */
-export async function setAuth(auth: MarketplaceAuth): Promise<void> {
+/** Validates and writes a token record under `key`. */
+export async function writeAuth(key: string, auth: MarketplaceAuth): Promise<void> {
   if (!isClassicToken(auth.token)) {
-    throw new Error('The marketplace only accepts classic GitHub tokens (ghp_…)')
+    throw new Error('Only classic GitHub tokens (ghp_…) are supported')
   }
   if (!auth.login || auth.login.length > LOGIN_MAX) {
-    throw new Error('A GitHub login is required to save the marketplace token')
+    throw new Error('A GitHub login is required to save the token')
   }
-  await chrome.storage.local.set({ [MARKETPLACE_AUTH_KEY]: { ...auth } })
+  await chrome.storage.local.set({ [key]: { ...auth } })
 }
 
-export async function clearAuth(): Promise<void> {
-  await chrome.storage.local.remove(MARKETPLACE_AUTH_KEY)
+export async function removeAuth(key: string): Promise<void> {
+  await chrome.storage.local.remove(key)
+}
+
+export function getAuth(): Promise<MarketplaceAuth | null> {
+  return readAuth(MARKETPLACE_AUTH_KEY)
+}
+
+/** Validates and stores a token; callers resolve `login` with `GET /user` first. */
+export function setAuth(auth: MarketplaceAuth): Promise<void> {
+  return writeAuth(MARKETPLACE_AUTH_KEY, auth)
+}
+
+export function clearAuth(): Promise<void> {
+  return removeAuth(MARKETPLACE_AUTH_KEY)
 }

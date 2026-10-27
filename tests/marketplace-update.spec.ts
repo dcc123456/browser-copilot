@@ -105,6 +105,16 @@ describe('pendingUpdates', () => {
       ),
     ).toEqual({})
   })
+
+  it('compares a copy only against cards from its own repository', () => {
+    const team = installed('wf-1', 'shared-111', 1)
+    team.marketplace = { ...team.marketplace!, repo: 'acme/team-workflows' }
+
+    expect(pendingUpdates([team], [card('shared-111', 2)])).toEqual({})
+    expect(
+      Object.keys(pendingUpdates([team], [card('shared-111', 2)], 'acme/team-workflows')),
+    ).toEqual(['wf-1'])
+  })
 })
 
 describe('removedSources', () => {
@@ -138,5 +148,12 @@ describe('removedSources', () => {
     const foreign = installed('wf-1', 'deleted-111', 1)
     foreign.marketplace = { ...foreign.marketplace!, repo: 'someone/other-workflows' }
     expect([...removedSources([foreign], [], true)]).toEqual([])
+  })
+
+  it('only judges copies from the repository the catalog came from', () => {
+    const team = installed('wf-1', 'deleted-111', 1)
+    team.marketplace = { ...team.marketplace!, repo: 'acme/team-workflows' }
+    expect([...removedSources([team], [], true)]).toEqual([])
+    expect([...removedSources([team], [], true, 'acme/team-workflows')]).toEqual(['wf-1'])
   })
 })

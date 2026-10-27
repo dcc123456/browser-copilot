@@ -78,6 +78,25 @@ export interface Messages {
   settingsWindowPolicyHelp: string
   settingsWindowPolicyFixedWindow: string
 
+  // Settings: team workflow sharing (private GitHub repository)
+  settingsTeamTitle: string
+  settingsTeamIntro: string
+  settingsTeamRepoLabel: string
+  settingsTeamRepoPlaceholder: string
+  settingsTeamTokenLabel: string
+  settingsTeamTokenPlaceholder: string
+  settingsTeamTokenHint: string
+  settingsTeamTokenLink: string
+  settingsTeamConnect: string
+  settingsTeamConnecting: string
+  settingsTeamConnected: ({ repo, login }: { repo: string; login: string }) => string
+  settingsTeamDisconnect: string
+  settingsTeamRepoInvalid: string
+  settingsTeamTokenInvalid: string
+  settingsTeamRepoNotFound: string
+  settingsTeamPublicWarning: string
+  settingsTeamReadOnlyWarning: string
+
   // History tab
   histConversations: string
   histTasks: string
@@ -246,6 +265,11 @@ export interface Messages {
   // --- Workflow marketplace: publishing ----------------------------------
   marketplacePublishTitle: string
   marketplacePublishRepoHint: (params: { repo: string }) => string
+  marketplacePublishTarget: string
+  marketplacePublishTargetPublic: string
+  marketplacePublishTargetTeam: string
+  marketplacePublishTeamMissing: string
+  marketplacePublishTeamConnected: (params: { repo: string; login: string }) => string
   /** Success banner after the pull request is opened. */
   marketplacePublishBanner: (params: { number: number }) => string
   /** Success banner when the pull request was merged straight away. */
@@ -354,6 +378,12 @@ export interface Messages {
   // --- Workflow marketplace: browsing ------------------------------------
   tabMarketplace: string
   marketplaceIntro: string
+  marketplaceSourcePublic: string
+  marketplaceSourceTeam: string
+  marketplaceTeamIntro: string
+  marketplaceTeamNotConnected: string
+  marketplaceTeamNotConnectedHint: string
+  marketplaceAttachmentFailed: string
   marketplaceSearchPlaceholder: string
   marketplaceFilterAll: string
   marketplaceSortRecent: string
@@ -1749,6 +1779,29 @@ const en: Messages = {
     'Which window agent-bridge / scheduled / Feishu tasks act in when several windows run the plugin. They can only ever act in windows with the plugin open (panel expanded or minimized); with the plugin closed everywhere they fall back to the legacy global behaviour.',
   settingsWindowPolicyFixedWindow: 'Fixed window',
 
+  // Settings: team workflow sharing (private GitHub repository)
+  settingsTeamTitle: 'Team sharing',
+  settingsTeamIntro:
+    'Connect a private GitHub repository to share workflows only with its collaborators. Create the repository yourself, invite teammates as collaborators, then connect it here with your own token.',
+  settingsTeamRepoLabel: 'Repository',
+  settingsTeamRepoPlaceholder: 'your-team/workflows',
+  settingsTeamTokenLabel: 'GitHub token',
+  settingsTeamTokenPlaceholder: 'ghp_…',
+  settingsTeamTokenHint:
+    'A classic token with the repo scope. It stays on this device, is never exported, and is only used for this repository.',
+  settingsTeamTokenLink: 'Create a token',
+  settingsTeamConnect: 'Connect',
+  settingsTeamConnecting: 'Connecting…',
+  settingsTeamConnected: ({ repo, login }) => `Connected to ${repo} as @${login}.`,
+  settingsTeamDisconnect: 'Disconnect',
+  settingsTeamRepoInvalid: 'Enter the repository as owner/name.',
+  settingsTeamTokenInvalid: 'Enter a classic GitHub token that starts with ghp_.',
+  settingsTeamRepoNotFound: 'Repository not found, or this token cannot access it.',
+  settingsTeamPublicWarning:
+    'This repository is public: every workflow shared to it is readable by anyone on GitHub.',
+  settingsTeamReadOnlyWarning:
+    'This token can read the repository but cannot push. You can browse and apply team workflows, but publishing needs write access.',
+
   // History tab
   histConversations: 'Conversations',
   histTasks: 'Task runs',
@@ -1915,6 +1968,12 @@ const en: Messages = {
   marketplacePublishTitle: 'Publish workflow',
   marketplacePublishRepoHint: ({ repo }) =>
     `Opens a pull request against ${repo}. It is merged automatically when your token can write to that repository; otherwise the maintainer merges it.`,
+  marketplacePublishTarget: 'Publish to',
+  marketplacePublishTargetPublic: 'Public marketplace',
+  marketplacePublishTargetTeam: 'Team repository',
+  marketplacePublishTeamMissing:
+    'No team repository is connected. Connect one in Settings → Team sharing first.',
+  marketplacePublishTeamConnected: ({ repo, login }) => `Publishing to ${repo} as @${login}.`,
   marketplacePublishBanner: ({ number }) => `Pull request #${number} opened.`,
   marketplacePublishBannerMerged: ({ number }) =>
     `Merged pull request #${number}; the workflow is live.`,
@@ -2032,6 +2091,14 @@ const en: Messages = {
   tabMarketplace: 'Marketplace',
   marketplaceIntro:
     'Workflows shared by the community. Applying one saves a local copy; nothing runs until you start it.',
+  marketplaceSourcePublic: 'Public',
+  marketplaceSourceTeam: 'Team',
+  marketplaceTeamIntro:
+    'Workflows shared inside your team repository. Only collaborators on that repository can read them.',
+  marketplaceTeamNotConnected: 'Team sharing is not connected.',
+  marketplaceTeamNotConnectedHint:
+    'Open Settings → Team sharing to connect your team’s private GitHub repository.',
+  marketplaceAttachmentFailed: 'Could not download the attachment.',
   marketplaceSearchPlaceholder: 'Search workflows',
   marketplaceFilterAll: 'All categories',
   marketplaceSortRecent: 'Recently updated',
@@ -3334,6 +3401,28 @@ const zhCN: Messages = {
     '当多个窗口开着插件时，指定 agent 接入 / 定时任务 / 飞书任务在哪个窗口执行。它们只会在“插件开着”（面板展开或最小化）的窗口中操作；所有窗口都关闭插件时，回退到原有全局行为。',
   settingsWindowPolicyFixedWindow: '固定窗口',
 
+  // Settings: team workflow sharing (private GitHub repository)
+  settingsTeamTitle: '团队共享',
+  settingsTeamIntro:
+    '连接一个私有 GitHub 仓库，只把工作流共享给该仓库的协作者。仓库由你自己创建并邀请团队成员为协作者，然后在这里用自己的令牌连接。',
+  settingsTeamRepoLabel: '仓库',
+  settingsTeamRepoPlaceholder: 'your-team/workflows',
+  settingsTeamTokenLabel: 'GitHub 令牌',
+  settingsTeamTokenPlaceholder: 'ghp_…',
+  settingsTeamTokenHint:
+    '需要带 repo 权限（scope）的 classic 令牌。令牌只保存在本机、绝不导出，并且只用于这个仓库。',
+  settingsTeamTokenLink: '创建令牌',
+  settingsTeamConnect: '连接',
+  settingsTeamConnecting: '正在连接…',
+  settingsTeamConnected: ({ repo, login }) => `已连接到 ${repo}，身份 @${login}。`,
+  settingsTeamDisconnect: '断开连接',
+  settingsTeamRepoInvalid: '仓库请按 owner/仓库名 的格式填写。',
+  settingsTeamTokenInvalid: '请填写以 ghp_ 开头的 classic GitHub 令牌。',
+  settingsTeamRepoNotFound: '找不到该仓库，或当前令牌无权访问。',
+  settingsTeamPublicWarning: '该仓库是公开的：共享到其中的工作流任何 GitHub 用户都能读取。',
+  settingsTeamReadOnlyWarning:
+    '当前令牌可以读取该仓库，但没有推送权限。你可以浏览和应用团队工作流，发布需要写入权限。',
+
   // History tab
   histConversations: '对话记录',
   histTasks: '任务记录',
@@ -3493,6 +3582,11 @@ const zhCN: Messages = {
   marketplacePublishTitle: '发布工作流',
   marketplacePublishRepoHint: ({ repo }) =>
     `将向 ${repo} 提交一个 PR；令牌对该仓库有写权限时会自动合并，否则由维护者合并后才会出现在工作流广场中。`,
+  marketplacePublishTarget: '发布到',
+  marketplacePublishTargetPublic: '公共广场',
+  marketplacePublishTargetTeam: '团队仓库',
+  marketplacePublishTeamMissing: '还没有连接团队仓库，请先在「设置 → 团队共享」中连接。',
+  marketplacePublishTeamConnected: ({ repo, login }) => `将以 @${login} 的身份发布到 ${repo}。`,
   marketplacePublishBanner: ({ number }) => `已创建 PR #${number}。`,
   marketplacePublishBannerMerged: ({ number }) => `已合并 PR #${number}，工作流已上线。`,
   marketplaceClose: '关闭',
@@ -3606,6 +3700,12 @@ const zhCN: Messages = {
   tabMarketplace: '工作流广场',
   marketplaceIntro:
     '社区共享的工作流。应用会在本地保存一份副本；在你主动运行之前，它不会做任何事。',
+  marketplaceSourcePublic: '公共',
+  marketplaceSourceTeam: '团队',
+  marketplaceTeamIntro: '团队仓库内共享的工作流。只有该仓库的协作者可以读取。',
+  marketplaceTeamNotConnected: '还没有连接团队仓库。',
+  marketplaceTeamNotConnectedHint: '在「设置 → 团队共享」中连接团队私有 GitHub 仓库。',
+  marketplaceAttachmentFailed: '无法下载附件。',
   marketplaceSearchPlaceholder: '搜索工作流',
   marketplaceFilterAll: '全部分类',
   marketplaceSortRecent: '最近更新',

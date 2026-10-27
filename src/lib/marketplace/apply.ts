@@ -50,9 +50,21 @@ export interface BundlePlan extends ApplyPlan {
   credentials: PasswordEntry[]
 }
 
-/** Local workflow installed from `slug`, if any. */
-export function findInstalled(workflows: readonly Workflow[], slug: string): Workflow | undefined {
-  return workflows.find((workflow) => workflow.marketplace?.slug === slug)
+/**
+ * Local workflow installed from `slug` in `repo`, if any.
+ *
+ * The repository is part of the identity: the team repo and the public
+ * marketplace may both publish a workflow with the same slug, and they must
+ * not be treated as the same listing.
+ */
+export function findInstalled(
+  workflows: readonly Workflow[],
+  slug: string,
+  repo: string = MARKETPLACE_REPO_FULL,
+): Workflow | undefined {
+  return workflows.find(
+    (workflow) => workflow.marketplace?.slug === slug && workflow.marketplace.repo === repo,
+  )
 }
 
 /**
@@ -61,16 +73,20 @@ export function findInstalled(workflows: readonly Workflow[], slug: string): Wor
  * A newer published version, or a changed hash at the same version, makes a
  * copy stale. A local edit does not: that is what an update is about to
  * overwrite, and a workflow that was never installed has nothing to update.
+ * Copies from another repository are skipped: `cards` comes from one source.
  */
 export function pendingUpdates(
   workflows: readonly Workflow[],
   cards: readonly MarketplaceCard[],
+  repo: string = MARKETPLACE_REPO_FULL,
 ): Record<string, MarketplaceCard> {
   const bySlug = new Map(cards.map((card) => [card.meta.slug, card]))
   const updates: Record<string, MarketplaceCard> = {}
   for (const workflow of workflows) {
-    const card = workflow.marketplace ? bySlug.get(workflow.marketplace.slug) : undefined
-    if (card && needsUpdate(card.meta, workflow.marketplace)) updates[workflow.id] = card
+    const ref = workflow.marketplace
+    if (!ref || ref.repo !== repo) continue
+    const card = bySlug.get(ref.slug)
+    if (card && needsUpdate(card.meta, ref)) updates[workflow.id] = card
   }
   return updates
 }
@@ -87,22 +103,27 @@ export function removedSources(
   workflows: readonly Workflow[],
   cards: readonly MarketplaceCard[],
   complete: boolean,
+  repo: string = MARKETPLACE_REPO_FULL,
 ): Set<string> {
   const removed = new Set<string>()
   if (!complete) return removed
   const slugs = new Set(cards.map((card) => card.meta.slug))
   for (const workflow of workflows) {
     const ref = workflow.marketplace
-    if (ref && ref.repo === MARKETPLACE_REPO_FULL && !slugs.has(ref.slug)) {
+    if (ref && ref.repo === repo && !slugs.has(ref.slug)) {
       removed.add(workflow.id)
     }
   }
   return removed
 }
 
-function marketplaceRef(card: MarketplaceCard, appliedAt: number): WorkflowMarketplaceRef {
+function marketplaceRef(
+  card: MarketplaceCard,
+  appliedAt: number,
+  repo: string,
+): WorkflowMarketplaceRef {
   return {
-    repo: MARKETPLACE_REPO_FULL,
+    repo,
     slug: card.meta.slug,
     version: card.meta.version,
     hash: card.meta.hash,
@@ -123,11 +144,12 @@ export function planApply(
   published: unknown,
   existing: Workflow | undefined,
   now = Date.now(),
+  repo: string = MARKETPLACE_REPO_FULL,
 ): ApplyPlan {
   const raw = asWorkflow(published)
   if (!raw) throw new MarketplaceError('invalid', 'The published workflow is not readable')
   const incoming = migrateWorkflow(raw)
-  const ref = marketplaceRef(card, now)
+  const ref = marketplaceRef(card, now, repo)
 
   if (existing) {
     if (existing.marketplace && !needsUpdate(card.meta, existing.marketplace)) {
@@ -174,12 +196,12 @@ export function planApply(
 /**
  * Local id for a bundled dependency.
  *
- * Derived from the listing slug and the dep file so a re-apply rewrites the
- * same copy instead of accumulating duplicates, and so two listings that call
- * the same workflow keep independent copies.
+ * Derived from the listing namespace and the dep file so a re-apply rewrites
+ * the same copy instead of accumulating duplicates, and so two listings that
+ * call the same workflow keep independent copies.
  */
-export function bundleDependencyId(parentSlug: string, path: string): string {
-  return `mkt-${parentSlug}-${dependencyFile(path) ?? 'workflow'}`
+export function bundleDependencyId(namespace: string, path: string): string {
+  return `mkt-${namespace}-${dependencyFile(path) ?? 'workflow'}`
 }
 
 /**
@@ -200,11 +222,20 @@ export function planApplyBundle(
   existing: Workflow | undefined,
   now = Date.now(),
   credentials: readonly PasswordEntry[] = [],
+  repo: string = MARKETPLACE_REPO_FULL,
 ): BundlePlan {
   const declared = card.meta.dependencies ?? []
   if (declared.length !== dependencies.length) {
     throw new MarketplaceError('invalid', 'The published bundle is incomplete')
   }
+
+  // Two sources may publish the same slug (a workflow shared both publicly and
+  // to a team). The namespace keeps their bundled ids and imported credentials
+  // apart; the public source keeps its historical ids unchanged.
+  const namespace =
+    repo === MARKETPLACE_REPO_FULL
+      ? card.meta.slug
+      : `${repo.replace(/[^A-Za-z0-9]+/g, '-').toLowerCase()}-${card.meta.slug}`
 
   const ids = new Map<string, string>()
   for (const dependency of dependencies) {
@@ -214,17 +245,18 @@ export function planApplyBundle(
     if (!declaredEntry) {
       throw new MarketplaceError('invalid', 'A bundled workflow is not listed in meta.json')
     }
-    ids.set(dependency.entry.id, bundleDependencyId(card.meta.slug, dependency.entry.path))
+    ids.set(dependency.entry.id, bundleDependencyId(namespace, dependency.entry.path))
   }
 
   const parent = asWorkflow(published)
   if (!parent) throw new MarketplaceError('invalid', 'The published workflow is not readable')
-  const imported = planSecretImport(card.meta.slug, card.meta.secrets, credentials, now)
+  const imported = planSecretImport(namespace, card.meta.secrets, credentials, now)
   const plan = planApply(
     card,
     rewriteWorkflowSecrets(rewriteWorkflowCalls(parent, ids), imported.idMap),
     existing,
     now,
+    repo,
   )
   if (plan.status === 'up-to-date') {
     return { ...plan, dependencies: [], credentials: [] }

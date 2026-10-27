@@ -12,6 +12,7 @@ import { I18nProvider } from '../src/sidepanel/i18n'
 import PublishWorkflowDialog, { connectFailureText } from '../src/sidepanel/PublishWorkflowDialog'
 import { messagesFor, type Locale } from '../src/lib/i18n'
 import { MarketplaceError } from '../src/lib/marketplace/types'
+import type { TeamRepoConfig } from '../src/lib/marketplace/team'
 import type { Workflow } from '../src/lib/workflow/types'
 
 function makeWorkflow(): Workflow {
@@ -39,7 +40,11 @@ function callNode(id: string, workflowId: string): Workflow['drawflow']['nodes']
 function render(
   initialAuth: { token: string; login: string } | null,
   locale: Locale = 'en',
-  options: { workflow?: Workflow; library?: Workflow[] } = {},
+  options: {
+    workflow?: Workflow
+    library?: Workflow[]
+    team?: { config: TeamRepoConfig; auth: { token: string; login: string } } | null
+  } = {},
 ): string {
   const workflow = options.workflow ?? makeWorkflow()
   return renderToStaticMarkup(
@@ -51,6 +56,7 @@ function render(
         library: options.library ?? [workflow],
         onClose: () => {},
         initialAuth,
+        initialTeam: options.team ?? null,
       }),
     ),
   )
@@ -234,6 +240,7 @@ describe('prefilling a published workflow', () => {
             library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
+            initialTeam: null,
           }),
         ),
       )
@@ -247,7 +254,9 @@ describe('prefilling a published workflow', () => {
     expect(inputs.find((input) => input.value === 'shop, export')).toBeDefined()
     expect(inputs.find((input) => input.value === 'https://example.com/v')).toBeDefined()
     expect(container.querySelector('textarea')?.value).toBe('Previous copy')
-    expect(container.querySelector('select')?.value).toBe('data')
+    expect(
+      (container.querySelector('select[aria-label="Category"]') as HTMLSelectElement | null)?.value,
+    ).toBe('data')
     expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:restored')
     expect(container.textContent).toContain('orders.csv')
     expect(container.textContent).toContain('2 KB')
@@ -306,6 +315,7 @@ describe('prefilling a published workflow', () => {
             library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
+            initialTeam: null,
           }),
         ),
       )
@@ -372,6 +382,7 @@ describe('prefilling a published workflow', () => {
             library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
+            initialTeam: null,
           }),
         ),
       )
@@ -380,7 +391,9 @@ describe('prefilling a published workflow', () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
     })
 
-    expect(container.querySelector('select')?.value).toBe('__custom__')
+    expect(
+      (container.querySelector('select[aria-label="Category"]') as HTMLSelectElement | null)?.value,
+    ).toBe('__custom__')
     const custom = [...container.querySelectorAll('input')].find(
       (input) => (input as HTMLInputElement).value === '行业调研',
     ) as HTMLInputElement
@@ -409,6 +422,7 @@ describe('prefilling a published workflow', () => {
             library: [makeWorkflow()],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
+            initialTeam: null,
           }),
         ),
       )
@@ -449,12 +463,13 @@ describe('prefilling a published workflow', () => {
             library: [makeWorkflow()],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
+            initialTeam: null,
           }),
         ),
       )
     })
 
-    const select = container.querySelector('select') as HTMLSelectElement
+    const select = container.querySelector('select[aria-label="Category"]') as HTMLSelectElement
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
       setter?.call(select, '__custom__')
@@ -471,6 +486,61 @@ describe('prefilling a published workflow', () => {
     ) as HTMLButtonElement
     await act(async () => publish.click())
     expect(container.textContent).toContain('Choose a category, or name your own.')
+  })
+})
+
+describe('publish target', () => {
+  function teamWorkflow(): Workflow {
+    const workflow = makeWorkflow()
+    workflow.marketplace = {
+      repo: 'acme/workflows',
+      slug: 'scrape-orders-abcdef',
+      version: 1,
+      hash: 'a'.repeat(64),
+      author: 'writer',
+      appliedAt: 1,
+    }
+    return workflow
+  }
+
+  const CONFIG: TeamRepoConfig = {
+    owner: 'acme',
+    repo: 'workflows',
+    branch: 'main',
+    canPush: true,
+    isPublic: false,
+  }
+  const TEAM_AUTH = { token: `ghp_${'a'.repeat(30)}`, login: 'writer' }
+
+  it('opens on the team target for a workflow last published there', () => {
+    const markup = render(null, 'en', {
+      workflow: teamWorkflow(),
+      team: { config: CONFIG, auth: TEAM_AUTH },
+    })
+
+    expect(markup).toContain('Publishing to acme/workflows as @writer.')
+    expect(markup).toContain('Public marketplace')
+    expect(markup).toContain('Team repository')
+    // The team token lives in Settings, so no token field is offered here.
+    expect(markup).not.toContain('Create a token on GitHub')
+    expect(markup).toContain('>Publish</button>')
+  })
+
+  it('stops when no team repository is connected', () => {
+    const markup = render(null, 'en', { workflow: teamWorkflow(), team: null })
+
+    expect(markup).toContain('No team repository is connected.')
+    expect(markup).toMatch(/<button[^>]*disabled[^>]*>Publish<\/button>/)
+  })
+
+  it('blocks a read-only team member from publishing', () => {
+    const markup = render(null, 'en', {
+      workflow: teamWorkflow(),
+      team: { config: { ...CONFIG, canPush: false }, auth: TEAM_AUTH },
+    })
+
+    expect(markup).toContain('publishing needs write access')
+    expect(markup).toMatch(/<button[^>]*disabled[^>]*>Publish<\/button>/)
   })
 })
 
@@ -496,6 +566,11 @@ describe('publish drafts', () => {
         },
       },
     })
+    // The published-listing prefill must not reach the network in these tests.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Promise.reject(new Error('offline'))),
+    )
     URL.createObjectURL = () => 'blob:draft'
     URL.revokeObjectURL = () => {}
   })
@@ -525,8 +600,67 @@ describe('publish drafts', () => {
     })
   }
 
-  function mount(): void {
+  const TEAM_CONFIG: TeamRepoConfig = {
+    owner: 'acme',
+    repo: 'workflows',
+    branch: 'main',
+    canPush: true,
+    isPublic: false,
+  }
+  const TEAM_AUTH = { token: `ghp_${'b'.repeat(30)}`, login: 'writer' }
+
+  function teamWorkflow(): Workflow {
     const workflow = makeWorkflow()
+    workflow.marketplace = {
+      repo: 'acme/workflows',
+      slug: 'scrape-orders-abcdef',
+      version: 1,
+      hash: 'a'.repeat(64),
+      author: 'writer',
+      appliedAt: 1,
+    }
+    return workflow
+  }
+
+  function seedTwoTargets(): void {
+    const savedAt = Date.now()
+    store.set('marketplaceDrafts', {
+      'local-1': {
+        schema: 1,
+        workflowId: 'local-1',
+        title: 'Public draft',
+        description: '',
+        category: 'other',
+        customCategory: '',
+        tags: '',
+        videoUrl: '',
+        images: [],
+        attachments: [],
+        savedAt,
+      },
+      'local-1@acme/workflows': {
+        schema: 1,
+        workflowId: 'local-1@acme/workflows',
+        title: 'Team draft',
+        description: '',
+        category: 'other',
+        customCategory: '',
+        tags: '',
+        videoUrl: '',
+        images: [],
+        attachments: [],
+        savedAt,
+      },
+    })
+  }
+
+  function mount(
+    options: {
+      workflow?: Workflow
+      team?: { config: TeamRepoConfig; auth: { token: string; login: string } } | null
+    } = {},
+  ): void {
+    const workflow = options.workflow ?? makeWorkflow()
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -540,16 +674,58 @@ describe('publish drafts', () => {
             library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
+            initialTeam: options.team === undefined ? null : options.team,
           }),
         ),
       )
     })
   }
 
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+  }
+
+  async function chooseTarget(value: 'public' | 'team'): Promise<void> {
+    const select = container.querySelector(
+      'select[aria-label="Publish to"]',
+    ) as HTMLSelectElement | null
+    if (!select) throw new Error('publish target select missing')
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+      setter?.call(select, value)
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await settle()
+  }
+
   function titleInput(): HTMLInputElement {
     return [...container.querySelectorAll('input')].find(
       (input) => (input as HTMLInputElement).value === 'Scrape orders',
     ) as HTMLInputElement
+  }
+
+  function anyTitleInput(): HTMLInputElement | undefined {
+    return [...container.querySelectorAll('input')].find((input) =>
+      [
+        'Scrape orders',
+        'Public draft',
+        'Team draft',
+        'Half-written title',
+        'Public half-written',
+      ].includes(input.value),
+    ) as HTMLInputElement | undefined
+  }
+
+  async function typeTitle(value: string): Promise<void> {
+    const input = anyTitleInput()
+    if (!input) throw new Error('title input missing')
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      setter?.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
   }
 
   it('restores the saved draft when the same workflow reopens', async () => {
@@ -563,7 +739,9 @@ describe('publish drafts', () => {
       [...container.querySelectorAll('input')].some((input) => input.value === 'Draft title'),
     ).toBe(true)
     expect(container.querySelector('textarea')?.value).toBe('Draft body')
-    expect(container.querySelector('select')?.value).toBe('data')
+    expect(
+      (container.querySelector('select[aria-label="Category"]') as HTMLSelectElement | null)?.value,
+    ).toBe('data')
     expect(container.textContent).toContain('Draft restored from your last edit.')
   })
 
@@ -610,5 +788,49 @@ describe('publish drafts', () => {
     expect(store.has('marketplaceDrafts')).toBe(false)
     expect(titleInput()?.value).toBe('Scrape orders')
     expect(container.textContent).not.toContain('Draft restored from your last edit.')
+  })
+
+  it('restores each target from its own draft', async () => {
+    seedTwoTargets()
+    mount({
+      workflow: teamWorkflow(),
+      team: { config: TEAM_CONFIG, auth: TEAM_AUTH },
+    })
+    await settle()
+
+    // Published to the team repo, so the dialog opens on the team target.
+    expect(anyTitleInput()?.value).toBe('Team draft')
+
+    await chooseTarget('public')
+
+    // The public draft is a different form; the team one is not reused.
+    expect(anyTitleInput()?.value).toBe('Public draft')
+  })
+
+  it('saves a team-target draft under its own key', async () => {
+    mount({ workflow: teamWorkflow(), team: { config: TEAM_CONFIG, auth: TEAM_AUTH } })
+    await settle()
+    await typeTitle('Half-written title')
+
+    await act(async () => {
+      root.unmount()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+
+    const drafts = store.get('marketplaceDrafts') as Record<string, { title: string }>
+    expect(drafts['local-1@acme/workflows']?.title).toBe('Half-written title')
+    expect(drafts['local-1']).toBeUndefined()
+  })
+
+  it('keeps the outgoing target’s draft when switching', async () => {
+    mount({ team: { config: TEAM_CONFIG, auth: TEAM_AUTH } })
+    await typeTitle('Half-written title')
+
+    await chooseTarget('team')
+
+    const drafts = store.get('marketplaceDrafts') as Record<string, { title: string }>
+    expect(drafts['local-1']?.title).toBe('Half-written title')
+    // Nothing was typed on the team form, so it stores nothing.
+    expect(drafts['local-1@acme/workflows']).toBeUndefined()
   })
 })

@@ -5,9 +5,11 @@
  * leaves the machine: `preparePublish` is pure (hash, slug, meta, files), and
  * `pushPublish` performs the fork → branch → files → PR sequence.
  *
- * The fork path is used even when the publisher owns the marketplace repo:
- * one write path means one set of failure modes, and the maintainer still
- * reviews every change as a PR.
+ * The public marketplace is written through a fork even when the publisher
+ * owns it: one write path means one set of failure modes, and the maintainer
+ * still reviews every change as a PR. A team repository is writable by its
+ * members, so its branches live in the repository itself and the PR is
+ * same-repo; a token with push access merges it right away.
  *
  * Unpublishing is the inverse and deliberately keeps the same shape: a branch
  * that deletes the workflow's files and a PR the maintainer merges. Nothing is
@@ -42,15 +44,16 @@ import {
   workflowHash,
   workflowPath,
 } from './meta'
+import { PUBLIC_REPO, repoFullName, type RepoRef } from './repo'
 import { toPublishableWorkflow, type PublishWarning, type PublishableWorkflow } from './sanitize'
 import { collectSecretRefs, filledPasswordFields, normalizePublishedSecrets } from './secrets'
 import { buildSlug } from './slug'
 import {
   MARKETPLACE_AUTO_MERGE_PULLS,
-  MARKETPLACE_BRANCH,
   MARKETPLACE_OWNER,
   MARKETPLACE_PR_BRANCH_PREFIX,
   MARKETPLACE_REPO,
+  MARKETPLACE_REPO_FULL,
   MAX_ATTACHMENT_NAME_CHARS,
   MAX_BUNDLE_WORKFLOWS,
   MAX_PUBLISH_ATTACHMENT_BYTES,
@@ -121,6 +124,11 @@ export interface PreparePublishOptions {
   /** GitHub login resolved from the token (`GET /user`). */
   author: string
   now?: Date
+  /**
+   * Full name (`owner/repo`) of the target repository. A local ref only bumps
+   * the listing when it came from that same repo; otherwise it is ignored.
+   */
+  repo?: string
   /** Looks up an already published workflow by slug, for version bumps. */
   findExistingMeta?: (slug: string) => Promise<MarketplaceMeta | null>
   /**
@@ -133,6 +141,8 @@ export interface PreparePublishOptions {
 export interface PushPublishDeps {
   client: PublishClient
   auth: MarketplaceAuth
+  /** Target repository; defaults to the public marketplace (fork + PR). */
+  repo?: RepoRef
   now?: Date
   sleep?: (ms: number) => Promise<void>
 }
@@ -144,6 +154,8 @@ export interface PublishResult {
   version: number
   hash: string
   meta: MarketplaceMeta
+  /** Full name of the repository the PR targets. */
+  repo: string
   /** True when the pull request was merged right after it opened. */
   merged: boolean
 }
@@ -162,6 +174,8 @@ export interface UnpublishClient extends PublishClient {
 export interface UnpublishDeps {
   client: UnpublishClient
   auth: MarketplaceAuth
+  /** Target repository; defaults to the public marketplace (fork + PR). */
+  repo?: RepoRef
   now?: Date
   sleep?: (ms: number) => Promise<void>
 }
@@ -260,7 +274,11 @@ export async function preparePublish(
     })),
   )
 
-  const localRef = input.workflow.marketplace
+  const targetRepo = options.repo ?? MARKETPLACE_REPO_FULL
+  const localRef =
+    input.workflow.marketplace && input.workflow.marketplace.repo === targetRepo
+      ? input.workflow.marketplace
+      : undefined
   const provisionalSlug =
     localRef && localRef.author === author ? localRef.slug : buildSlug(input.workflow.name, '')
   const sanitized = toPublishableWorkflow(input.workflow, provisionalSlug)
@@ -379,7 +397,7 @@ function pullTitle(meta: MarketplaceMeta): string {
   return `${verb}: ${meta.title} [wf:${meta.slug}]`
 }
 
-function pullBody(meta: MarketplaceMeta): string {
+function pullBody(meta: MarketplaceMeta, isPublic: boolean): string {
   const lines = [
     'Published from Browser Copilot.',
     '',
@@ -402,7 +420,12 @@ function pullBody(meta: MarketplaceMeta): string {
     lines.push(`- credentials: ${meta.secrets.map((secret) => `\`${secret.label}\``).join(', ')}`)
   }
   if (meta.videoUrl) lines.push(`- video: ${meta.videoUrl}`)
-  lines.push('', '<sub>Merging makes this workflow available to every Browser Copilot user.</sub>')
+  lines.push(
+    '',
+    isPublic
+      ? '<sub>Merging makes this workflow available to every Browser Copilot user.</sub>'
+      : '<sub>Merging makes this workflow available to everyone with access to this repository.</sub>',
+  )
   return lines.join('\n')
 }
 
@@ -444,12 +467,14 @@ async function writableOwner(
  */
 async function tryMergePublish(
   client: PublishClient,
+  owner: string,
+  repo: string,
   prNumber: number,
   sleep: (ms: number) => Promise<void>,
 ): Promise<boolean> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const outcome = await client.mergePull(MARKETPLACE_OWNER, MARKETPLACE_REPO, prNumber, {
+      const outcome = await client.mergePull(owner, repo, prNumber, {
         mergeMethod: 'merge',
       })
       return outcome.merged === true
@@ -475,23 +500,27 @@ export async function pushPublish(
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
 
-  const upstream = await deps.client.getRepo(MARKETPLACE_OWNER, MARKETPLACE_REPO)
-  const base = upstream.default_branch || MARKETPLACE_BRANCH
-  const writable = await writableOwner(deps.client, login, sleep)
-  const baseRef = await deps.client.getRef(writable, MARKETPLACE_REPO, base)
+  const repo = deps.repo ?? PUBLIC_REPO
+  const isPublic = repoFullName(repo) === MARKETPLACE_REPO_FULL
+  const upstream = await deps.client.getRepo(repo.owner, repo.repo)
+  const base = upstream.default_branch || repo.branch
+  // Only the shared marketplace needs a fork; a team repo takes branches from
+  // its own members directly, which is also what makes a same-repo PR possible.
+  const writable = isPublic ? await writableOwner(deps.client, login, sleep) : repo.owner
+  const baseRef = await deps.client.getRef(writable, repo.repo, base)
   const commitMessage = `Add workflow: ${prepared.meta.title} [wf:${prepared.slug}]`
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const branch = `${MARKETPLACE_PR_BRANCH_PREFIX}${prepared.slug}-${branchStamp(now, attempt)}`
     try {
-      await deps.client.createRef(writable, MARKETPLACE_REPO, branch, baseRef.object.sha)
+      await deps.client.createRef(writable, repo.repo, branch, baseRef.object.sha)
     } catch (error) {
       if (isConflict(error) && attempt === 0) continue
       throw error
     }
 
     for (const file of prepared.files) {
-      await deps.client.putFile(writable, MARKETPLACE_REPO, file.path, {
+      await deps.client.putFile(writable, repo.repo, file.path, {
         message: commitMessage,
         contentBase64: file.contentBase64,
         branch,
@@ -499,14 +528,14 @@ export async function pushPublish(
     }
 
     try {
-      const pull = await deps.client.createPull(MARKETPLACE_OWNER, MARKETPLACE_REPO, {
+      const pull = await deps.client.createPull(repo.owner, repo.repo, {
         title: pullTitle(prepared.meta),
-        head: `${login}:${branch}`,
+        head: isPublic ? `${login}:${branch}` : branch,
         base,
-        body: pullBody(prepared.meta),
+        body: pullBody(prepared.meta, isPublic),
       })
       const merged = MARKETPLACE_AUTO_MERGE_PULLS
-        ? await tryMergePublish(deps.client, pull.number, sleep)
+        ? await tryMergePublish(deps.client, repo.owner, repo.repo, pull.number, sleep)
         : false
       return {
         prUrl: pull.html_url,
@@ -515,6 +544,7 @@ export async function pushPublish(
         version: prepared.version,
         hash: prepared.hash,
         meta: prepared.meta,
+        repo: repoFullName(repo),
         merged,
       }
     } catch (error) {
@@ -537,6 +567,7 @@ export async function publishWorkflow(
   const prepared = await preparePublish(input, {
     author: deps.author,
     now: deps.now,
+    repo: deps.repo ? repoFullName(deps.repo) : undefined,
     findExistingMeta: deps.findExistingMeta,
     library: deps.library,
   })
@@ -571,11 +602,13 @@ export async function unpublishWorkflow(
   const sleep =
     deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
 
-  const upstream = await deps.client.getRepo(MARKETPLACE_OWNER, MARKETPLACE_REPO)
-  const base = upstream.default_branch || MARKETPLACE_BRANCH
-  const writable = await writableOwner(deps.client, login, sleep)
-  const baseRef = await deps.client.getRef(writable, MARKETPLACE_REPO, base)
-  const tree = await deps.client.listTree(writable, MARKETPLACE_REPO, base)
+  const repo = deps.repo ?? PUBLIC_REPO
+  const isPublic = repoFullName(repo) === MARKETPLACE_REPO_FULL
+  const upstream = await deps.client.getRepo(repo.owner, repo.repo)
+  const base = upstream.default_branch || repo.branch
+  const writable = isPublic ? await writableOwner(deps.client, login, sleep) : repo.owner
+  const baseRef = await deps.client.getRef(writable, repo.repo, base)
+  const tree = await deps.client.listTree(writable, repo.repo, base)
   const blobs = workflowBlobs(tree, input.slug)
   if (blobs.length === 0) {
     throw new MarketplaceError('not-found', `No published files for "${input.slug}" were found`)
@@ -588,20 +621,22 @@ export async function unpublishWorkflow(
     `- slug: \`${input.slug}\``,
     `- version files: ${blobs.length}`,
     '',
-    '<sub>Merging removes this workflow from the marketplace. Copies already applied locally keep working.</sub>',
+    isPublic
+      ? '<sub>Merging removes this workflow from the marketplace. Copies already applied locally keep working.</sub>'
+      : '<sub>Merging removes this workflow from the team repository. Copies already applied locally keep working.</sub>',
   ].join('\n')
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const branch = `${MARKETPLACE_PR_BRANCH_PREFIX}${input.slug}-${branchStamp(now, attempt)}`
     try {
-      await deps.client.createRef(writable, MARKETPLACE_REPO, branch, baseRef.object.sha)
+      await deps.client.createRef(writable, repo.repo, branch, baseRef.object.sha)
     } catch (error) {
       if (isConflict(error) && attempt === 0) continue
       throw error
     }
 
     for (const blob of blobs) {
-      await deps.client.deleteFile(writable, MARKETPLACE_REPO, blob.path, {
+      await deps.client.deleteFile(writable, repo.repo, blob.path, {
         message: commitMessage,
         sha: blob.sha,
         branch,
@@ -609,9 +644,9 @@ export async function unpublishWorkflow(
     }
 
     try {
-      const pull = await deps.client.createPull(MARKETPLACE_OWNER, MARKETPLACE_REPO, {
+      const pull = await deps.client.createPull(repo.owner, repo.repo, {
         title: commitMessage,
-        head: `${login}:${branch}`,
+        head: isPublic ? `${login}:${branch}` : branch,
         base,
         body,
       })

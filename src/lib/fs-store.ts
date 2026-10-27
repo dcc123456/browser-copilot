@@ -113,6 +113,11 @@ export const CONFIG_KEYS: ReadonlySet<string> = new Set([
   // The marketplace PAT is a credential: it must stay in chrome.storage.local
   // and never be written into the user's data folder (which may be synced).
   'marketplaceAuth',
+  // The team repository, its token, and its catalog snapshot. The token is a
+  // credential for the same reason as above; the address/cache are config.
+  'teamRepo',
+  'teamRepoAuth',
+  'teamCatalog',
   // The marketplace catalog is a throwaway HTTP cache: rebuilding it costs a
   // few GitHub reads, and a synced copy would only go stale in the folder.
   'marketplaceCatalog',

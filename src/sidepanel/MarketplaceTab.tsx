@@ -12,12 +12,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MessageSquare, RefreshCw, ThumbsUp } from 'lucide-react'
 import { sendCommand } from '../lib/messages'
+import { downloadBlob } from '../lib/export-answer'
 import { onStoreChanged } from '../lib/store-events'
 import type { Workflow } from '../lib/workflow/types'
 import { findInstalled } from '../lib/marketplace/apply'
 import { formatAttachmentSize } from '../lib/marketplace/attachments'
 import { categoryKey, categoryLabel, categoryOptions } from '../lib/marketplace/categories'
-import { chromeCatalogCache, loadCatalog, type LoadCatalogResult } from '../lib/marketplace/catalog'
+import {
+  chromeCatalogCache,
+  loadCatalog,
+  TEAM_CATALOG_CACHE_KEY,
+  type LoadCatalogResult,
+} from '../lib/marketplace/catalog'
 import {
   chromeReactionCache,
   listAllComments,
@@ -28,10 +34,11 @@ import {
 import { GitHubClient, type GitHubComment } from '../lib/marketplace/github-client'
 import { assetRepoPath, needsUpdate, workflowDir } from '../lib/marketplace/meta'
 import { unpublishWorkflow } from '../lib/marketplace/publish'
-import { rawUrl } from '../lib/marketplace/raw'
+import { fetchRepoAsset, rawUrl, type RepoReadAccess } from '../lib/marketplace/raw'
+import { PUBLIC_REPO, repoFullName, type RepoRef } from '../lib/marketplace/repo'
+import { getTeamAuth, getTeamRepo, teamRepoRef, type TeamRepoConfig } from '../lib/marketplace/team'
 import { clearAuth, getAuth } from '../lib/marketplace/token'
 import {
-  MARKETPLACE_BRANCH,
   MARKETPLACE_REPO_FULL,
   MarketplaceError,
   type MarketplaceAuth,
@@ -44,12 +51,17 @@ import { marketplaceErrorMessage } from './marketplace-errors'
 
 type SortMode = 'recent' | 'likes'
 
+/** Which repository the tab is reading: the public one or the team one. */
+type Source = 'public' | 'team'
+
 /** `all` plus a built-in slug or a publisher-defined label. */
 type CategoryFilter = string
 
 interface Props {
   /** The tab is mounted from startup; the catalog loads on first activation. */
   active: boolean
+  /** Test/preview seam: start on a source with the stored connection known. */
+  initial?: { source: Source; teamConfig: TeamRepoConfig | null; teamAuth: MarketplaceAuth | null }
 }
 
 function matchesQuery(card: MarketplaceCard, query: string): boolean {
@@ -97,6 +109,59 @@ const CARD_ACTION_IDLE =
   'border-border! bg-transparent! text-muted! hover:border-accent! hover:text-accent!'
 const CARD_ACTION_ACTIVE = 'border-accent! bg-accent-soft! text-accent!'
 
+/** Public/team switch; the `!` modifiers beat `styles.css`'s bare button rule. */
+const SOURCE_TAB_BASE =
+  'flex-1 cursor-pointer rounded-md border-0! bg-transparent! px-2! py-1! text-[12px] font-medium transition-colors duration-150'
+const SOURCE_TAB_IDLE = 'text-muted! hover:text-ink!'
+const SOURCE_TAB_ACTIVE = 'bg-panel! text-ink! shadow-[var(--bc-shadow)]'
+
+/**
+ * Cover image from a private repository.
+ *
+ * The raw host ignores `Authorization`, so the blob comes through the
+ * authenticated contents API and is shown through an object URL that is
+ * revoked when the card unmounts or the source changes.
+ */
+function RepoImage({
+  repo,
+  slug,
+  path,
+  client,
+}: {
+  repo: RepoRef
+  slug: string
+  path: string
+  client: GitHubClient
+}): React.ReactElement | null {
+  const [src, setSrc] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let objectUrl: string | null = null
+    void fetchRepoAsset(repo, slug, path, { client })
+      .then((blob) => {
+        if (!blob || cancelled) return
+        objectUrl = URL.createObjectURL(blob)
+        setSrc(objectUrl)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [repo, slug, path, client])
+
+  if (!src) return null
+  return (
+    <img
+      alt=""
+      className="mb-2 aspect-video w-full rounded-md border border-border object-cover"
+      loading="lazy"
+      src={src}
+    />
+  )
+}
+
 /** GitHub's mark, which lucide dropped from its brand icons. */
 function GitHubMark(): React.ReactElement {
   return (
@@ -111,7 +176,7 @@ function GitHubMark(): React.ReactElement {
   )
 }
 
-export default function MarketplaceTab({ active }: Props): React.ReactElement {
+export default function MarketplaceTab({ active, initial }: Props): React.ReactElement {
   const t = useT()
   const { locale } = useI18n()
   const [snapshot, setSnapshot] = useState<LoadCatalogResult | null>(null)
@@ -131,6 +196,12 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   const [unavailable, setUnavailable] = useState<Set<string>>(new Set())
 
   const [auth, setAuth] = useState<MarketplaceAuth | null | undefined>(undefined)
+  const [source, setSource] = useState<Source>(initial?.source ?? 'public')
+  /** Undefined while loading; null when no team repository is connected. */
+  const [teamConfig, setTeamConfig] = useState<TeamRepoConfig | null | undefined>(
+    initial ? initial.teamConfig : undefined,
+  )
+  const [teamAuth, setTeamAuth] = useState<MarketplaceAuth | null>(initial?.teamAuth ?? null)
   /** Slug whose discussion panel is expanded; one at a time. */
   const [openSlug, setOpenSlug] = useState<string | null>(null)
   const [threads, setThreads] = useState<Record<number, ThreadState>>({})
@@ -144,27 +215,66 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   }, [])
 
   const loadedRef = useRef(false)
+  /** Guards against a slow public load overwriting a newer team result. */
+  const requestIdRef = useRef(0)
+
+  const teamReady = !!teamConfig && !!teamAuth
+  const sourceClient = useMemo(
+    () =>
+      source === 'team'
+        ? teamAuth
+          ? new GitHubClient({ token: teamAuth.token })
+          : null
+        : new GitHubClient(),
+    [source, teamAuth],
+  )
+  const sourceRepo = useMemo(
+    () => (source === 'team' && teamConfig ? teamRepoRef(teamConfig) : PUBLIC_REPO),
+    [source, teamConfig],
+  )
+  const sourceRepoName = repoFullName(sourceRepo)
+  const sourceAccess: RepoReadAccess | undefined =
+    source === 'team' && sourceClient ? { client: sourceClient } : undefined
 
   const refresh = useCallback(
     async (force: boolean, quiet = false): Promise<void> => {
+      const requestId = ++requestIdRef.current
+      if (source === 'team' && !(teamConfig && teamAuth && sourceClient)) {
+        setSnapshot(null)
+        setError(null)
+        setLoading(false)
+        return
+      }
       if (!quiet) setLoading(true)
       setError(null)
       try {
-        const result = await loadCatalog({
-          client: new GitHubClient(),
-          cache: chromeCatalogCache(),
-          force,
-        })
+        const result =
+          source === 'team' && teamConfig && sourceClient
+            ? await loadCatalog({
+                client: sourceClient,
+                cache: chromeCatalogCache(TEAM_CATALOG_CACHE_KEY),
+                force,
+                repo: teamRepoRef(teamConfig),
+                access: { client: sourceClient },
+                includeEngagement: false,
+              })
+            : await loadCatalog({
+                client: sourceClient ?? new GitHubClient(),
+                cache: chromeCatalogCache(),
+                force,
+              })
+        if (requestIdRef.current !== requestId) return
         setSnapshot(result)
         if (force) setUnavailable(new Set())
       } catch (caught) {
+        if (requestIdRef.current !== requestId) return
         setError(marketplaceErrorMessage(t, caught))
         setSnapshot(null)
       } finally {
-        setLoading(false)
+        if (requestIdRef.current === requestId) setLoading(false)
       }
     },
-    [t],
+    [t, source, teamConfig, teamAuth, sourceClient],
   )
 
   useEffect(() => {
@@ -195,7 +305,20 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   useEffect(() => {
     if (!active) return
     void getAuth().then(setAuth)
+    void Promise.all([getTeamRepo(), getTeamAuth()]).then(([config, token]) => {
+      setTeamConfig(config)
+      setTeamAuth(token)
+    })
   }, [active])
+
+  // Cards, threads and removals all belong to one repository; carrying any of
+  // them across the switch would show the other source's state.
+  useEffect(() => {
+    setSnapshot(null)
+    setError(null)
+    setOpenSlug(null)
+    setUnavailable(new Set())
+  }, [source])
 
   // The catalog knows the public counts, not whether this device reacted; the
   // stored reaction id is the only record, so the like icon would otherwise
@@ -227,9 +350,12 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
   const issueUrl = (issueNumber: number): string =>
     `https://github.com/${MARKETPLACE_REPO_FULL}/pull/${issueNumber}`
 
+  /** The account that can write to the active source, if any. */
+  const sourceAuth = source === 'team' ? teamAuth : auth
+
   const clientForWrites = (): GitHubClient => {
-    if (!auth) throw new MarketplaceError('auth-required', 'Connect GitHub first')
-    return new GitHubClient({ token: auth.token })
+    if (!sourceAuth) throw new MarketplaceError('auth-required', 'Connect GitHub first')
+    return new GitHubClient({ token: sourceAuth.token })
   }
 
   const forgetRejectedToken = async (): Promise<void> => {
@@ -370,8 +496,27 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
           })
         : t.marketplaceStaleReason({ reason: marketplaceErrorMessage(t, staleError) })
 
+  /** Downloads an attachment served by the private contents API. */
+  const downloadAttachment = async (
+    repo: RepoRef,
+    slug: string,
+    file: { name: string; path: string },
+  ): Promise<void> => {
+    if (!sourceClient) return
+    try {
+      const blob = await fetchRepoAsset(repo, slug, file.path, { client: sourceClient })
+      if (!blob) {
+        setBanner({ kind: 'error', text: t.marketplaceAttachmentFailed })
+        return
+      }
+      await downloadBlob(blob, blob.type || 'application/octet-stream', file.name)
+    } catch (caught) {
+      setBanner({ kind: 'error', text: marketplaceErrorMessage(t, caught) })
+    }
+  }
+
   const apply = async (card: MarketplaceCard): Promise<void> => {
-    const existing = findInstalled(installed, card.meta.slug)
+    const existing = findInstalled(installed, card.meta.slug, sourceRepoName)
     const isUpdate = !!existing && needsUpdate(card.meta, existing.marketplace)
     const bundled = (card.meta.dependencies ?? []).map((entry) => entry.name)
     const credentials = (card.meta.secrets ?? []).map((entry) => entry.label || entry.id)
@@ -397,7 +542,10 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
 
     setBusySlug(card.meta.slug)
     try {
-      const plan = await installFromCard(card, existing, installed)
+      const plan = await installFromCard(card, existing, installed, {
+        repo: sourceRepo,
+        access: sourceAccess,
+      })
       setBanner({
         kind: 'ok',
         text:
@@ -425,7 +573,7 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
    * every copy already applied keeps working afterwards.
    */
   const unpublish = async (card: MarketplaceCard): Promise<void> => {
-    if (!auth) return
+    if (!sourceAuth) return
     const confirmed = await confirmDialog({
       title: t.marketplaceUnpublishTitle,
       message: t.marketplaceUnpublishMessage({ title: card.meta.title }),
@@ -438,14 +586,18 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
     try {
       const result = await unpublishWorkflow(
         { slug: card.meta.slug, title: card.meta.title },
-        { client: clientForWrites(), auth },
+        { client: clientForWrites(), auth: sourceAuth, repo: sourceRepo },
       )
       setBanner({
         kind: 'ok',
         text: t.marketplaceUnpublishBanner({ number: result.prNumber }),
       })
     } catch (caught) {
-      if (caught instanceof MarketplaceError && caught.code === 'unauthorized') {
+      if (
+        source === 'public' &&
+        caught instanceof MarketplaceError &&
+        caught.code === 'unauthorized'
+      ) {
         await forgetRejectedToken()
       }
       setBanner({ kind: 'error', text: marketplaceErrorMessage(t, caught) })
@@ -476,7 +628,45 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
         </button>
       </div>
 
-      <p className="mt-0 mb-3 text-[12px] leading-snug text-muted">{t.marketplaceIntro}</p>
+      <div
+        aria-label={t.tabMarketplace}
+        className="mb-2 flex gap-0.5 rounded-lg border border-border bg-panel-2 p-0.5"
+        role="tablist"
+      >
+        <button
+          aria-selected={source === 'public'}
+          className={[
+            SOURCE_TAB_BASE,
+            source === 'public' ? SOURCE_TAB_ACTIVE : SOURCE_TAB_IDLE,
+          ].join(' ')}
+          onClick={() => setSource('public')}
+          role="tab"
+          type="button"
+        >
+          {t.marketplaceSourcePublic}
+        </button>
+        <button
+          aria-selected={source === 'team'}
+          className={[
+            SOURCE_TAB_BASE,
+            source === 'team' ? SOURCE_TAB_ACTIVE : SOURCE_TAB_IDLE,
+          ].join(' ')}
+          onClick={() => setSource('team')}
+          role="tab"
+          type="button"
+        >
+          {t.marketplaceSourceTeam}
+        </button>
+      </div>
+
+      <p className="mt-0 mb-3 text-[12px] leading-snug text-muted">
+        {source === 'team' ? t.marketplaceTeamIntro : t.marketplaceIntro}
+      </p>
+      {source === 'team' && teamConfig && !teamConfig.canPush && (
+        <p className="mt-0 mb-3 text-[11.5px] leading-snug text-warn">
+          {t.settingsTeamReadOnlyWarning}
+        </p>
+      )}
 
       <input
         aria-label={t.marketplaceSearchPlaceholder}
@@ -520,7 +710,16 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
         <p className="mt-0 mb-2 text-[11.5px] text-muted">{t.marketplaceTruncated}</p>
       )}
 
-      {loading && !snapshot ? (
+      {source === 'team' && !teamReady ? (
+        teamConfig === undefined ? (
+          <p className="m-0 text-[12.5px] text-muted">{t.marketplaceLoading}</p>
+        ) : (
+          <div className="empty-state">
+            <p>{t.marketplaceTeamNotConnected}</p>
+            <p className="mt-1">{t.marketplaceTeamNotConnectedHint}</p>
+          </div>
+        )
+      ) : loading && !snapshot ? (
         <p className="m-0 text-[12.5px] text-muted">{t.marketplaceLoading}</p>
       ) : error ? (
         <div className="empty-state">
@@ -540,12 +739,17 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
         <ul className="task-list">
           {cards.map((card) => {
             const meta = card.meta
-            const existing = findInstalled(installed, meta.slug)
+            const existing = findInstalled(installed, meta.slug, sourceRepoName)
             const hasUpdate = !!existing && needsUpdate(meta, existing.marketplace)
             const isUnavailable = unavailable.has(meta.slug)
-            const isMine = !!auth && auth.login.toLowerCase() === meta.author.toLowerCase()
+            const sourceLogin = source === 'team' ? teamAuth?.login : auth?.login
+            const canWriteHere = source === 'public' || teamConfig?.canPush === true
+            const isMine =
+              !!sourceLogin &&
+              canWriteHere &&
+              sourceLogin.toLowerCase() === meta.author.toLowerCase()
             const cover = meta.images[0]
-            const sourceUrl = `https://github.com/${MARKETPLACE_REPO_FULL}/tree/${MARKETPLACE_BRANCH}/${workflowDir(meta.slug)}`
+            const sourceUrl = `https://github.com/${sourceRepoName}/tree/${sourceRepo.branch}/${workflowDir(meta.slug)}`
             const issueNumber = card.prNumber
             const likeState = issueNumber === null ? undefined : likeStates[issueNumber]
             const liked = likeState?.liked ?? false
@@ -554,14 +758,22 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
             const bundleCount = meta.dependencies?.length ?? 0
             return (
               <li className="task-item" key={meta.slug}>
-                {cover && (
-                  <img
-                    alt=""
-                    className="mb-2 aspect-video w-full rounded-md border border-border object-cover"
-                    loading="lazy"
-                    src={rawUrl(assetRepoPath(meta.slug, cover))}
-                  />
-                )}
+                {cover &&
+                  (source === 'team' && sourceClient ? (
+                    <RepoImage
+                      client={sourceClient}
+                      path={assetRepoPath(meta.slug, cover)}
+                      repo={sourceRepo}
+                      slug={meta.slug}
+                    />
+                  ) : (
+                    <img
+                      alt=""
+                      className="mb-2 aspect-video w-full rounded-md border border-border object-cover"
+                      loading="lazy"
+                      src={rawUrl(sourceRepo, assetRepoPath(meta.slug, cover))}
+                    />
+                  ))}
                 <div className="task-item-head">
                   <div className="task-item-lead">
                     <strong className="task-item-name">{meta.title}</strong>
@@ -616,17 +828,28 @@ export default function MarketplaceTab({ active }: Props): React.ReactElement {
                 {!!meta.attachments?.length && (
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">
                     <span className="text-muted">{t.marketplaceCardAttachments}</span>
-                    {meta.attachments.map((file) => (
-                      <a
-                        className="text-accent"
-                        href={rawUrl(assetRepoPath(meta.slug, file.path))}
-                        key={file.path}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        {file.name} ({formatAttachmentSize(file.size)})
-                      </a>
-                    ))}
+                    {meta.attachments.map((file) =>
+                      source === 'team' ? (
+                        <button
+                          className="cursor-pointer border-0! bg-transparent! p-0! text-[11.5px]! text-accent!"
+                          key={file.path}
+                          onClick={() => void downloadAttachment(sourceRepo, meta.slug, file)}
+                          type="button"
+                        >
+                          {file.name} ({formatAttachmentSize(file.size)})
+                        </button>
+                      ) : (
+                        <a
+                          className="text-accent"
+                          href={rawUrl(sourceRepo, assetRepoPath(meta.slug, file.path))}
+                          key={file.path}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          {file.name} ({formatAttachmentSize(file.size)})
+                        </a>
+                      ),
+                    )}
                   </div>
                 )}
                 <div className="actions task-actions">

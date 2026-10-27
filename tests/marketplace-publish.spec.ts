@@ -580,6 +580,27 @@ describe('preparePublish', () => {
 
     await expect(prepare(makeInput({ workflow }))).rejects.toMatchObject({ code: 'invalid' })
   })
+
+  it('does not reuse a local ref that belongs to another repository', async () => {
+    const prepared = await preparePublish(
+      makeInput({
+        workflow: makeWorkflow({
+          marketplace: {
+            repo: `${MARKETPLACE_OWNER}/${MARKETPLACE_REPO}`,
+            slug: 'scrape-orders-abcdef',
+            version: 2,
+            hash: 'a'.repeat(64),
+            author: 'octocat',
+            appliedAt: 1,
+          },
+        }),
+      }),
+      { author: 'octocat', now: NOW, repo: 'acme/team-workflows' },
+    )
+
+    expect(prepared.slug).not.toBe('scrape-orders-abcdef')
+    expect(prepared.version).toBe(1)
+  })
 })
 
 describe('pushPublish', () => {
@@ -754,6 +775,62 @@ describe('pushPublish', () => {
       pushPublish(prepared, { client, auth: { token: '', login: 'octocat' } }),
     ).rejects.toMatchObject({ code: 'auth-required' })
   })
+
+  const TEAM = { owner: 'acme', repo: 'team-workflows', branch: 'main', isPrivate: true }
+
+  it('pushes a team publish as a same-repo branch and pull request', async () => {
+    const prepared = await prepare()
+    const { client, calls } = makeClient()
+
+    const result = await pushPublish(prepared, {
+      client,
+      auth: AUTH,
+      repo: TEAM,
+      now: NOW,
+      sleep: async () => {},
+    })
+
+    const branch = `submit/${prepared.slug}-202610250900`
+    expect(calls.createFork).toHaveLength(0)
+    expect(calls.getRepo).toEqual([{ owner: 'acme', repo: 'team-workflows' }])
+    expect(calls.getRef).toEqual([{ owner: 'acme', repo: 'team-workflows', branch: 'main' }])
+    expect(calls.createRef).toEqual([
+      { owner: 'acme', repo: 'team-workflows', branch, sha: BASE_SHA },
+    ])
+    expect(calls.putFile.every((call) => call.owner === 'acme')).toBe(true)
+    expect(calls.putFile.every((call) => call.repo === 'team-workflows')).toBe(true)
+    expect(calls.createPull).toMatchObject([
+      {
+        owner: 'acme',
+        repo: 'team-workflows',
+        head: branch,
+        base: 'main',
+      },
+    ])
+    expect(calls.createPull[0]!.body).toContain(
+      'available to everyone with access to this repository',
+    )
+    expect(calls.mergePull).toEqual([
+      { owner: 'acme', repo: 'team-workflows', pullNumber: 42, mergeMethod: 'merge' },
+    ])
+    expect(result).toMatchObject({ repo: 'acme/team-workflows', merged: true })
+  })
+
+  it('leaves a team pull request open for a read-only member', async () => {
+    const prepared = await prepare()
+    const { client, calls } = makeClient({ mergeForbidden: true })
+
+    const result = await pushPublish(prepared, {
+      client,
+      auth: AUTH,
+      repo: TEAM,
+      now: NOW,
+      sleep: async () => {},
+    })
+
+    expect(calls.mergePull).toHaveLength(1)
+    expect(result).toMatchObject({ repo: 'acme/team-workflows', merged: false })
+  })
 })
 
 describe('unpublishWorkflow', () => {
@@ -847,6 +924,31 @@ describe('unpublishWorkflow', () => {
         { client, auth: { token: '', login: 'octocat' } },
       ),
     ).rejects.toMatchObject({ code: 'auth-required' })
+  })
+
+  it('removes a team listing through a same-repo pull request', async () => {
+    const { client, calls } = makeClient({ tree: treeFor(SLUG) })
+
+    const result = await unpublishWorkflow(
+      { slug: SLUG, title: 'Scrape orders' },
+      {
+        client,
+        auth: AUTH,
+        repo: { owner: 'acme', repo: 'team-workflows', branch: 'main', isPrivate: true },
+        now: NOW,
+        sleep: async () => {},
+      },
+    )
+
+    const branch = `submit/${SLUG}-202610250900`
+    expect(calls.createFork).toHaveLength(0)
+    expect(calls.listTree).toEqual([{ owner: 'acme', repo: 'team-workflows', branch: 'main' }])
+    expect(calls.deleteFile.every((call) => call.owner === 'acme')).toBe(true)
+    expect(calls.createPull).toMatchObject([
+      { owner: 'acme', repo: 'team-workflows', head: branch, base: 'main' },
+    ])
+    expect(calls.createPull[0]!.body).toContain('from the team repository')
+    expect(result).toMatchObject({ slug: SLUG, files: 3 })
   })
 })
 

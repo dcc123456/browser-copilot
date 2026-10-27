@@ -363,18 +363,19 @@ ${body}
  * using the File System Access API for silent downloads without user confirmation.
  */
 export async function downloadBlob(
-  content: string,
+  content: string | Blob,
   mime: string,
   filename: string,
   downloadDir?: FileSystemDirectoryHandle | null,
 ): Promise<boolean> {
+  const blob = typeof content === 'string' ? new Blob([content], { type: mime }) : content
   // If a download directory is configured, write directly to it (silent download)
   if (downloadDir) {
     try {
       const fileHandle = await downloadDir.getFileHandle(filename, { create: true })
       const writable = await fileHandle.createWritable()
       try {
-        await writable.write(content)
+        await writable.write(blob)
       } finally {
         await writable.close()
       }
@@ -397,7 +398,7 @@ export async function downloadBlob(
   }
   try {
     if (hasChrome) {
-      const url = URL.createObjectURL(new Blob([content], { type: mime }))
+      const url = URL.createObjectURL(blob)
       // Revoke only after the download has been accepted: Chrome has copied the
       // blob by then. A too-early revoke (the old setTimeout(0)) can abort the
       // transfer and look like a no-op click.
@@ -412,7 +413,7 @@ export async function downloadBlob(
       return true
     }
     // Non-extension fallback (web preview / tests): plain anchor download.
-    const url = URL.createObjectURL(new Blob([content], { type: mime }))
+    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = filename

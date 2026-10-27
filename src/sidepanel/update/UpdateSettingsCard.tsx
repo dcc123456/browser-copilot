@@ -8,16 +8,12 @@
  */
 
 import { useState, type ReactElement } from 'react'
+import { PRIMARY_BUTTON, SECONDARY_BUTTON } from '../../ui/button-styles'
 import { useI18n, useT } from '../i18n'
 import { describeCheckError } from './error-text'
 import { openReleasePage } from './open-release'
 import UpdateDialog from './UpdateDialog'
 import { useUpdateSnapshot } from './use-update-snapshot'
-
-const PRIMARY_BUTTON =
-  'h-8 cursor-pointer rounded-lg border border-accent bg-accent px-3 text-[12.5px] font-semibold text-on-accent transition-colors duration-150 hover:bg-accent-strong disabled:cursor-default disabled:opacity-60'
-const SECONDARY_BUTTON =
-  'h-8 cursor-pointer rounded-lg border border-border bg-panel-2 px-3 text-[12.5px] font-medium text-muted transition-colors duration-150 hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-60'
 
 export default function UpdateSettingsCard(): ReactElement {
   const t = useT()

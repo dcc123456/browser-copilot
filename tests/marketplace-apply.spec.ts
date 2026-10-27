@@ -156,6 +156,17 @@ describe('planApply', () => {
     expect(findInstalled([local], 'scrape-orders-abcdef')).toBe(local)
     expect(findInstalled([local], 'other')).toBeUndefined()
   })
+
+  it('keeps same-slug listings from different repositories apart', () => {
+    const local = existing(1)
+    expect(findInstalled([local], 'scrape-orders-abcdef', 'acme/team-workflows')).toBeUndefined()
+    expect(findInstalled([local], 'scrape-orders-abcdef', 'dcc123456/BC-workflow')).toBe(local)
+  })
+
+  it('records the source repository on an applied copy', () => {
+    const plan = planApply(card(), published(), undefined, NOW, 'acme/team-workflows')
+    expect(plan.workflow.marketplace?.repo).toBe('acme/team-workflows')
+  })
 })
 
 function dependency(id: string, name: string): MarketplaceDependency {

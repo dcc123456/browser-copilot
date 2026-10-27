@@ -48,11 +48,13 @@ import { confirmDialog } from '../ui/confirm'
 import { FailureCenterDialog } from './FailureCenter'
 import { WorkflowHealthView } from './WorkflowHealthView'
 import PublishWorkflowDialog from './PublishWorkflowDialog'
-import { installFromCard } from './marketplace-install'
+import { installFromCard, type InstallSource } from './marketplace-install'
 import { marketplaceErrorMessage } from './marketplace-errors'
 import { pendingUpdates, removedSources } from '../lib/marketplace/apply'
-import { chromeCatalogCache, loadCatalog } from '../lib/marketplace/catalog'
+import { chromeCatalogCache, loadCatalog, TEAM_CATALOG_CACHE_KEY } from '../lib/marketplace/catalog'
 import { GitHubClient } from '../lib/marketplace/github-client'
+import { PUBLIC_REPO, repoFullName } from '../lib/marketplace/repo'
+import { getTeamAuth, getTeamRepo, teamRepoRef } from '../lib/marketplace/team'
 import {
   MARKETPLACE_CACHE_TTL_MS,
   MARKETPLACE_REPO_FULL,
@@ -530,30 +532,99 @@ export default function WorkflowsTab() {
   const nextUpdateCheckRef = useRef(0)
 
   /**
-   * Reads the (30-minute cached) marketplace catalog and marks installed
+   * Reads the public and team catalogs (30-minute cached) and marks installed
    * workflows the publisher has moved ahead of.
    *
    * The tab refreshes every 5s, so the check is throttled: a normal pass costs
-   * nothing beyond the cached catalog read, and an offline failure waits ten
+   * nothing beyond the cached catalog reads, and an offline failure waits ten
    * minutes before asking GitHub again instead of retrying on every tick.
+   * A source with no installed workflows is never fetched.
    */
   const checkMarketplaceUpdates = useCallback(async (list: Workflow[]): Promise<void> => {
     if (!list.some((wf) => wf.marketplace)) return
     if (Date.now() < nextUpdateCheckRef.current) return
     nextUpdateCheckRef.current = Date.now() + MARKETPLACE_CACHE_TTL_MS
-    try {
-      const catalog = await loadCatalog({
-        client: new GitHubClient(),
-        cache: chromeCatalogCache(),
-      })
-      setMarketplaceUpdates(pendingUpdates(list, catalog.cards))
-      setMarketplaceRemoved(
-        removedSources(list, catalog.cards, !catalog.truncated && !catalog.stale),
-      )
-    } catch {
+
+    const sourceOf = (wf: Workflow): string => wf.marketplace?.repo ?? MARKETPLACE_REPO_FULL
+    const publicFlows = list.filter((wf) => sourceOf(wf) === MARKETPLACE_REPO_FULL)
+    const [teamConfig, teamAuth] = await Promise.all([getTeamRepo(), getTeamAuth()])
+    const teamRepo = teamConfig ? teamRepoRef(teamConfig) : null
+    const teamRepoName = teamRepo ? repoFullName(teamRepo) : null
+    const teamFlows = teamRepoName ? list.filter((wf) => sourceOf(wf) === teamRepoName) : []
+
+    const publicTask: Promise<{
+      updates: Record<string, MarketplaceCard>
+      removed: Set<string>
+    }> | null =
+      publicFlows.length > 0
+        ? (async () => {
+            const catalog = await loadCatalog({
+              client: new GitHubClient(),
+              cache: chromeCatalogCache(),
+            })
+            return {
+              updates: pendingUpdates(publicFlows, catalog.cards),
+              removed: removedSources(
+                publicFlows,
+                catalog.cards,
+                !catalog.truncated && !catalog.stale,
+              ),
+            }
+          })()
+        : null
+
+    const teamTask: Promise<{
+      updates: Record<string, MarketplaceCard>
+      removed: Set<string>
+    }> | null =
+      teamRepo && teamAuth && teamFlows.length > 0
+        ? (async () => {
+            const client = new GitHubClient({ token: teamAuth.token })
+            const catalog = await loadCatalog({
+              client,
+              cache: chromeCatalogCache(TEAM_CATALOG_CACHE_KEY),
+              repo: teamRepo,
+              access: { client },
+              includeEngagement: false,
+            })
+            return {
+              updates: pendingUpdates(teamFlows, catalog.cards, repoFullName(teamRepo)),
+              removed: removedSources(
+                teamFlows,
+                catalog.cards,
+                !catalog.truncated && !catalog.stale,
+                repoFullName(teamRepo),
+              ),
+            }
+          })()
+        : null
+
+    const tasks = [publicTask, teamTask].filter(
+      (task): task is Exclude<typeof task, null> => task !== null,
+    )
+    if (tasks.length === 0) return
+    const results = await Promise.allSettled(tasks)
+    const succeeded = results.filter(
+      (
+        entry,
+      ): entry is PromiseFulfilledResult<{
+        updates: Record<string, MarketplaceCard>
+        removed: Set<string>
+      }> => entry.status === 'fulfilled',
+    )
+    if (succeeded.length === 0) {
       // Offline: keep the last known state, no banner for an unasked check.
       nextUpdateCheckRef.current = Date.now() + 10 * 60 * 1000
+      return
     }
+    const updates: Record<string, MarketplaceCard> = {}
+    const removed = new Set<string>()
+    for (const entry of succeeded) {
+      Object.assign(updates, entry.value.updates)
+      for (const id of entry.value.removed) removed.add(id)
+    }
+    setMarketplaceUpdates(updates)
+    setMarketplaceRemoved(removed)
   }, [])
 
   useEffect(() => {
@@ -575,7 +646,21 @@ export default function WorkflowsTab() {
     if (!confirmed) return
     setBusy(true)
     try {
-      const plan = await installFromCard(card, wf, workflows)
+      const repoName = wf.marketplace?.repo ?? MARKETPLACE_REPO_FULL
+      let source: InstallSource = { repo: PUBLIC_REPO }
+      if (repoName !== MARKETPLACE_REPO_FULL) {
+        const [config, teamToken] = await Promise.all([getTeamRepo(), getTeamAuth()])
+        const repo = config ? teamRepoRef(config) : null
+        if (!repo || !teamToken || repoFullName(repo) !== repoName) {
+          setBanner({ kind: 'error', text: t.settingsTeamRepoNotFound })
+          return
+        }
+        source = {
+          repo,
+          access: { client: new GitHubClient({ token: teamToken.token }) },
+        }
+      }
+      const plan = await installFromCard(card, wf, workflows, source)
       if (plan.status === 'update') {
         setBanner({
           kind: 'ok',
@@ -1698,7 +1783,7 @@ export default function WorkflowsTab() {
                   type: 'workflows.marketplace',
                   id: publishTarget.id,
                   marketplace: {
-                    repo: MARKETPLACE_REPO_FULL,
+                    repo: result.repo,
                     slug: result.slug,
                     version: result.version,
                     hash: result.hash,

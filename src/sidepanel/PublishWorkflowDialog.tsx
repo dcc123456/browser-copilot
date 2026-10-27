@@ -9,7 +9,7 @@
  * @module sidepanel/PublishWorkflowDialog
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ImagePlus, Paperclip, Trash2 } from 'lucide-react'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
 import { useT } from './i18n'
@@ -32,8 +32,16 @@ import {
   type PublishResult,
 } from '../lib/marketplace/publish'
 import type { PublishWarning } from '../lib/marketplace/sanitize'
-import { fetchPublishedAsset, fetchPublishedMeta } from '../lib/marketplace/raw'
-import { invalidateCatalogCache } from '../lib/marketplace/catalog'
+import {
+  fetchPublishedAsset,
+  fetchPublishedMeta,
+  fetchRepoAsset,
+  fetchRepoMeta,
+  type RepoReadAccess,
+} from '../lib/marketplace/raw'
+import { invalidateCatalogCache, TEAM_CATALOG_CACHE_KEY } from '../lib/marketplace/catalog'
+import { PUBLIC_REPO, repoFullName, type RepoRef } from '../lib/marketplace/repo'
+import { getTeamAuth, getTeamRepo, teamRepoRef, type TeamRepoConfig } from '../lib/marketplace/team'
 import { sendCommand } from '../lib/messages'
 import type { PasswordEntry } from '../lib/types'
 import {
@@ -43,6 +51,7 @@ import {
   draftFileToBlob,
   loadDraft,
   saveDraft,
+  type PublishDraft,
 } from '../lib/marketplace/draft'
 import { isClassicToken, setAuth, clearAuth, getAuth } from '../lib/marketplace/token'
 import {
@@ -64,6 +73,9 @@ const TOKEN_URL =
 
 /** Select value that reveals the free-form category input. */
 const CUSTOM_CATEGORY = '__custom__'
+
+/** Which repository the listing goes to. */
+type PublishTarget = 'public' | 'team'
 
 const FORM_ERROR_KEY: Record<PublishFormError, keyof Messages> = {
   'title-required': 'marketplaceFormTitleRequired',
@@ -142,6 +154,8 @@ interface Props {
   onPublished?: (result: PublishResult) => void
   /** Test/preview seam: skip reading `chrome.storage.local`. */
   initialAuth?: MarketplaceAuth | null
+  /** Test/preview seam: the stored team connection; `null` means none. */
+  initialTeam?: { config: TeamRepoConfig; auth: MarketplaceAuth } | null
 }
 
 function Field({
@@ -168,6 +182,7 @@ export default function PublishWorkflowDialog({
   onClose,
   onPublished,
   initialAuth,
+  initialTeam,
 }: Props): React.ReactElement {
   const t = useT()
   /**
@@ -202,6 +217,42 @@ export default function PublishWorkflowDialog({
   const [tokenInput, setTokenInput] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
+
+  // Re-editing a workflow published to the team repo starts on that target.
+  const [target, setTarget] = useState<PublishTarget>(
+    workflow.marketplace?.repo && workflow.marketplace.repo !== MARKETPLACE_REPO_FULL
+      ? 'team'
+      : 'public',
+  )
+  /** Undefined while loading; null when no team repository is connected. */
+  const [teamConfig, setTeamConfig] = useState<TeamRepoConfig | null | undefined>(
+    initialTeam === undefined ? undefined : (initialTeam?.config ?? null),
+  )
+  const [teamAuth, setTeamAuth] = useState<MarketplaceAuth | null>(initialTeam?.auth ?? null)
+
+  useEffect(() => {
+    if (initialTeam !== undefined) return
+    void Promise.all([getTeamRepo(), getTeamAuth()]).then(([config, token]) => {
+      setTeamConfig(config)
+      setTeamAuth(token)
+    })
+  }, [initialTeam])
+
+  const teamRef = useMemo(() => (teamConfig ? teamRepoRef(teamConfig) : null), [teamConfig])
+  const targetRepo: RepoRef = target === 'team' && teamRef ? teamRef : PUBLIC_REPO
+  const targetRepoName = repoFullName(targetRepo)
+  const targetAuth = target === 'team' ? teamAuth : auth
+  const teamUnavailable = target === 'team' && (!teamRef || !teamAuth)
+  const teamReadOnly = target === 'team' && teamConfig?.canPush === false
+  const targetReady = target === 'team' ? !teamUnavailable && !teamReadOnly : !!auth
+  /**
+   * Credential overrides typed for one repository must never be restored into
+   * the other's form, so a draft belongs to one target (and one team repo).
+   */
+  const draftKey =
+    target === 'team' ? `${workflow.id}@${teamRef ? repoFullName(teamRef) : 'team'}` : workflow.id
+  const draftKeyRef = useRef(draftKey)
+  draftKeyRef.current = draftKey
 
   const [title, setTitle] = useState(workflow.name)
   const [description, setDescription] = useState(workflow.description ?? '')
@@ -297,14 +348,44 @@ export default function PublishWorkflowDialog({
   }
 
   /**
+   * The form's contents as a draft, or null when nothing changed since it
+   * opened or the publish already succeeded. Reads refs only, so the identity
+   * is stable for the unmount cleanup.
+   */
+  const captureDraft = useCallback(async (key: string): Promise<PublishDraft | null> => {
+    const snapshot = formRef.current
+    if (!draftDirtyRef.current || resultRef.current) return null
+    const [draftImages, draftAttachments] = await Promise.all([
+      Promise.all(snapshot.images.map((image) => blobToDraftFile(image.blob))),
+      Promise.all(snapshot.attachments.map((file) => blobToDraftFile(file.blob, file.name))),
+    ])
+    return {
+      schema: DRAFT_SCHEMA_VERSION,
+      workflowId: key,
+      title: snapshot.title,
+      description: snapshot.description,
+      category: snapshot.category,
+      customCategory: snapshot.customCategory,
+      tags: snapshot.tagInput,
+      videoUrl: snapshot.videoUrl,
+      images: draftImages,
+      attachments: draftAttachments,
+      secretValues: snapshot.secretValues,
+      savedAt: Date.now(),
+    }
+  }, [])
+
+  /**
    * A saved draft outranks the published listing: it is the user's newer,
    * unfinished copy. Marking the form author-owned up front also stops the
-   * async `meta.json` prefill from overwriting it field by field.
+   * async `meta.json` prefill from overwriting it field by field. Reruns when
+   * the target changes; `switchTarget` clears the ownership so the incoming
+   * target can restore its own draft.
    */
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const draft = await loadDraft(workflow.id)
+      const draft = await loadDraft(draftKey)
       if (!draft || cancelled || formOwnedRef.current) return
       formOwnedRef.current = true
       setTitle(draft.title)
@@ -335,7 +416,7 @@ export default function PublishWorkflowDialog({
     return () => {
       cancelled = true
     }
-  }, [workflow.id])
+  }, [draftKey])
 
   /**
    * Every close path unmounts the dialog (Escape, backdrop, cancel, switching
@@ -345,37 +426,16 @@ export default function PublishWorkflowDialog({
    */
   useEffect(() => {
     return () => {
-      const snapshot = formRef.current
-      if (!draftDirtyRef.current || resultRef.current) return
-      void (async () => {
-        const draftImages = await Promise.all(
-          snapshot.images.map((image) => blobToDraftFile(image.blob)),
-        )
-        const draftAttachments = await Promise.all(
-          snapshot.attachments.map((file) => blobToDraftFile(file.blob, file.name)),
-        )
-        await saveDraft({
-          schema: DRAFT_SCHEMA_VERSION,
-          workflowId: workflow.id,
-          title: snapshot.title,
-          description: snapshot.description,
-          category: snapshot.category,
-          customCategory: snapshot.customCategory,
-          tags: snapshot.tagInput,
-          videoUrl: snapshot.videoUrl,
-          images: draftImages,
-          attachments: draftAttachments,
-          secretValues: snapshot.secretValues,
-          savedAt: Date.now(),
+      void captureDraft(draftKeyRef.current)
+        .then((draft) => (draft ? saveDraft(draft) : undefined))
+        .catch(() => {
+          // Losing a draft must never be what breaks closing the dialog.
         })
-      })().catch(() => {
-        // Losing a draft must never be what breaks closing the dialog.
-      })
     }
-  }, [workflow.id])
+  }, [captureDraft])
 
   const discardDraft = (): void => {
-    void clearDraft(workflow.id)
+    void clearDraft(draftKeyRef.current)
     setRestoredDraft(false)
     // Keep the form author-owned so an in-flight prefill cannot repaint it,
     // but closing now must not write the discarded draft back.
@@ -402,11 +462,26 @@ export default function PublishWorkflowDialog({
   }
 
   const publishedSlug = workflow.marketplace?.slug
+  const publishedRepoName = workflow.marketplace?.repo ?? MARKETPLACE_REPO_FULL
+  /** Where the current listing lives; null until the team connection loads. */
+  const publishedRepo = useMemo<RepoRef | null>(() => {
+    if (publishedRepoName === MARKETPLACE_REPO_FULL) return PUBLIC_REPO
+    return teamRef && repoFullName(teamRef) === publishedRepoName ? teamRef : null
+  }, [publishedRepoName, teamRef])
+
   useEffect(() => {
-    if (!publishedSlug) return
+    if (!publishedSlug || !publishedRepo) return
+    const access: RepoReadAccess | undefined =
+      publishedRepo !== PUBLIC_REPO && teamAuth
+        ? { client: new GitHubClient({ token: teamAuth.token }) }
+        : undefined
+    if (publishedRepo !== PUBLIC_REPO && !access) return
     let cancelled = false
     void (async () => {
-      const meta = await fetchPublishedMeta(publishedSlug).catch(() => null)
+      const meta =
+        publishedRepo === PUBLIC_REPO
+          ? await fetchPublishedMeta(publishedSlug).catch(() => null)
+          : await fetchRepoMeta(publishedRepo, publishedSlug, access).catch(() => null)
       if (!meta || cancelled || formOwnedRef.current) return
       setTitle(meta.title)
       setDescription(meta.description)
@@ -417,7 +492,11 @@ export default function PublishWorkflowDialog({
       const blobs = await Promise.all(
         meta.images
           .slice(0, MAX_PUBLISH_IMAGES)
-          .map((asset) => fetchPublishedAsset(publishedSlug, asset)),
+          .map((asset) =>
+            publishedRepo === PUBLIC_REPO
+              ? fetchPublishedAsset(publishedSlug, asset)
+              : fetchRepoAsset(publishedRepo, publishedSlug, asset, access),
+          ),
       )
       if (cancelled || formOwnedRef.current) return
       const restored = blobs
@@ -426,7 +505,11 @@ export default function PublishWorkflowDialog({
       if (restored.length > 0) setImages(restored)
       const publishedAttachments = meta.attachments ?? []
       const attachmentBlobs = await Promise.all(
-        publishedAttachments.map((file) => fetchPublishedAsset(publishedSlug, file.path)),
+        publishedAttachments.map((file) =>
+          publishedRepo === PUBLIC_REPO
+            ? fetchPublishedAsset(publishedSlug, file.path)
+            : fetchRepoAsset(publishedRepo, publishedSlug, file.path, access),
+        ),
       )
       if (cancelled || formOwnedRef.current) return
       const restoredAttachments = publishedAttachments.flatMap((file, index) => {
@@ -438,7 +521,7 @@ export default function PublishWorkflowDialog({
     return () => {
       cancelled = true
     }
-  }, [publishedSlug])
+  }, [publishedSlug, publishedRepo, teamAuth])
 
   const addImages = async (files: FileList | null): Promise<void> => {
     if (!files || files.length === 0) return
@@ -515,8 +598,28 @@ export default function PublishWorkflowDialog({
     setPrepared(null)
   }
 
+  /** A new target invalidates the prepared bytes and any error from the old one. */
+  const switchTarget = (next: PublishTarget): void => {
+    if (next === target) return
+    // Keep the outgoing target's unfinished form under its own key, then let
+    // the incoming target's draft (if any) take over the form.
+    void captureDraft(draftKeyRef.current)
+      .then((draft) => (draft ? saveDraft(draft) : undefined))
+      .catch(() => {})
+    draftDirtyRef.current = false
+    formOwnedRef.current = false
+    setRestoredDraft(false)
+    // Credential values belong to the repository they were typed for.
+    setSecretValues({})
+    setTarget(next)
+    setPrepared(null)
+    setPublishError(null)
+    setFormError(null)
+    setConnectError(null)
+  }
+
   const publish = async (acknowledged: boolean): Promise<void> => {
-    if (!auth || busy) return
+    if (!targetAuth || busy) return
     const validation = validatePublishForm({
       title,
       category: effectiveCategory,
@@ -533,6 +636,7 @@ export default function PublishWorkflowDialog({
     setPublishError(null)
     setBusy(true)
     try {
+      const isTeam = target === 'team'
       let ready = prepared
       if (!ready) {
         ready = await preparePublish(
@@ -548,22 +652,31 @@ export default function PublishWorkflowDialog({
             ...(videoUrl.trim() ? { videoUrl: videoUrl.trim() } : {}),
           },
           {
-            author: auth.login,
-            findExistingMeta: (slug) => fetchPublishedMeta(slug),
+            author: targetAuth.login,
+            findExistingMeta: (slug) =>
+              isTeam
+                ? fetchRepoMeta(targetRepo, slug, {
+                    client: new GitHubClient({ token: targetAuth.token }),
+                  })
+                : fetchPublishedMeta(slug),
             library,
+            ...(isTeam ? { repo: targetRepoName } : {}),
           },
         )
         setPrepared(ready)
         if (ready.warnings.length > 0 && !acknowledged) return
       }
       const pushed = await pushPublish(ready, {
-        client: new GitHubClient({ token: auth.token }),
-        auth,
+        client: new GitHubClient({ token: targetAuth.token }),
+        auth: targetAuth,
+        ...(isTeam ? { repo: targetRepo } : {}),
       })
       setResult(pushed)
       resultRef.current = pushed
-      void clearDraft(workflow.id).catch(() => {})
-      if (pushed.merged) void invalidateCatalogCache().catch(() => {})
+      void clearDraft(draftKeyRef.current).catch(() => {})
+      if (pushed.merged) {
+        void invalidateCatalogCache(isTeam ? TEAM_CATALOG_CACHE_KEY : undefined).catch(() => {})
+      }
       onPublished?.(pushed)
     } catch (error) {
       setPublishError(marketplaceErrorMessage(t, error))
@@ -582,7 +695,7 @@ export default function PublishWorkflowDialog({
     busy ||
     imageBusy ||
     connecting ||
-    !auth ||
+    !targetReady ||
     vault === null ||
     missingRefs.length > 0 ||
     missingCredentials.length > 0 ||
@@ -618,9 +731,28 @@ export default function PublishWorkflowDialog({
       title={t.marketplacePublishTitle}
       width="lg"
     >
-      <p className="mb-3 text-[12px] leading-snug text-muted">
-        {t.marketplacePublishRepoHint({ repo: MARKETPLACE_REPO_FULL })}
-      </p>
+      {!result && (
+        <label className="mb-3 block">
+          <span className="mb-1 block text-[12px] font-medium text-muted">
+            {t.marketplacePublishTarget}
+          </span>
+          <select
+            aria-label={t.marketplacePublishTarget}
+            className="w-full"
+            disabled={busy}
+            onChange={(event) => switchTarget(event.target.value as PublishTarget)}
+            value={target}
+          >
+            <option value="public">{t.marketplacePublishTargetPublic}</option>
+            <option value="team">{t.marketplacePublishTargetTeam}</option>
+          </select>
+        </label>
+      )}
+      {!(target === 'team' && teamUnavailable) && (
+        <p className="mb-3 text-[12px] leading-snug text-muted">
+          {t.marketplacePublishRepoHint({ repo: targetRepoName })}
+        </p>
+      )}
 
       {result ? (
         <div className="rounded-lg border border-border bg-panel-2 p-3">
@@ -634,71 +766,100 @@ export default function PublishWorkflowDialog({
           )}
           <p className="mt-1 mb-0 text-[12px] text-muted">{result.prUrl}</p>
         </div>
-      ) : auth === undefined ? (
+      ) : (target === 'team' ? teamConfig === undefined : auth === undefined) ? (
         <p className="m-0 text-[12.5px] text-muted">{t.marketplaceConnectLoading}</p>
       ) : (
         <>
-          <section className="mb-4 rounded-lg border border-border bg-panel-2 p-3">
-            <h3 className="m-0 text-[12.5px] font-semibold text-ink">
-              {t.marketplaceConnectTitle}
-            </h3>
-            {auth ? (
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <span className="text-[12.5px] text-ink">
-                  {t.marketplaceConnectConnected({ login: auth.login })}
-                </span>
-                <button
-                  className="border-0! bg-transparent! p-0! text-[12px]! text-accent!"
-                  disabled={busy}
-                  onClick={() => void disconnect()}
-                  type="button"
-                >
-                  {t.marketplaceConnectDisconnect}
-                </button>
-              </div>
-            ) : (
-              <>
-                <p className="mt-1 mb-2 text-[11.5px] leading-snug text-muted">
-                  {t.marketplaceConnectHint}{' '}
-                  <a className="text-accent" href={TOKEN_URL} rel="noreferrer" target="_blank">
-                    {t.marketplaceConnectCreateToken}
-                  </a>
+          {target === 'team' ? (
+            <section className="mb-4 rounded-lg border border-border bg-panel-2 p-3">
+              <h3 className="m-0 text-[12.5px] font-semibold text-ink">
+                {t.marketplaceConnectTitle}
+              </h3>
+              {teamUnavailable ? (
+                <p className="mt-1 mb-0 text-[11.5px] leading-snug text-muted">
+                  {t.marketplacePublishTeamMissing}
                 </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    autoComplete="off"
-                    className="min-w-0 flex-1"
-                    disabled={connecting}
-                    onChange={(event) => {
-                      setTokenInput(event.target.value)
-                      setConnectError(null)
-                    }}
-                    placeholder={t.marketplaceConnectTokenPlaceholder}
-                    type="password"
-                    value={tokenInput}
-                  />
+              ) : (
+                <>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-[12.5px] text-ink">
+                      {t.marketplacePublishTeamConnected({
+                        repo: targetRepoName,
+                        login: teamAuth?.login ?? '',
+                      })}
+                    </span>
+                  </div>
+                  {teamReadOnly && (
+                    <p className="mt-1 mb-0 text-[11.5px] leading-snug text-warn">
+                      {t.settingsTeamReadOnlyWarning}
+                    </p>
+                  )}
+                </>
+              )}
+            </section>
+          ) : (
+            <section className="mb-4 rounded-lg border border-border bg-panel-2 p-3">
+              <h3 className="m-0 text-[12.5px] font-semibold text-ink">
+                {t.marketplaceConnectTitle}
+              </h3>
+              {auth ? (
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-[12.5px] text-ink">
+                    {t.marketplaceConnectConnected({ login: auth.login })}
+                  </span>
                   <button
-                    className="section-action"
-                    disabled={connecting || !tokenInput.trim()}
-                    onClick={() => void connect()}
+                    className="border-0! bg-transparent! p-0! text-[12px]! text-accent!"
+                    disabled={busy}
+                    onClick={() => void disconnect()}
                     type="button"
                   >
-                    {t.marketplaceConnectButton}
+                    {t.marketplaceConnectDisconnect}
                   </button>
                 </div>
-                <p className="mt-1 mb-0 text-[11px] leading-snug text-muted">
-                  {t.marketplaceConnectScopeHint}
-                </p>
-                {connectError && (
-                  <p className="mt-1 mb-0 text-[11.5px] text-err" role="alert">
-                    {connectError}
+              ) : (
+                <>
+                  <p className="mt-1 mb-2 text-[11.5px] leading-snug text-muted">
+                    {t.marketplaceConnectHint}{' '}
+                    <a className="text-accent" href={TOKEN_URL} rel="noreferrer" target="_blank">
+                      {t.marketplaceConnectCreateToken}
+                    </a>
                   </p>
-                )}
-              </>
-            )}
-          </section>
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoComplete="off"
+                      className="min-w-0 flex-1"
+                      disabled={connecting}
+                      onChange={(event) => {
+                        setTokenInput(event.target.value)
+                        setConnectError(null)
+                      }}
+                      placeholder={t.marketplaceConnectTokenPlaceholder}
+                      type="password"
+                      value={tokenInput}
+                    />
+                    <button
+                      className="section-action"
+                      disabled={connecting || !tokenInput.trim()}
+                      onClick={() => void connect()}
+                      type="button"
+                    >
+                      {t.marketplaceConnectButton}
+                    </button>
+                  </div>
+                  <p className="mt-1 mb-0 text-[11px] leading-snug text-muted">
+                    {t.marketplaceConnectScopeHint}
+                  </p>
+                  {connectError && (
+                    <p className="mt-1 mb-0 text-[11.5px] text-err" role="alert">
+                      {connectError}
+                    </p>
+                  )}
+                </>
+              )}
+            </section>
+          )}
 
-          {auth && (
+          {targetReady && (
             <>
               {restoredDraft && (
                 <p className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-panel-2 px-2 py-1 text-[11.5px] leading-snug text-muted">
@@ -772,6 +933,7 @@ export default function PublishWorkflowDialog({
                 <div className="min-w-0 flex-1">
                   <Field label={t.marketplaceFieldCategory}>
                     <select
+                      aria-label={t.marketplaceFieldCategory}
                       disabled={busy}
                       onChange={(event) => {
                         setCategory(event.target.value)

@@ -148,4 +148,43 @@ describe('github client', () => {
     await expect(client.deleteReaction('dcc123456', 'BC-workflow', 7, 99)).resolves.toBeUndefined()
     expect(calls[1]!.init!.method).toBe('DELETE')
   })
+
+  it('reads private file text through the contents API with the raw media type', async () => {
+    const { client, calls } = makeClient(() => new Response('{"slug":"x"}', { status: 200 }))
+    await expect(
+      client.getFileText('acme', 'team-workflows', 'workflows/a b/meta.json', 'main'),
+    ).resolves.toBe('{"slug":"x"}')
+
+    expect(calls[0]!.url).toBe(
+      'https://api.github.com/repos/acme/team-workflows/contents/workflows/a%20b/meta.json?ref=main',
+    )
+    const headers = calls[0]!.init!.headers as Record<string, string>
+    expect(headers.Accept).toBe('application/vnd.github.raw+json')
+    expect(headers.Authorization).toBe('Bearer ghp_test')
+  })
+
+  it('treats a missing private file as null and other failures as errors', async () => {
+    await expect(
+      makeClient(() => jsonResponse({ message: 'Not Found' }, 404)).client.getFileText(
+        'acme',
+        'team',
+        'workflows/x/meta.json',
+        'main',
+      ),
+    ).resolves.toBeNull()
+    await expect(
+      makeClient(() => jsonResponse({ message: 'boom' }, 500)).client.getFileText(
+        'acme',
+        'team',
+        'workflows/x/meta.json',
+        'main',
+      ),
+    ).rejects.toMatchObject({ code: 'network', status: 500 })
+  })
+
+  it('returns a private file as a blob', async () => {
+    const { client } = makeClient(() => new Response('PNGDATA', { status: 200 }))
+    const blob = await client.getFileBlob('acme', 'team', 'workflows/x/assets/1.webp', 'main')
+    await expect(blob!.text()).resolves.toBe('PNGDATA')
+  })
 })

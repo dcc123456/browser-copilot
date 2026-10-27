@@ -52,13 +52,20 @@ const mock = vi.hoisted(() => {
     parent: null as unknown,
     dependency: null as unknown,
   }
-  return { calls, state, sendCommand, published }
+  const reads: unknown[] = []
+  return { calls, state, sendCommand, published, reads }
 })
 
 vi.mock('../src/lib/messages', () => ({ sendCommand: mock.sendCommand }))
 vi.mock('../src/lib/marketplace/raw', () => ({
-  fetchPublishedWorkflow: async () => mock.published.parent,
-  fetchWorkflowAt: async () => mock.published.dependency,
+  fetchRepoWorkflow: async (repo: unknown) => {
+    mock.reads.push(repo)
+    return mock.published.parent
+  },
+  fetchRepoWorkflowAt: async (repo: unknown) => {
+    mock.reads.push(repo)
+    return mock.published.dependency
+  },
 }))
 
 const { installFromCard } = await import('../src/sidepanel/marketplace-install')
@@ -168,6 +175,7 @@ function savedPasswords(): Array<{ id: string; fields: Array<{ key: string; valu
 
 beforeEach(() => {
   mock.calls.length = 0
+  mock.reads.length = 0
   mock.state.groups = []
   mock.state.passwords = []
   mock.state.failGroupList = false
@@ -287,6 +295,48 @@ describe('installing a bundle', () => {
     ])
     expect(savedWorkflows()[0]!.drawflow.nodes[0]!.data).toMatchObject({
       credential: 'mkt-scrape-orders-abcdef-gh::token',
+    })
+  })
+
+  it('reads from and records the team repository when that is the source', async () => {
+    const team = { owner: 'acme', repo: 'team-workflows', branch: 'main', isPrivate: true }
+
+    const plan = await installFromCard(
+      card([dependency('child-1', 'Collect numbers')]),
+      undefined,
+      [],
+      { repo: team },
+    )
+
+    expect(mock.reads).toEqual([team, team])
+    expect(plan.workflow.marketplace?.repo).toBe('acme/team-workflows')
+  })
+
+  it('keeps team bundle ids and credentials apart from a public listing of the same slug', async () => {
+    mock.published.parent = secretGraph('Scrape orders', 'gh::token')
+
+    await installFromCard(
+      card(
+        [dependency('child-1', 'Collect numbers')],
+        [
+          {
+            id: 'gh',
+            label: 'GitHub',
+            fields: [{ key: 'token', value: 'ghp_team' }],
+          },
+        ],
+      ),
+      undefined,
+      [],
+      { repo: { owner: 'acme', repo: 'team-workflows', branch: 'main', isPrivate: true } },
+    )
+
+    const namespace = 'acme-team-workflows-scrape-orders-abcdef'
+    expect(savedPasswords()[0]!.id).toBe(`mkt-${namespace}-gh`)
+    const saves = savedWorkflows()
+    expect(saves[0]!.id).toBe(`mkt-${namespace}-collect-numbers`)
+    expect(saves[1]!.drawflow.nodes[0]!.data).toMatchObject({
+      credential: `mkt-${namespace}-gh::token`,
     })
   })
 })

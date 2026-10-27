@@ -32,6 +32,7 @@ import NumberInput from '../ui/NumberInput'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
 import { Switch } from '../ui/Switch'
 import UpdateSettingsCard from './update/UpdateSettingsCard'
+import TeamSharingCard from './TeamSharingCard'
 import { useSettings } from './hooks/useSettings'
 import { useI18n, useT } from './i18n'
 
@@ -1179,6 +1180,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         )}
       </div>
 
+      <TeamSharingCard />
       <UpdateSettingsCard />
 
       {openDialog === 'agent' && (

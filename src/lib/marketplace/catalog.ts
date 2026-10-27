@@ -1,11 +1,13 @@
 /**
  * The marketplace catalog: which workflows exist and how they are engaged.
  *
- * A refresh costs three API calls regardless of size — the tree lists every
- * published directory, merged pull requests map a slug to its discussion
+ * A public refresh costs three API calls regardless of size — the tree lists
+ * every published directory, merged pull requests map a slug to its discussion
  * thread, and the issues list carries the like/comment counts for those same
  * numbers. Workflow bodies and screenshots are read from the raw host, which
- * does not consume API quota.
+ * does not consume API quota. A team refresh skips the two engagement calls
+ * (its cards show no likes or comments) and reads metas through the contents
+ * API with the team token.
  *
  * The snapshot is cached (memory value + `chrome.storage.local`) for
  * {@link MARKETPLACE_CACHE_TTL_MS}; a failed refresh falls back to the cached
@@ -17,13 +19,11 @@
 import type { GitHubIssue, GitHubPull, GitHubTree, GitHubTreeEntry } from './github-client'
 import { hasChromeStorage } from '../fs-outbox'
 import { isValidSlug } from './slug'
-import { fetchPublishedMeta } from './raw'
+import { fetchRepoMeta, type RepoReadAccess } from './raw'
+import { PUBLIC_REPO, type RepoRef } from './repo'
 import { parseMeta } from './meta'
 import {
-  MARKETPLACE_BRANCH,
   MARKETPLACE_CACHE_TTL_MS,
-  MARKETPLACE_OWNER,
-  MARKETPLACE_REPO,
   MarketplaceError,
   type MarketplaceCard,
   type MarketplaceMeta,
@@ -36,6 +36,7 @@ export const MAX_CATALOG_ENTRIES = 300
 export const MAX_CATALOG_PAGES = 3
 
 export const CATALOG_CACHE_KEY = 'marketplaceCatalog'
+export const TEAM_CATALOG_CACHE_KEY = 'teamCatalog'
 export const CATALOG_LAST_CHECK_KEY = 'marketplaceLastCheck'
 
 const PAGE_SIZE = 100
@@ -72,6 +73,16 @@ export interface CatalogCache {
 
 export interface ReadCatalogDeps {
   client: CatalogClient
+  /** Repository to read; defaults to the public marketplace. */
+  repo?: RepoRef
+  /** Token-backed client used for private repositories' file reads. */
+  access?: RepoReadAccess
+  /**
+   * Whether to read pulls/issues for like and comment counts. The team view
+   * turns this off: it has no discussion threads, and the two skipped requests
+   * keep a refresh to one tree call plus one meta per workflow.
+   */
+  includeEngagement?: boolean
   fetchMeta?: (slug: string) => Promise<MarketplaceMeta | null>
   maxPages?: number
   now?: () => number
@@ -182,9 +193,9 @@ async function collectPages<T>(
  * which is exactly the state the marketplace repo starts in. Reporting it as a
  * load failure would make a newly created marketplace look broken.
  */
-async function readTree(client: CatalogClient): Promise<GitHubTree> {
+async function readTree(client: CatalogClient, repo: RepoRef): Promise<GitHubTree> {
   try {
-    return await client.listTree(MARKETPLACE_OWNER, MARKETPLACE_REPO, MARKETPLACE_BRANCH)
+    return await client.listTree(repo.owner, repo.repo, repo.branch)
   } catch (error) {
     if (error instanceof MarketplaceError && error.code === 'conflict') {
       return { tree: [], truncated: false }
@@ -215,18 +226,18 @@ async function mapLimit<T, R>(
 /** Reads and joins the catalog. Throws when the API itself is unreachable. */
 export async function readCatalog(deps: ReadCatalogDeps): Promise<CatalogSnapshot> {
   const { client } = deps
+  const repo = deps.repo ?? PUBLIC_REPO
+  const includeEngagement = deps.includeEngagement ?? true
   const maxPages = deps.maxPages ?? MAX_CATALOG_PAGES
-  const fetchMeta = deps.fetchMeta ?? ((slug: string) => fetchPublishedMeta(slug))
+  const fetchMeta = deps.fetchMeta ?? ((slug: string) => fetchRepoMeta(repo, slug, deps.access))
 
-  const tree = await readTree(client)
-  const pulls = await collectPages(
-    (page) => client.listClosedPulls(MARKETPLACE_OWNER, MARKETPLACE_REPO, page),
-    maxPages,
-  )
-  const issues = await collectPages(
-    (page) => client.listIssues(MARKETPLACE_OWNER, MARKETPLACE_REPO, page),
-    maxPages,
-  )
+  const tree = await readTree(client, repo)
+  const pulls = includeEngagement
+    ? await collectPages((page) => client.listClosedPulls(repo.owner, repo.repo, page), maxPages)
+    : { items: [] as GitHubPull[], truncated: false }
+  const issues = includeEngagement
+    ? await collectPages((page) => client.listIssues(repo.owner, repo.repo, page), maxPages)
+    : { items: [] as GitHubIssue[], truncated: false }
 
   const entries = mergeCatalog(tree.tree, pulls.items, issues.items)
   const metas = await mapLimit(entries, 8, async (entry) => {
@@ -288,12 +299,12 @@ function parseSnapshot(raw: unknown): CatalogSnapshot | null {
 }
 
 /** `chrome.storage.local`-backed cache; the whole snapshot fits in one key. */
-export function chromeCatalogCache(): CatalogCache {
+export function chromeCatalogCache(key: string = CATALOG_CACHE_KEY): CatalogCache {
   return {
     async load() {
       try {
-        const stored = await chrome.storage.local.get(CATALOG_CACHE_KEY)
-        return parseSnapshot(stored[CATALOG_CACHE_KEY])
+        const stored = await chrome.storage.local.get(key)
+        return parseSnapshot(stored[key])
       } catch {
         return null
       }
@@ -301,7 +312,7 @@ export function chromeCatalogCache(): CatalogCache {
     async save(snapshot) {
       try {
         await chrome.storage.local.set({
-          [CATALOG_CACHE_KEY]: snapshot,
+          [key]: snapshot,
           [CATALOG_LAST_CHECK_KEY]: snapshot.fetchedAt,
         })
       } catch {
@@ -317,9 +328,9 @@ export function chromeCatalogCache(): CatalogCache {
  * Used after an auto-merged publish: the workflow is live immediately, and a
  * 2-hour-old snapshot would hide the card the publisher just created.
  */
-export async function invalidateCatalogCache(): Promise<void> {
+export async function invalidateCatalogCache(key: string = CATALOG_CACHE_KEY): Promise<void> {
   if (!hasChromeStorage()) return
-  await chrome.storage.local.remove(CATALOG_CACHE_KEY)
+  await chrome.storage.local.remove(key)
 }
 
 /**

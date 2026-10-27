@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added — Share workflows inside a private team repository
+
+The marketplace has a second source: a private GitHub repository whose
+collaborators are the team. Connect it in Settings → Team sharing with a
+classic token that has the `repo` scope. Reads go through the authenticated
+contents API, so only people GitHub allows into that repository can see the
+listings, and the marketplace tab switches between the public marketplace and
+the team source. Applying a team workflow imports its bundles and credentials
+the same way as a public one. Publishing to the team opens a pull request
+against the repository itself and merges it when the token can push; read-only
+members leave the PR for a maintainer. Publish drafts are kept per target, so
+credential values typed for one repository never reappear in the other.
+
 ### Changed — Update backups delete themselves after the reload
 
 An in-place update backs up the files it replaces inside the install folder.

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { GitHubIssue, GitHubPull, GitHubTreeEntry } from '../src/lib/marketplace/github-client'
+import {
+  GitHubClient,
+  type GitHubIssue,
+  type GitHubPull,
+  type GitHubTreeEntry,
+} from '../src/lib/marketplace/github-client'
 import {
   MAX_CATALOG_ENTRIES,
   loadCatalog,
@@ -11,6 +16,7 @@ import {
   type CatalogSnapshot,
 } from '../src/lib/marketplace/catalog'
 import { buildMeta } from '../src/lib/marketplace/meta'
+import type { RepoRef } from '../src/lib/marketplace/repo'
 import {
   MarketplaceError,
   MARKETPLACE_CACHE_TTL_MS,
@@ -219,6 +225,86 @@ describe('readCatalog', () => {
     })
     expect(snapshot.cards).toHaveLength(MAX_CATALOG_ENTRIES)
     expect(snapshot.truncated).toBe(true)
+  })
+
+  it('reads a team repo without engagement calls', async () => {
+    const reads: string[] = []
+    const teamRepo: RepoRef = {
+      owner: 'acme',
+      repo: 'team-workflows',
+      branch: 'trunk',
+      isPrivate: true,
+    }
+    const teamClient: CatalogClient = {
+      async listTree(owner, repo, branch) {
+        reads.push(`tree ${owner}/${repo}@${branch}`)
+        return { tree: TREE, truncated: false }
+      },
+      async listClosedPulls() {
+        reads.push('pulls')
+        return []
+      },
+      async listIssues() {
+        reads.push('issues')
+        return []
+      },
+    }
+
+    const snapshot = await readCatalog({
+      client: teamClient,
+      repo: teamRepo,
+      includeEngagement: false,
+      fetchMeta: metaReader(),
+      now: () => 3,
+    })
+
+    expect(reads).toEqual(['tree acme/team-workflows@trunk'])
+    expect(snapshot.cards[0]).toMatchObject({ prNumber: null, likes: 0, comments: 0 })
+  })
+
+  it('defaults meta reads to the configured repo over an authenticated client', async () => {
+    const teamRepo: RepoRef = {
+      owner: 'acme',
+      repo: 'team-workflows',
+      branch: 'main',
+      isPrivate: true,
+    }
+    const urls: string[] = []
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      urls.push(url)
+      const slug = /workflows\/([^/]+)\/meta\.json/.exec(url)?.[1]
+      return slug === 'c-333333'
+        ? new Response('{"message":"Not Found"}', { status: 404 })
+        : new Response(JSON.stringify(meta(slug!)), { status: 200 })
+    }) as unknown as typeof fetch
+    const teamClient: CatalogClient = {
+      async listTree() {
+        return { tree: TREE, truncated: false }
+      },
+      async listClosedPulls() {
+        return []
+      },
+      async listIssues() {
+        return []
+      },
+    }
+
+    const snapshot = await readCatalog({
+      client: teamClient,
+      repo: teamRepo,
+      access: { client: new GitHubClient({ token: 'ghp_test', fetchImpl }) },
+      includeEngagement: false,
+      now: () => 3,
+    })
+
+    expect(snapshot.cards.map((card) => card.meta.slug)).toEqual(['a-111111', 'b-222222'])
+    expect(
+      urls.every((url) =>
+        url.startsWith('https://api.github.com/repos/acme/team-workflows/contents/'),
+      ),
+    ).toBe(true)
+    expect(urls[0]).toMatch(/\/meta\.json\?ref=main$/)
   })
 })
 
