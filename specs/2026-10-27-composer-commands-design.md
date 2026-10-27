@@ -62,12 +62,15 @@ display-only 的 `skillName?: string`（与 `displayContent` 同性质：`toApiM
 `/name` 的 `.skill-chip`。因此刷新/重开历史后 tag 仍在，历史预览抽屉同样展示。
 tag 文案取 `/${name}`（与用户敲的命令一致），不再使用 `chatSkillActive`（该键删除）。
 
-**D4 tag 在输入框内部、与正文同一行。** 输入区的带边框容器改为一个 flex 行：
-`[技能 tag] [textarea]`，textarea 去掉自己的边框/背景/内边距（焦点环移到容器的
-`:focus-within`），于是 tag 与第一行文字并排，换行后的文字从 tag 右侧的列内继续。
-否决「contenteditable + 行内 token」：要把整个 composer、IME、拖放、粘贴重写一遍，
-收益只是换行后文字能回到最左侧，不值得。否决「浮层 + `text-indent` 测量 chip 宽度」：
-要按字体/语言测量，字号一变就错位，比 flex 兄弟节点脆弱。
+**D4 tag 在输入框内部、与正文同一行，且只缩进第一行。** 首版把 tag 做成 textarea 的 flex 兄弟节点：
+tag 与第一行并排，但 textarea 的**整个高度**都被挤窄，长消息每一行都短一截——dcc 明确否决。
+改为 tag 绝对定位在输入框第一行行首，textarea 保持满宽，第一行用 `text-indent` 让开 tag 的宽度，
+换行后的正文回到最左侧、与输入框同宽（DeepSeek harness 的观感）。
+宽度不要靠猜字体：`useLayoutEffect` 量 tag 的 `getBoundingClientRect().width` 加上 6px 间距，
+作为运行时值写进 textarea 的内联 `textIndent`（§2 允许运行时动态值），窗口 resize 时重量一次；
+jsdom 里宽度为 0，落到 6px，测试只断言「有正缩进 + textarea 满宽 + tag 为 absolute」。
+textarea 去掉了自己的边框/背景/内边距（焦点环放在容器的 `:focus-within`）。
+否决「contenteditable + 行内 token」：要把整个 composer、IME、拖放、粘贴重写一遍，收益只是换行后文字能回到最左侧，不值得。
 输入框内不再保留 `/trans` 原文（`applySlashPick` 已删除）；tag 右侧的 × 沿用
 `skillsStopUsing` 作为取消。
 
@@ -85,6 +88,8 @@ tag 文案取 `/${name}`（与用户敲的命令一致），不再使用 `chatSk
 粘贴进来的 `@` 都不会触发。取消选择时 `@` 已被消费——和 `/` 命令被选中后不再留在草稿里
 是同一语义。placeholder 改为同时说明 `/`（命令）与 `@`（附件），
 `chatPlaceholderWithSkills` 因此删除（`/compact` 让 `/` 提示不再依赖有没有技能）。
+`@` 成为附件入口后，工具条上的 📎 按钮（及其 `chatAttach` 文案）删除，隐藏的
+`<input type=file>`、拖放与粘贴路径不变；新会话按钮的图标改为加号（`Plus`）。
 
 **D7 chat 模式下的 pin 技能必须真的进 prompt。** 真机探针发现：chat 模式（面板默认）
 的 system prompt 是一句 191 字符的身份句，`buildSystemPrompt` 在返回前直接短路，
@@ -107,7 +112,7 @@ pin 的技能说明**从未进入模型**——而 `wrapSkillDirective` 写进�
   当前项 `aria-selected`；点选发一条 `provider.activate`；失败回滚 + toast；没有 provider 时不渲染；
   菜单带 `bottom-full`（向上展开）。
 - `tests/chat-composer-commands.spec.tsx`（新）：选技能后草稿里的 `/tr` 被消费、`onSelectSkill`
-  收到 id；active skill 的 tag 与 textarea 是同一容器的兄弟节点（在输入框内部）；发送后
+  收到 id；active skill 的 tag 在输入框内部、绝对定位且 textarea 保持满宽（只缩进第一行）；发送后
   `onSelectSkill(null)`（一次性）；`restore` 带 `skillName` 的消息渲染 `/trans` tag；
   输入 `@` 触发文件选择器且正文不含 `@`；placeholder 同时提到 `/` 与 `@`。
 - `tests/attachments.spec.ts`：`toRestoreMessages` 透传 `skillName`，且

@@ -14,7 +14,7 @@
  *    worker's session storage keyed by `conversationId`, so the conversation
  *    continues instead of silently restarting.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AGENT_PORT,
@@ -97,7 +97,7 @@ import {
   Loader2,
   Minus,
   Paperclip,
-  SquarePen,
+  Plus,
   Wrench,
   X,
 } from 'lucide-react'
@@ -454,6 +454,9 @@ function SkillTag({ name }: { name: string }) {
     </span>
   )
 }
+
+/** Space between the composer's skill tag and the text that follows it. */
+const SKILL_TAG_GAP = 6
 
 /** Localized-text bundle type, reused by the small render components below. */
 type ChatT = ReturnType<typeof useT>
@@ -3563,6 +3566,48 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
   // --- Slash menu ------------------------------------------------------------
 
   const activeSkill = skills.find((skill) => skill.id === activeSkillId) ?? null
+  /**
+   * The skill tag is drawn on the FIRST line only. The textarea keeps the full
+   * width and its first line is indented by the tag's measured width, so a long
+   * message wraps edge to edge instead of being narrowed on every line for the
+   * whole height of the field (a flex sibling would do exactly that).
+   */
+  const skillChipRef = useRef<HTMLSpanElement>(null)
+  const [skillIndent, setSkillIndent] = useState(0)
+  useLayoutEffect(() => {
+    const chip = skillChipRef.current
+    if (!activeSkill || !chip) {
+      setSkillIndent(0)
+      return
+    }
+    const measure = (): void =>
+      setSkillIndent(Math.ceil(chip.getBoundingClientRect().width) + SKILL_TAG_GAP)
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [activeSkill])
+
+  /**
+   * The field grows with the draft instead of scrolling under the tag: a
+   * scrolled textarea hides its first line, leaving the tag hovering over text
+   * it no longer belongs to. `height:auto` is applied for one read because a
+   * stretched textarea reports its old floor as `scrollHeight`.
+   */
+  useLayoutEffect(() => {
+    const fit = (): void => {
+      const node = textareaRef.current
+      if (!node) return
+      node.style.minHeight = '0px'
+      node.style.height = 'auto'
+      const wanted = node.scrollHeight
+      node.style.height = ''
+      node.style.minHeight = `${Math.min(wanted, Math.round(window.innerHeight * 0.4))}px`
+    }
+    fit()
+    window.addEventListener('resize', fit)
+    return () => window.removeEventListener('resize', fit)
+  }, [draft])
+
   // Filename base for answer downloads: prefer the active conversation's title,
   // with a localized fallback for untitled conversations.
   const convTitle =
@@ -4429,69 +4474,77 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
           </div>
         )}
         {/*
-          The bordered field is the input box. The active skill is a tag on the
-          first line, and the textarea is its flex sibling so typed text starts
-          beside the tag instead of under a floating chip.
+          The bordered field is the input box. The active skill is a tag pinned
+          to the field's first line; the textarea stays full-width and indents
+          only that line, so later lines run edge to edge.
         */}
-        <div className="flex min-h-0 flex-1 items-stretch gap-1.5 rounded-[10px] border border-border bg-sunken px-2.5 py-2 focus-within:border-accent focus-within:ring-[3px] focus-within:ring-accent-soft">
-          {activeSkill && (
-            <span className="skill-chip mt-px shrink-0 self-start" title={`/${activeSkill.name}`}>
-              <span className="skill-chip-name">/{activeSkill.name}</span>
-              <button
-                aria-label={t.skillsStopUsing}
-                className="skill-chip-clear"
-                onClick={() => onSelectSkill(null)}
-                title={t.skillsStopUsing}
-                type="button"
+        <div className="flex min-h-0 flex-1 items-stretch rounded-[10px] border border-border bg-sunken px-2.5 py-2 focus-within:border-accent focus-within:ring-[3px] focus-within:ring-accent-soft">
+          <div className="relative min-w-0 flex-1">
+            {activeSkill && (
+              <span
+                className="skill-chip absolute left-0 top-0 z-10"
+                ref={skillChipRef}
+                title={`/${activeSkill.name}`}
               >
-                ×
-              </button>
-            </span>
-          )}
-          <textarea
-            onChange={(event) => {
-              const next = event.target.value
-              const caret = event.target.selectionStart
-              const attach = takeAttachTrigger(draft, next, caret)
-              if (attach) {
-                // `@` opens the file picker, so it is a gesture, not content:
-                // consume it, park the caret where it stood, open the picker.
-                setDraft(attach.text)
-                closeMenu()
-                requestAnimationFrame(() => {
-                  textareaRef.current?.setSelectionRange(attach.caret, attach.caret)
-                })
-                fileInputRef.current?.click()
-                return
-              }
-              setDraft(next)
-              syncMenu(next, caret)
-            }}
-            onCompositionEnd={() => {
-              composingRef.current = false
-            }}
-            onCompositionStart={() => {
-              composingRef.current = true
-            }}
-            onBlur={closeMenu}
-            onClick={(event) => syncMenu(draft, event.currentTarget.selectionStart)}
-            onKeyDown={handleKeyDown}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => {
-              event.preventDefault()
-              void addFiles(event.dataTransfer?.files ?? null)
-            }}
-            onPaste={(event) => {
-              const files = event.clipboardData?.files
-              if (files && files.length > 0) {
+                <span className="skill-chip-name">/{activeSkill.name}</span>
+                <button
+                  aria-label={t.skillsStopUsing}
+                  className="skill-chip-clear"
+                  onClick={() => onSelectSkill(null)}
+                  title={t.skillsStopUsing}
+                  type="button"
+                >
+                  ×
+                </button>
+              </span>
+            )}
+            <textarea
+              className="h-full w-full"
+              style={activeSkill ? { textIndent: `${skillIndent}px` } : undefined}
+              onChange={(event) => {
+                const next = event.target.value
+                const caret = event.target.selectionStart
+                const attach = takeAttachTrigger(draft, next, caret)
+                if (attach) {
+                  // `@` opens the file picker, so it is a gesture, not content:
+                  // consume it, park the caret where it stood, open the picker.
+                  setDraft(attach.text)
+                  closeMenu()
+                  requestAnimationFrame(() => {
+                    textareaRef.current?.setSelectionRange(attach.caret, attach.caret)
+                  })
+                  fileInputRef.current?.click()
+                  return
+                }
+                setDraft(next)
+                syncMenu(next, caret)
+              }}
+              onCompositionEnd={() => {
+                composingRef.current = false
+              }}
+              onCompositionStart={() => {
+                composingRef.current = true
+              }}
+              onBlur={closeMenu}
+              onClick={(event) => syncMenu(draft, event.currentTarget.selectionStart)}
+              onKeyDown={handleKeyDown}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
                 event.preventDefault()
-                void addFiles(files)
-              }
-            }}
-            placeholder={busy ? t.chatInterjectPlaceholder : t.chatPlaceholder}
-            ref={textareaRef}
-            value={draft}
-          />
+                void addFiles(event.dataTransfer?.files ?? null)
+              }}
+              onPaste={(event) => {
+                const files = event.clipboardData?.files
+                if (files && files.length > 0) {
+                  event.preventDefault()
+                  void addFiles(files)
+                }
+              }}
+              placeholder={busy ? t.chatInterjectPlaceholder : t.chatPlaceholder}
+              ref={textareaRef}
+              value={draft}
+            />
+          </div>
         </div>
         <div className="composer-row">
           <div className="mode-select">
@@ -4546,16 +4599,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
             )}
           </div>
           <div className="actions ml-auto shrink-0" style={{ margin: 0 }}>
-            <button
-              aria-label={t.chatAttach}
-              className="icon-btn"
-              disabled={busy}
-              onClick={() => fileInputRef.current?.click()}
-              title={t.chatAttach}
-              type="button"
-            >
-              <Paperclip size={16} aria-hidden="true" />
-            </button>
             <input
               accept={FILE_INPUT_ACCEPT}
               multiple
@@ -4639,7 +4682,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 title={t.chatNewChat}
                 type="button"
               >
-                <SquarePen size={16} aria-hidden="true" />
+                <Plus size={16} aria-hidden="true" />
               </button>
             )}
             {busy && (

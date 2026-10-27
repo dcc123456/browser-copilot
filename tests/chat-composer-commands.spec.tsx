@@ -206,15 +206,18 @@ describe('composer slash commands', () => {
     expect(field.value).toBe('')
   })
 
-  it('shows the active skill as a tag inside the input, beside the text', async () => {
+  it('shows the active skill as a tag that only indents the first line', async () => {
     await mount({ skills: [TRANS], activeSkillId: 's1' })
     const chip = container!.querySelector('.skill-chip')
     const field = composer(container!)
     expect(chip).not.toBeNull()
     expect(chip?.textContent).toContain('/trans')
-    // Same flex row: the tag is not floating above the text.
+    // The tag overlays the field's first line instead of eating its width.
     expect(chip?.parentElement).toBe(field.parentElement)
-    expect(chip?.className).not.toContain('absolute')
+    expect(chip?.className).toContain('absolute')
+    // The textarea keeps the full width; only its first line starts after the tag.
+    expect(field.className).toContain('w-full')
+    expect(Number.parseInt(field.style.textIndent || '0', 10)).toBeGreaterThan(0)
   })
 
   it('uses the skill for one turn only', async () => {

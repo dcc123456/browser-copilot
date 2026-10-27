@@ -285,4 +285,12 @@ describe('composer actions are icons', () => {
     expect(newChat?.textContent?.trim()).toBe('')
     expect(send?.textContent?.trim()).toBe('')
   })
+
+  it('uses a plus icon for new chat and drops the paperclip button', async () => {
+    const mounted = await mountChat(true)
+    const newChat = mounted.querySelector('button[aria-label="New chat"]')
+    expect(newChat?.querySelector('svg')?.getAttribute('class')).toContain('lucide-plus')
+    // Files come in through the composer's `@` gesture, not a toolbar button.
+    expect(mounted.querySelector('button[aria-label="Attach files"]')).toBeNull()
+  })
 })

@@ -623,8 +623,6 @@ export interface Messages {
   /** Toast when the model switch could not be saved. */
   chatModelSwitchFailed: string
   chatAttachSelection: string
-  /** Composer 📎 button tooltip. */
-  chatAttach: string
   /** Remove button on a pending attachment chip. */
   chatAttachmentRemove: string
   /** One file exceeds the per-file size limit. */
@@ -2311,7 +2309,6 @@ const en: Messages = {
   chatModelSelect: 'Model',
   chatModelSwitchFailed: 'Could not switch the model — check it in Settings.',
   chatAttachSelection: 'Attach selection',
-  chatAttach: 'Attach files',
   chatAttachmentRemove: 'Remove attachment',
   chatAttachmentTooLarge: ({ name }) => `${name} is too large (images ≤ 4 MB, text files ≤ 200 KB)`,
   chatAttachmentUnsupported: ({ name }) => `${name} is not a supported file type`,
@@ -3925,7 +3922,6 @@ const zhCN: Messages = {
   chatModelSelect: '模型',
   chatModelSwitchFailed: '切换模型失败——请在设置中检查该模型。',
   chatAttachSelection: '附带选中内容',
-  chatAttach: '添加附件',
   chatAttachmentRemove: '移除附件',
   chatAttachmentTooLarge: ({ name }) => `${name} 过大（图片 ≤ 4 MB，文本 ≤ 200 KB）`,
   chatAttachmentUnsupported: ({ name }) => `${name} 不是受支持的文件类型`,

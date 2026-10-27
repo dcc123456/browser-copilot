@@ -12,14 +12,17 @@ The composer is command-driven: typing `/` opens the same picker that summons
 skills, and it now also carries `/compact`, which compresses the context on
 demand — the toolbar button that used to do this is gone, so the action lives
 where the conversation is typed. Picking a skill (say `/trans`) removes the
-typed command from the draft, shows the skill as a tag inside the input field on
-the same line as the text, and applies it to that one message: the send carries
-the skill, the transcript keeps the `/trans` tag on the turn, and the next
-message starts unpinned. In chat mode the pinned skill's instructions now
-actually reach the model instead of being dropped from the short identity
-prompt. Typing `@` opens the file picker (the character itself never enters the
-draft), and the placeholder names both gestures. The model picker opens its list
-above the control now, so it no longer covers the model it is about to change.
+typed command from the draft, shows the skill as a tag on the input field's
+first line (the field keeps its full width — only the first line starts after
+the tag — and grows with the draft instead of scrolling under it), and
+applies it to that one message: the send carries the skill, the transcript keeps
+the `/trans` tag on the turn, and the next message starts unpinned. In chat mode
+the pinned skill's instructions now actually reach the model instead of being
+dropped from the short identity prompt. Typing `@` opens the file picker (the
+character itself never enters the draft), replacing the paperclip button, and
+the placeholder names both gestures. The model picker opens its list above the
+control now, so it no longer covers the model it is about to change, and a new
+chat is started with a plus icon.
 
 ### Added — Pick the chat model from the composer
 

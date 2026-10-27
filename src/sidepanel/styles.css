@@ -800,9 +800,9 @@ body {
   align-items: center;
   gap: 8px;
   justify-content: space-between;
-  /* The action cluster (attach, model picker, new chat, send) is wider than a
-     narrow panel's leftover space, so it drops to a second line as a whole
-     instead of splitting into a stack of one-control rows. */
+  /* The action cluster (model picker, new chat, send) is wider than a narrow
+     panel's leftover space, so it drops to a second line as a whole instead of
+     splitting into a stack of one-control rows. */
   flex-wrap: wrap;
   white-space: nowrap;
 }
