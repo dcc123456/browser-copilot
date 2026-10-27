@@ -494,9 +494,9 @@ describe('element picker: verify outlines the matches', () => {
   })
 })
 
-describe('element picker: html mode copies the subtree', () => {
-  const mountHtml = (args: Partial<PickerArgs> = {}) =>
-    startPicker({ pickerId: 'h1', mode: 'html', ...args })
+describe('element picker: copy mode copies the selected payload', () => {
+  const mountCopy = (args: Partial<PickerArgs> = {}) =>
+    startPicker({ pickerId: 'h1', mode: 'copy', ...args })
   const countText = () => field('[data-role="count"]').textContent
   const note = () => field('[data-role="note"]')
   let copied = ''
@@ -522,7 +522,7 @@ describe('element picker: html mode copies the subtree', () => {
   })
 
   it('copies the locked element outerHTML, descendants included, and sends nothing', async () => {
-    await mountHtml()
+    await mountCopy()
     const shop = document.getElementById('shop')!
 
     clickGesture(shop)
@@ -537,8 +537,37 @@ describe('element picker: html mode copies the subtree', () => {
     expect(toast?.shadowRoot?.textContent).toContain('chars')
   })
 
+  it('copies only a CSS selector that resolves to the element', async () => {
+    await mountCopy({ copyFormat: 'selector' })
+
+    clickGesture(document.getElementById('shop')!)
+    expect(selectorText()).toBe('#shop')
+    expect(countText()).toContain('CSS selector')
+
+    dispatchMouse(confirmBtn(), 'click')
+
+    expect(copied).toBe('#shop')
+    expect(document.querySelectorAll(copied)).toHaveLength(1)
+    const toast = document.getElementById('bc-element-picker-toast')
+    expect(toast?.shadowRoot?.textContent).toContain('CSS selector')
+  })
+
+  it('copies only the visible text', async () => {
+    await mountCopy({ copyFormat: 'text' })
+
+    clickGesture(document.getElementById('buy')!)
+    expect(selectorText()).toBe('<button#buy.cta>')
+    expect(countText()).toContain('Text ·')
+
+    dispatchMouse(confirmBtn(), 'click')
+
+    expect(copied).toBe('Buy')
+    const toast = document.getElementById('bc-element-picker-toast')
+    expect(toast?.shadowRoot?.textContent).toContain('<button> text')
+  })
+
   it('retargets the copied subtree with the parent pill', async () => {
-    await mountHtml()
+    await mountCopy()
 
     clickGesture(document.getElementById('buy')!)
     dispatchMouse(field('[data-act="parent"]'), 'click')
@@ -549,7 +578,7 @@ describe('element picker: html mode copies the subtree', () => {
   })
 
   it('measures the HTML size only after the element is locked', async () => {
-    await mountHtml()
+    await mountCopy()
 
     dispatchMouse(document.getElementById('shop')!, 'mousemove')
     expect(countText()).toContain('Click an element')
@@ -561,7 +590,7 @@ describe('element picker: html mode copies the subtree', () => {
   it('warns about huge HTML but still copies it', async () => {
     document.body.innerHTML = '<div id="huge"></div>'
     document.getElementById('huge')!.textContent = 'x'.repeat(120_000)
-    await mountHtml()
+    await mountCopy()
 
     clickGesture(document.getElementById('huge')!)
     expect(countText()).toContain('Large HTML')
@@ -574,7 +603,7 @@ describe('element picker: html mode copies the subtree', () => {
 
   it('keeps the card open with an error when the browser refuses the copy', async () => {
     execCommand.mockReturnValueOnce(false)
-    await mountHtml()
+    await mountCopy()
 
     clickGesture(document.getElementById('shop')!)
     dispatchMouse(confirmBtn(), 'click')
@@ -586,7 +615,7 @@ describe('element picker: html mode copies the subtree', () => {
   })
 
   it('closes without messaging an editor', async () => {
-    await mountHtml()
+    await mountCopy()
 
     dispatchKey('Escape')
 
@@ -599,7 +628,7 @@ describe('element picker: html mode copies the subtree', () => {
     launcher.id = 'bc-element-picker-launcher'
     document.documentElement.appendChild(launcher)
 
-    await mountHtml()
+    await mountCopy()
     expect(launcher.style.display).toBe('none')
 
     dispatchKey('Escape')
@@ -609,7 +638,7 @@ describe('element picker: html mode copies the subtree', () => {
   })
 
   it('localizes the copy action', async () => {
-    await mountHtml({ locale: 'zh' })
+    await mountCopy({ locale: 'zh' })
 
     expect(confirmBtn().textContent).toBe('复制 HTML')
 

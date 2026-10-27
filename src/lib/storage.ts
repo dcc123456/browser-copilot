@@ -46,6 +46,7 @@ import type {
 import {
   DEFAULT_LOCAL_AGENT_URL,
   RUN_WINDOW_LIMITS,
+  normalizeElementPickerFormat,
   normalizeLocalAgentUrl,
   normalizeProviderModels,
   normalizeRunWindowLimit,
@@ -120,6 +121,7 @@ export const DEFAULT_SETTINGS: Settings = {
   takeoverOnRun: false,
   autoRepairOnRun: false,
   elementPickerEnabled: false,
+  elementPickerFormat: 'html',
 }
 
 /**
@@ -273,6 +275,7 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     autoRepairOnRun: typeof value.autoRepairOnRun === 'boolean' ? value.autoRepairOnRun : false,
     elementPickerEnabled:
       typeof value.elementPickerEnabled === 'boolean' ? value.elementPickerEnabled : false,
+    elementPickerFormat: normalizeElementPickerFormat(value.elementPickerFormat),
   }
 }
 

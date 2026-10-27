@@ -188,6 +188,7 @@ describe('normalizeStoredSettings', () => {
         takeoverOnRun: false,
         autoRepairOnRun: false,
         elementPickerEnabled: false,
+        elementPickerFormat: 'html',
       })
     }
   })
@@ -217,6 +218,7 @@ describe('normalizeStoredSettings', () => {
       takeoverOnRun: false,
       autoRepairOnRun: false,
       elementPickerEnabled: false,
+      elementPickerFormat: 'html',
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -268,6 +270,7 @@ describe('normalizeStoredSettings', () => {
       takeoverOnRun: false,
       autoRepairOnRun: false,
       elementPickerEnabled: false,
+      elementPickerFormat: 'html',
     })
   })
 

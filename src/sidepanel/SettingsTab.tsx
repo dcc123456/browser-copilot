@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { sendCommand, type WindowChoice } from '../lib/messages'
 import { LOCALE_LABELS, LOCALES, type LocaleSetting, type Messages } from '../lib/i18n'
-import type { AgentStatus, UnattendedWindowPolicy } from '../lib/types'
+import type { AgentStatus, ElementPickerFormat, UnattendedWindowPolicy } from '../lib/types'
 import { RUN_WINDOW_LIMITS, normalizeRunWindowLimit } from '../lib/types'
 import { TOOL_META } from '../lib/tool-catalog'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
@@ -837,6 +837,21 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             void mutate({ type: 'settings.set', patch: { elementPickerEnabled } })
           }
         />
+        <div className="field mt-2.5">
+          <label htmlFor="element-picker-format">{t.settingsElementPickerFormat}</label>
+          <select
+            id="element-picker-format"
+            value={settings.elementPickerFormat}
+            onChange={(event) => {
+              const elementPickerFormat = event.target.value as ElementPickerFormat
+              void mutate({ type: 'settings.set', patch: { elementPickerFormat } })
+            }}
+          >
+            <option value="selector">{t.settingsElementPickerFormatSelector}</option>
+            <option value="text">{t.settingsElementPickerFormatText}</option>
+            <option value="html">{t.settingsElementPickerFormatHtml}</option>
+          </select>
+        </div>
       </div>
 
       {/* --- Unattended window policy --- */}

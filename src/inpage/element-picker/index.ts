@@ -35,7 +35,12 @@
 
 export interface PickerArgs {
   pickerId: string
-  mode: 'select' | 'verify' | 'html'
+  mode: 'select' | 'verify' | 'copy'
+  /**
+   * Copy mode: what the confirm action writes to the clipboard. Mirrors the
+   * shared `ElementPickerFormat`; inlined because this file must not import.
+   */
+  copyFormat?: 'selector' | 'text' | 'html'
   /**
    * `text` captures the aimed element's visible text instead of a selector:
    * the workflow engine resolves it through the kernel's text strategy.
@@ -63,6 +68,7 @@ export const startPicker: PickerStart = async (args) => {
   const {
     pickerId,
     mode,
+    copyFormat = 'html',
     findBy = 'cssSelector',
     selector: initial = '',
     multiple = false,
@@ -169,23 +175,38 @@ export const startPicker: PickerStart = async (args) => {
     textOption: locale === 'zh' ? '文本' : 'Text',
     noText: locale === 'zh' ? '（无可读文本）' : '(no visible text)',
     copyHtml: locale === 'zh' ? '复制 HTML' : 'Copy HTML',
+    copySelector: locale === 'zh' ? '复制选择器' : 'Copy selector',
+    copyText: locale === 'zh' ? '复制文本' : 'Copy text',
     targetPlaceholder: locale === 'zh' ? '（点击一个元素）' : '(click an element)',
-    htmlHint:
+    copyHint: (action: string): string =>
       locale === 'zh'
-        ? '点击元素锁定，按 Enter 或点“复制 HTML”'
-        : 'Click an element, then press Enter or Copy HTML',
-    htmlLockHint:
-      locale === 'zh'
-        ? '点击页面上的元素以测量 HTML 大小'
-        : 'Click an element on the page to measure its HTML',
+        ? `点击元素锁定，按 Enter 或点“${action}”`
+        : `Click an element, then press Enter or ${action}`,
+    copyLockHint: locale === 'zh' ? '点击页面上的元素' : 'Click an element on the page',
     htmlChars: (size: string): string =>
       locale === 'zh' ? `HTML · ${size} 个字符` : `HTML · ${size} chars`,
+    selectorChars: (size: string): string =>
+      locale === 'zh' ? `CSS 选择器 · ${size} 个字符` : `CSS selector · ${size} chars`,
+    textChars: (size: string): string =>
+      locale === 'zh' ? `文本 · ${size} 个字符` : `Text · ${size} chars`,
     htmlLarge: (size: string): string =>
       locale === 'zh'
         ? `HTML 较大（${size} 个字符），粘贴后可能超出模型上下文`
         : `Large HTML (${size} chars) — pasting may exceed the model context`,
-    copied: (size: string, tag: string): string =>
+    textLarge: (size: string): string =>
+      locale === 'zh'
+        ? `文本较大（${size} 个字符），粘贴后可能超出模型上下文`
+        : `Large text (${size} chars) — pasting may exceed the model context`,
+    copiedHtml: (size: string, tag: string): string =>
       locale === 'zh' ? `已复制 <${tag}> 的 ${size} 个字符` : `Copied ${size} chars of <${tag}>`,
+    copiedSelector: (size: string): string =>
+      locale === 'zh'
+        ? `已复制 CSS 选择器（${size} 个字符）`
+        : `Copied CSS selector (${size} chars)`,
+    copiedText: (size: string, tag: string): string =>
+      locale === 'zh'
+        ? `已复制 <${tag}> 的文本（${size} 个字符）`
+        : `Copied <${tag}> text (${size} chars)`,
     copyFailed: locale === 'zh' ? '复制失败，请重试' : 'Copy failed — please retry',
   }
 
@@ -516,16 +537,22 @@ export const startPicker: PickerStart = async (args) => {
   const settingsEl = card.querySelector('.pick-settings') as HTMLElement | null
   findBySel.value = findBy
 
-  // html mode drops everything that builds a selector: only the target, its
-  // subtree size and the copy action remain.
-  if (mode === 'html') {
+  // Copy mode drops the selector machinery: only the target, the payload size
+  // and the copy action remain. What gets copied is the copyFormat setting.
+  const copyAction =
+    copyFormat === 'selector'
+      ? STRINGS.copySelector
+      : copyFormat === 'text'
+        ? STRINGS.copyText
+        : STRINGS.copyHtml
+  if (mode === 'copy') {
     findBySel.style.display = 'none'
     verifyBtn.style.display = 'none'
     if (settingsEl) settingsEl.style.display = 'none'
     selectorEl.textContent = STRINGS.targetPlaceholder
-    confirmBtn.textContent = STRINGS.copyHtml
-    hintEl.textContent = STRINGS.htmlHint
-    countEl.textContent = STRINGS.htmlLockHint
+    confirmBtn.textContent = copyAction
+    hintEl.textContent = STRINGS.copyHint(copyAction)
+    countEl.textContent = STRINGS.copyLockHint
   }
 
   let locked: Element | null = null
@@ -566,10 +593,10 @@ export const startPicker: PickerStart = async (args) => {
     matchLabelEl.textContent = STRINGS.matchNav(matchGroup.index + 1, matchGroup.members.length)
   }
 
-  /** Serializing a large subtree is expensive; warn above this size. */
+  /** Serializing a large payload is expensive; warn above this size. */
   const HTML_WARN_CHARS = 100_000
 
-  /** Compact `<tag#id.class>` label for the html-mode card. */
+  /** Compact `<tag#id.class>` label for the copy-mode card. */
   const describeTarget = (el: Element): string => {
     const tag = el.tagName.toLowerCase()
     const id = el.id ? `#${el.id}` : ''
@@ -577,8 +604,22 @@ export const startPicker: PickerStart = async (args) => {
     return `<${tag}${id}${cls}>`
   }
 
-  /** html mode: the target and its subtree size, no selector machinery. */
-  function refreshHtml() {
+  /** One selector that resolves to exactly `el`, falling back to the short form. */
+  const selectorFor = (el: Element): string => {
+    const base = build(el)
+    return pinnedSelectorFor(el, base, 0, false) || base
+  }
+
+  /** Caller-selected clipboard payload for a copy-mode target. */
+  const copyValueFor = (el: Element): string =>
+    copyFormat === 'selector'
+      ? selectorFor(el)
+      : copyFormat === 'text'
+        ? visibleTextOf(el)
+        : el.outerHTML
+
+  /** Copy mode: the target and its payload size, no selector machinery. */
+  function refreshCopy() {
     const el = target()
     if (!el) {
       selectorEl.textContent = STRINGS.targetPlaceholder
@@ -589,18 +630,28 @@ export const startPicker: PickerStart = async (args) => {
       updateHint()
       return
     }
-    selectorEl.textContent = describeTarget(el)
-    // Only the locked target is measured: outerHTML on every mousemove would
-    // re-serialize huge containers dozens of times per second.
+    selectorEl.textContent =
+      copyFormat === 'selector' && locked ? selectorFor(locked) : describeTarget(el)
+    // Only the locked target is measured: serializing on every mousemove would
+    // rebuild huge payloads dozens of times per second.
     if (locked) {
-      const size = locked.outerHTML.length
+      const size = copyValueFor(locked).length
       const isLarge = size > HTML_WARN_CHARS
-      countEl.textContent = isLarge
-        ? STRINGS.htmlLarge(size.toLocaleString())
-        : STRINGS.htmlChars(size.toLocaleString())
+      const sizeText = size.toLocaleString()
+      if (isLarge) {
+        countEl.textContent =
+          copyFormat === 'text' ? STRINGS.textLarge(sizeText) : STRINGS.htmlLarge(sizeText)
+      } else {
+        countEl.textContent =
+          copyFormat === 'selector'
+            ? STRINGS.selectorChars(sizeText)
+            : copyFormat === 'text'
+              ? STRINGS.textChars(sizeText)
+              : STRINGS.htmlChars(sizeText)
+      }
       countEl.style.color = isLarge ? '#dc2626' : '#6b7280'
     } else {
-      countEl.textContent = STRINGS.htmlLockHint
+      countEl.textContent = STRINGS.copyLockHint
       countEl.style.color = '#6b7280'
     }
     confirmBtn.disabled = false
@@ -610,7 +661,7 @@ export const startPicker: PickerStart = async (args) => {
   }
 
   function refresh() {
-    if (mode === 'html') return refreshHtml()
+    if (mode === 'copy') return refreshCopy()
     const el = target()
     if (!el) return
     const dialect = findBySel.value
@@ -862,19 +913,26 @@ export const startPicker: PickerStart = async (args) => {
     // The button's disabled state is the single authority on what is pickable
     // (an empty selector, or one matching nothing, must not be committed).
     if (confirmBtn.disabled) return
-    if (mode === 'html') {
+    if (mode === 'copy') {
       const el = target()
       if (!el) return
-      const html = el.outerHTML
-      if (!copyPlainText(html)) {
+      const value = copyValueFor(el)
+      if (!copyPlainText(value)) {
         noteEl.style.display = 'block'
         noteEl.style.color = '#dc2626'
         noteEl.textContent = STRINGS.copyFailed
         return
       }
       const tag = el.tagName.toLowerCase()
+      const size = value.length.toLocaleString()
       cleanup()
-      showCopiedToast(STRINGS.copied(html.length.toLocaleString(), tag))
+      showCopiedToast(
+        copyFormat === 'selector'
+          ? STRINGS.copiedSelector(size)
+          : copyFormat === 'text'
+            ? STRINGS.copiedText(size, tag)
+            : STRINGS.copiedHtml(size, tag),
+      )
       return
     }
     void chrome.runtime.sendMessage({
@@ -886,10 +944,10 @@ export const startPicker: PickerStart = async (args) => {
     })
     cleanup()
   }
-  /** html mode is a local copy action: closing it must not message an editor. */
+  /** Copy mode is a local action: closing it must not message an editor. */
   function cancelPick() {
     cleanup()
-    if (mode !== 'html') {
+    if (mode !== 'copy') {
       void chrome.runtime.sendMessage({ type: 'picker:cancel', pickerId })
     }
   }

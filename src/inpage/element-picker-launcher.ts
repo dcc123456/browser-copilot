@@ -4,9 +4,10 @@
  * A static content script parked on every http(s) page. It stays inert until
  * the `elementPickerEnabled` setting is on — the worker's boot reply
  * (`elementPicker.status`) and its `elementPicker.set` broadcasts decide.
- * Clicking the crosshair button starts the shared picker in `html` mode: the
- * user picks an element and its outerHTML is copied to the clipboard for
- * pasting into the chat.
+ * Clicking the crosshair button starts the shared picker in `copy` mode: the
+ * user picks an element and the payload picked in Settings (CSS selector,
+ * visible text, or outerHTML) is copied to the clipboard for pasting into the
+ * chat.
  *
  * The setting is answered by the worker rather than read here: settings may
  * live in a user-chosen folder that content scripts cannot access.
@@ -27,16 +28,26 @@ import type {
 import { startPicker } from './element-picker'
 
 const HOST_ID = 'bc-element-picker-launcher'
-const PICKER_ID = 'element-picker-html'
+const FLOATING_HOST_ID = 'browser-copilot-floating-host'
+const PICKER_ID = 'element-picker'
+const BUTTON_SIZE = 40
+const GAP = 8
+const EDGE = 16
 const BUTTON_ICON =
   '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/></svg>'
 
 type PickerLocale = 'en' | 'zh'
+type CopyFormat = ElementPickerControl['format']
 
 let locale: PickerLocale = 'en'
+let copyFormat: CopyFormat = 'html'
+
+function copyFormatOf(value: unknown): CopyFormat {
+  return value === 'selector' || value === 'text' ? value : 'html'
+}
 
 function label(): string {
-  return locale === 'zh' ? '选择页面元素并复制其 HTML' : 'Pick a page element and copy its HTML'
+  return locale === 'zh' ? '选择页面元素并复制' : 'Pick a page element and copy it'
 }
 
 function launcherButton(): HTMLButtonElement | null {
@@ -55,17 +66,55 @@ function unmount(): void {
   document.getElementById(HOST_ID)?.remove()
 }
 
+/**
+ * Keeps the crosshair clear of the plugin's restore button: the floating button
+ * is draggable and its saved position may sit wherever the crosshair used to
+ * be, which hid one button behind the other. Anchored below it (flipped above
+ * near the bottom edge), defaulting to the old spot when the panel is open.
+ */
+function place(host: HTMLElement): void {
+  host.style.right = `${EDGE}px`
+  const floating = document.getElementById(FLOATING_HOST_ID)
+  if (!floating) {
+    host.style.top = 'calc(50% + 28px)'
+    return
+  }
+  const rect = floating.getBoundingClientRect()
+  host.style.right = `${Math.max(EDGE, Math.round(window.innerWidth - rect.right))}px`
+  let top = Math.round(rect.bottom + GAP)
+  if (top + BUTTON_SIZE > window.innerHeight - EDGE) {
+    top = Math.round(rect.top - GAP - BUTTON_SIZE)
+  }
+  host.style.top = `${Math.max(EDGE, top)}px`
+}
+
+function placeLauncher(): void {
+  const host = document.getElementById(HOST_ID)
+  if (host instanceof HTMLElement) place(host)
+}
+
+let floatingWatch: MutationObserver | null = null
+
+/** Follow the floating button's mount, unmount and drag without polling. */
+function watchFloating(): void {
+  floatingWatch?.disconnect()
+  floatingWatch = null
+  const floating = document.getElementById(FLOATING_HOST_ID)
+  if (!floating) return
+  floatingWatch = new MutationObserver(placeLauncher)
+  floatingWatch.observe(floating, { attributes: true, attributeFilter: ['style'] })
+}
+
 function mount(): void {
   if (!document.getElementById(HOST_ID)) {
     const host = document.createElement('div')
     host.id = HOST_ID
     host.style.all = 'initial'
     host.style.position = 'fixed'
-    host.style.right = '16px'
-    host.style.top = 'calc(50% + 28px)'
     host.style.zIndex = '2147483647'
     host.style.pointerEvents = 'none'
 
+    place(host)
     const shadow = host.attachShadow({ mode: 'open' })
     shadow.innerHTML = `
       <style>
@@ -103,13 +152,24 @@ function mount(): void {
       // A second click while the picker is open would stack listeners on the
       // same document; the open card is the signal to wait.
       if (document.getElementById('bc-element-picker')) return
-      void startPicker({ pickerId: PICKER_ID, mode: 'html', locale })
+      void startPicker({ pickerId: PICKER_ID, mode: 'copy', copyFormat, locale })
     })
 
     document.documentElement.appendChild(host)
+    watchFloating()
   }
   applyLabel()
+  placeLauncher()
 }
+
+window.addEventListener('resize', placeLauncher)
+
+// The floating button mounts/unmounts as the panel minimizes/expands; re-anchor
+// whenever a direct child of <html> changes (cheap: subtree is not observed).
+new MutationObserver(() => {
+  watchFloating()
+  placeLauncher()
+}).observe(document.documentElement, { childList: true })
 
 /** Boot: the worker knows both the toggle and the storage area it lives in. */
 void chrome.runtime
@@ -117,6 +177,7 @@ void chrome.runtime
   .then((response: unknown) => {
     const status = response as ElementPickerStatusResponse | undefined
     locale = status?.locale === 'zh' ? 'zh' : 'en'
+    copyFormat = copyFormatOf(status?.format)
     if (status?.enabled) mount()
   })
   .catch(() => {})
@@ -125,6 +186,7 @@ chrome.runtime.onMessage.addListener((message: unknown) => {
   const msg = message as Partial<ElementPickerControl> | undefined
   if (msg?.type !== 'elementPicker.set') return
   locale = msg.locale === 'zh' ? 'zh' : 'en'
+  copyFormat = copyFormatOf(msg.format)
   if (msg.enabled) mount()
   else unmount()
 })

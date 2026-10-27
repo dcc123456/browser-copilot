@@ -248,10 +248,25 @@ export interface Settings {
   autoRepairOnRun: boolean
   /**
    * When on, every http(s) page shows a crosshair button that opens the element
-   * picker; picking an element copies its outerHTML (descendants included) to
-   * the clipboard so the user can paste it into the chat. Default off.
+   * picker; confirming copies the selected element to the clipboard so the user
+   * can paste it into the chat. What gets copied is
+   * {@link Settings.elementPickerFormat}. Default off.
    */
   elementPickerEnabled: boolean
+  /**
+   * What the picker copies on confirm: a CSS selector, the element's visible
+   * text, or its outerHTML (tags + text, descendants included). Default
+   * `'html'`.
+   */
+  elementPickerFormat: ElementPickerFormat
+}
+
+/** Payload the on-page element picker writes to the clipboard. */
+export type ElementPickerFormat = 'selector' | 'text' | 'html'
+
+/** Unknown or missing values fall back to the shipped default, `'html'`. */
+export function normalizeElementPickerFormat(value: unknown): ElementPickerFormat {
+  return value === 'selector' || value === 'text' || value === 'html' ? value : 'html'
 }
 
 /** 无人值守运行的窗口选择策略（见 {@link Settings.unattendedWindowPolicy}）。 */

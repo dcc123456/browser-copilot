@@ -109,6 +109,7 @@ import {
   handleWorkflowTriggerAlarm,
 } from './workflow-triggers'
 import { validateProfile } from '../lib/providers'
+import type { ElementPickerFormat } from '../lib/types'
 import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
 import { normalizeAgent, validateAgent } from '../lib/agents'
 import {
@@ -958,7 +959,11 @@ async function broadcastFloating(
  * query mounts the button (the floating button's fallback, reused). Turning OFF
  * needs no injection: a page without the script has nothing to remove.
  */
-async function broadcastElementPicker(enabled: boolean, locale: 'en' | 'zh'): Promise<void> {
+async function broadcastElementPicker(
+  enabled: boolean,
+  locale: 'en' | 'zh',
+  format: ElementPickerFormat,
+): Promise<void> {
   const tabs = await chrome.tabs.query({}).catch(() => [])
   await Promise.all(
     tabs
@@ -970,6 +975,7 @@ async function broadcastElementPicker(enabled: boolean, locale: 'en' | 'zh'): Pr
             type: 'elementPicker.set',
             enabled,
             locale,
+            format,
           } satisfies ElementPickerControl)
         } catch {
           if (!enabled) return
@@ -1177,9 +1183,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({
           enabled: settings.elementPickerEnabled,
           locale: pickerLocale(settings.locale),
+          format: settings.elementPickerFormat,
         })
       })
-      .catch(() => sendResponse({ enabled: false, locale: 'en' }))
+      .catch(() => sendResponse({ enabled: false, locale: 'en', format: 'html' }))
     return true
   }
 
@@ -1422,9 +1429,14 @@ async function handleCommand(
       void agentClient.sync()
       if (
         previous.elementPickerEnabled !== settings.elementPickerEnabled ||
+        previous.elementPickerFormat !== settings.elementPickerFormat ||
         previous.locale !== settings.locale
       ) {
-        void broadcastElementPicker(settings.elementPickerEnabled, pickerLocale(settings.locale))
+        void broadcastElementPicker(
+          settings.elementPickerEnabled,
+          pickerLocale(settings.locale),
+          settings.elementPickerFormat,
+        )
       }
       return { type: 'settings', settings }
     }

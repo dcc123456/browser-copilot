@@ -59,6 +59,7 @@ function settingsWith(provider: Partial<ProviderProfile>): Settings {
     takeoverOnRun: false,
     autoRepairOnRun: false,
     elementPickerEnabled: false,
+    elementPickerFormat: 'html',
   } as Settings
 }
 

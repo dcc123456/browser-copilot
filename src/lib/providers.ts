@@ -17,8 +17,13 @@
 import { LOCALES, type LocaleSetting, type Messages } from './i18n'
 import { normalizeLocalAgentBindings } from './storage'
 import { normalizeThinkingProfile, type ThinkingLevel } from './thinking'
-import { normalizeLocalAgentUrl, normalizeProviderModels, normalizeRunWindowLimit } from './types'
-import type { AgentMode, UnattendedWindowPolicy } from './types'
+import {
+  normalizeElementPickerFormat,
+  normalizeLocalAgentUrl,
+  normalizeProviderModels,
+  normalizeRunWindowLimit,
+} from './types'
+import type { AgentMode, ElementPickerFormat, UnattendedWindowPolicy } from './types'
 
 /** A configured endpoint the agent can talk to. */
 export interface ProviderProfile {
@@ -412,6 +417,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   takeoverOnRun: boolean
   autoRepairOnRun: boolean
   elementPickerEnabled: boolean
+  elementPickerFormat: ElementPickerFormat
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -511,5 +517,6 @@ export function normalizeSettingsPayload(raw: unknown): {
     autoRepairOnRun: typeof value.autoRepairOnRun === 'boolean' ? value.autoRepairOnRun : false,
     elementPickerEnabled:
       typeof value.elementPickerEnabled === 'boolean' ? value.elementPickerEnabled : false,
+    elementPickerFormat: normalizeElementPickerFormat(value.elementPickerFormat),
   }
 }

@@ -59,6 +59,7 @@ function settingsWith(model: string, baseUrl: string): Settings {
     takeoverOnRun: false,
     autoRepairOnRun: false,
     elementPickerEnabled: false,
+    elementPickerFormat: 'html',
   } as Settings
 }
 

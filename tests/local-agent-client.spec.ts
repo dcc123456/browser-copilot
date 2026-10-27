@@ -141,6 +141,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     takeoverOnRun: false,
     autoRepairOnRun: false,
     elementPickerEnabled: false,
+    elementPickerFormat: 'html',
     localAgentEnabled: true,
     localAgentToken: '',
     localAgentUrl: 'ws://127.0.0.1:8765',

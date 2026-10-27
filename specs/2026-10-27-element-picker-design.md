@@ -14,8 +14,11 @@
 
 1. 设置页把这四个模块（含新增的「元素选择器」开关）移到顶部，更新卡片保持最后。
 2. 新增开关 `elementPickerEnabled`（默认关闭）。开启后，每个 http(s) 页面右侧出现一个十字准星图标按钮。
-3. 点击按钮进入拾取：悬停高亮、点击锁定、可切父/子元素；确认后把 `outerHTML` 原样写入剪贴板，
-   并给出“复制了多少字符”的反馈。
+3. 点击按钮进入拾取：悬停高亮、点击锁定、可切父/子元素；确认后按设置里的复制格式写入剪贴板：
+   - **HTML（默认）**：`outerHTML`，标签 + 文本，含全部子元素；
+   - **仅文本**：元素的可见文本（与内核的文本策略同一套空白折叠规则）；
+   - **仅 CSS 选择器**：能唯一定位该元素的 CSS 选择器。
+     复制后给出“复制了多少字符”的反馈。
 4. 关闭开关后已打开的页面立即移除按钮；页面刷新后按存储的设置恢复。
 
 非目标：
@@ -38,13 +41,14 @@
 
 ## 3. 交互与数据流
 
-1. 设置开关写入 `settings.elementPickerEnabled`，后台在 `settings.set` 后向所有标签页广播
-   `elementPicker.set { enabled, locale }`；对没有内容脚本的旧标签页，开启时补注入 launcher 文件。
-2. launcher 启动时询问 `elementPicker.status`，按 `{ enabled, locale }` 决定是否挂载；点击按钮
-   → `startPicker({ mode: 'html', locale })`。
-3. html 模式卡片只保留父/子与「复制 HTML」：悬停显示标签，锁定后显示标签 + 字符数；
-   Enter/按钮提交，Esc/× 关闭。复制成功 → 关闭卡片 + 轻提示；失败 → 卡片保留并提示重试。
-4. html 模式不发送 `picker:result` / `picker:cancel`，不进入工作流编辑器的监听扇出。
+1. 设置开关写入 `settings.elementPickerEnabled`、复制格式写入 `settings.elementPickerFormat`；
+   后台在 `settings.set` 后向所有标签页广播 `elementPicker.set { enabled, locale, format }`；
+   对没有内容脚本的旧标签页，开启时补注入 launcher 文件。
+2. launcher 启动时询问 `elementPicker.status`，按 `{ enabled, locale, format }` 决定是否挂载；
+   点击按钮 → `startPicker({ mode: 'copy', copyFormat: format, locale })`。
+3. copy 模式卡片只保留父/子与复制按钮（按钮文案随格式变化）：悬停显示标签，锁定后显示标签/选择器
+   - 字符数；Enter/按钮提交，Esc/× 关闭。复制成功 → 关闭卡片 + 轻提示；失败 → 卡片保留并提示重试。
+4. copy 模式不发送 `picker:result` / `picker:cancel`，不进入工作流编辑器的监听扇出。
 5. 拾取期间隐藏 launcher，`cleanup()` 恢复，避免“再次点击启动器”与页面按下拦截互相干扰。
 
 ## 4. 已知边界

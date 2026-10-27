@@ -11,6 +11,7 @@
  */
 
 import type { ProviderProfile } from './providers'
+import type { ElementPickerFormat } from './types'
 import type {
   Agent,
   AgentStatus,
@@ -1184,17 +1185,19 @@ export interface FloatingStatusResponse {
 /** Messages from the launcher content script to the service worker. */
 export type ElementPickerLauncherMessage = { type: 'elementPicker.status' }
 
-/** Worker → launcher content script: current toggle state and copy locale. */
+/** Worker → launcher content script: toggle state, copy locale and payload. */
 export type ElementPickerControl = {
   type: 'elementPicker.set'
   enabled: boolean
   locale: 'en' | 'zh'
+  format: ElementPickerFormat
 }
 
 /** Reply to `elementPicker.status`. */
 export interface ElementPickerStatusResponse {
   enabled: boolean
   locale: 'en' | 'zh'
+  format: ElementPickerFormat
 }
 
 // --- Multi-window picker (unattended window policy = "ask") --------------------
