@@ -795,6 +795,12 @@ body {
   outline: none;
 }
 
+/* The field wrapper already draws the focus frame. The generic textarea focus
+   rule would add its own ring inside the wrapper, i.e. a second inner box. */
+.composer textarea:focus-visible {
+  box-shadow: none;
+}
+
 .composer-row {
   display: flex;
   align-items: center;

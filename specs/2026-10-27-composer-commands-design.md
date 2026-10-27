@@ -110,6 +110,13 @@ pin 的技能说明**从未进入模型**——而 `wrapSkillDirective` 写进�
 高亮成为内嵌圆角块而非压满整行的色带。深浅两套主题都用真机探针读 computed style 验过：
 浅色 `rgba(40,96,207,.1)` 底 + `#18202c` 字 + `#2860cf` 名，深色 `rgba(110,163,255,.14)` 底 + `#e9ecf2` 字。
 
+**D9 聚焦时只有一个焦点框。** 全站 `textarea:focus-visible` 会给输入框加
+`box-shadow: 0 0 0 3px var(--accent-soft)`，而 composer 的字段容器本身已经
+`focus-within:border-accent` + 3px 软环。两者叠加后焦点态出现"外蓝框 + 内灰框"（内层那圈 10% 蓝
+在浅色底上读作灰色矩形），明显是两层框。`.composer textarea` 的 `border: 0` 只压住边框宽度，
+压不住这条 `box-shadow`（`textarea:focus-visible` 与 `.composer textarea` 同为 0,1,1）。
+修法：`.composer textarea:focus-visible { box-shadow: none }`，焦点框只由字段容器画。
+
 ## 4. 测试与验收
 
 - `tests/slash.spec.ts`：`takeAttachTrigger` 在开头/空白后触发并返回去掉 `@` 的文本与光标；
