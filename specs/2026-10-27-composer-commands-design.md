@@ -117,6 +117,15 @@ pin 的技能说明**从未进入模型**——而 `wrapSkillDirective` 写进�
 压不住这条 `box-shadow`（`textarea:focus-visible` 与 `.composer textarea` 同为 0,1,1）。
 修法：`.composer textarea:focus-visible { box-shadow: none }`，焦点框只由字段容器画。
 
+**D10 底部操作行永远一行。** `.composer-row` 原先是 `flex-wrap: wrap`，另外 `.actions` 自带
+`flex-wrap: wrap` 且 composer 里写着 `shrink-0`：面板收窄到 320px 时，模式选择与动作簇总宽
+（325px > 292px 可用）无法共存，动作簇整体掉到第二行（实测行高 63px）。改法：
+行级 `flex-wrap: nowrap`，取消动作簇的 `shrink-0`，让模式选择（`flex-shrink: 0.5` + `min-width: 0`，
+select 省略号）与模型按钮（外层 `w-36 min-w-0`、按钮 `w-full`）承担收缩；图标按钮与带文字的动作按钮
+`flex-shrink: 0`，标签保持完整。取舍：空间不足时先丢模型名（它本来就有 chevron 表示是选择器），
+模式名尽量保留。320px 实测三种状态（空对话 / 回合进行中 / 有对话带新建按钮）行高分别 28/34/28px、
+无横向溢出，`停止`、`补充`、`发送` 标签均完整。
+
 ## 4. 测试与验收
 
 - `tests/slash.spec.ts`：`takeAttachTrigger` 在开头/空白后触发并返回去掉 `@` 的文本与光标；

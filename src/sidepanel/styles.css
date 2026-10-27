@@ -806,11 +806,40 @@ body {
   align-items: center;
   gap: 8px;
   justify-content: space-between;
-  /* The action cluster (model picker, new chat, send) is wider than a narrow
-     panel's leftover space, so it drops to a second line as a whole instead of
-     splitting into a stack of one-control rows. */
-  flex-wrap: wrap;
+  /* The mode picker and the action cluster share one line even at the side
+     panel's narrowest: the two pickers give up their labels instead of the row
+     wrapping, while the icon and send buttons keep their size. */
+  flex-wrap: nowrap;
   white-space: nowrap;
+}
+
+.composer-row .mode-select {
+  min-width: 0;
+  /* Half weight: when the row is tight the model picker gives up its name
+     before the mode label loses its text, but neither is starved. */
+  flex-shrink: 0.5;
+}
+
+.composer-row .mode-select select {
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+
+.composer-row .mode-select .icon-btn,
+.composer-row .actions .icon-btn {
+  flex-shrink: 0;
+}
+
+.composer-row .actions {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+/* Labelled actions keep their whole label; the mode and model pickers are the
+   ones that give up width when the panel is at its narrowest. */
+.composer-row .actions > button {
+  flex-shrink: 0;
 }
 
 /* --- Forms & controls --- */

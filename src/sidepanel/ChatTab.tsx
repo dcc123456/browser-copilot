@@ -4598,7 +4598,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
               </div>
             )}
           </div>
-          <div className="actions ml-auto shrink-0" style={{ margin: 0 }}>
+          <div className="actions ml-auto" style={{ margin: 0 }}>
             <input
               accept={FILE_INPUT_ACCEPT}
               multiple
@@ -4617,7 +4617,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 (`bottom-full`) — the composer sits at the panel's bottom edge.
               */
               <div
-                className="relative shrink-0"
+                className="relative w-36 min-w-0"
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') setModelMenuOpen(false)
                 }}
@@ -4627,7 +4627,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                   aria-expanded={modelMenuOpen}
                   aria-haspopup="listbox"
                   aria-label={t.chatModelSelect}
-                  className="flex h-7 w-36 items-center justify-between gap-1 rounded-md border border-border bg-panel px-2 text-xs text-ink hover:bg-hover disabled:opacity-50"
+                  className="flex h-7 w-full min-w-0 items-center justify-between gap-1 rounded-md border border-border bg-panel px-2 text-xs text-ink hover:bg-hover disabled:opacity-50"
                   disabled={busy}
                   onClick={() => setModelMenuOpen((open) => !open)}
                   title={t.chatModelSelect}
