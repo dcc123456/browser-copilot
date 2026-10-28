@@ -1363,6 +1363,17 @@ export interface Messages {
   settingsLocalAgentAllowReload: string
   settingsLocalAgentAllowReloadHint: string
 
+  // Feedback
+  /** Issue body: the reporter's text followed by the diagnostics block. */
+  feedbackIssueBody: (params: {
+    text: string
+    version: string
+    build: string
+    userAgent: string
+    locale: string
+  }) => string
+  feedbackIssueFallbackTitle: string
+
   // Data / memory
   dataTitle: string
   dataIntro: string
@@ -2968,6 +2979,10 @@ const en: Messages = {
   settingsLocalAgentAllowReloadHint:
     'Exposes reload_extension on the bridge so a self-test script can pick up a fresh build without reopening chrome://extensions. Off by default; reload only restarts the service worker.',
 
+  feedbackIssueBody: ({ text, version, build, userAgent, locale }) =>
+    `${text}\n\n---\n\n**Diagnostics**\n\n- Extension version: ${version}\n- Build: ${build}\n- Browser: ${userAgent}\n- UI language: ${locale}\n`,
+  feedbackIssueFallbackTitle: 'Feedback',
+
   dataTitle: 'Personal data',
   dataIntro:
     'Saved profiles and credentials are stored locally and only sent to the model as part of a request you approve. The agent uses them to fill forms so you do not have to retype them.',
@@ -4534,6 +4549,10 @@ const zhCN: Messages = {
   settingsLocalAgentAllowReload: '允许本地 agent 重载扩展（开发者）',
   settingsLocalAgentAllowReloadHint:
     '开启后桥接会暴露 reload_extension，自测脚本在 build 之后可自行重载扩展，不必再去 chrome://extensions 手点。默认关闭；重载只会重启 service worker。',
+
+  feedbackIssueBody: ({ text, version, build, userAgent, locale }) =>
+    `${text}\n\n---\n\n**诊断信息**\n\n- 扩展版本：${version}\n- 构建：${build}\n- 浏览器：${userAgent}\n- 界面语言：${locale}\n`,
+  feedbackIssueFallbackTitle: '反馈',
 
   dataTitle: '个人数据',
   dataIntro:

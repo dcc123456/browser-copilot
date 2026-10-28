@@ -66,6 +66,12 @@ export interface GitHubIssue {
   pull_request?: unknown
 }
 
+/** The fields of a freshly created issue that the UI needs. */
+export interface GitHubCreatedIssue {
+  number: number
+  html_url: string
+}
+
 export interface GitHubReaction {
   id: number
   content: string
@@ -285,6 +291,18 @@ export class GitHubClient {
     return this.request<GitHubIssue[]>(
       `/repos/${owner}/${repo}/issues?state=all&per_page=100&page=${page}`,
     )
+  }
+
+  /** Opens an issue. 201 on success; 410 when the repository disabled issues. */
+  createIssue(
+    owner: string,
+    repo: string,
+    input: { title: string; body: string },
+  ): Promise<GitHubCreatedIssue> {
+    return this.request<GitHubCreatedIssue>(`/repos/${owner}/${repo}/issues`, {
+      method: 'POST',
+      body: input,
+    })
   }
 
   addReaction(owner: string, repo: string, issueNumber: number): Promise<GitHubReaction> {

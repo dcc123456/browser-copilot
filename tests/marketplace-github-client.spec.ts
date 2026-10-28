@@ -149,6 +149,37 @@ describe('github client', () => {
     expect(calls[1]!.init!.method).toBe('DELETE')
   })
 
+  it('opens an issue with a JSON title and body', async () => {
+    const { client, calls } = makeClient(() =>
+      jsonResponse(
+        { number: 42, html_url: 'https://github.com/dcc123456/browser-copilot/issues/42' },
+        201,
+      ),
+    )
+    await expect(
+      client.createIssue('dcc123456', 'browser-copilot', { title: 'Settings', body: 'Steps' }),
+    ).resolves.toEqual({
+      number: 42,
+      html_url: 'https://github.com/dcc123456/browser-copilot/issues/42',
+    })
+
+    expect(calls[0]!.url).toBe('https://api.github.com/repos/dcc123456/browser-copilot/issues')
+    expect(calls[0]!.init!.method).toBe('POST')
+    const headers = calls[0]!.init!.headers as Record<string, string>
+    expect(headers['Content-Type']).toBe('application/json')
+    expect(JSON.parse(String(calls[0]!.init!.body))).toEqual({ title: 'Settings', body: 'Steps' })
+  })
+
+  it('maps a rejected issue to the shared conflict error', async () => {
+    await expect(
+      makeClient(() => jsonResponse({ message: 'Validation Failed' }, 422)).client.createIssue(
+        'dcc123456',
+        'browser-copilot',
+        { title: 't', body: 'b' },
+      ),
+    ).rejects.toMatchObject({ code: 'conflict' })
+  })
+
   it('reads private file text through the contents API with the raw media type', async () => {
     const { client, calls } = makeClient(() => new Response('{"slug":"x"}', { status: 200 }))
     await expect(
