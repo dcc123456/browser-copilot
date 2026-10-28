@@ -46,7 +46,10 @@ export function feedbackIssueTitle(text: string, fallbackTitle: string): string 
   if (!line) return fallbackTitle
   const points = [...line]
   if (points.length <= FEEDBACK_TITLE_MAX_CHARS) return line
-  return `${points.slice(0, FEEDBACK_TITLE_MAX_CHARS - 1).join('').trimEnd()}…`
+  return `${points
+    .slice(0, FEEDBACK_TITLE_MAX_CHARS - 1)
+    .join('')
+    .trimEnd()}…`
 }
 
 export function buildFeedbackIssue(

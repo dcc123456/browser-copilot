@@ -27,7 +27,10 @@ describe('connect failure text', () => {
   })
 
   it('explains a non-classic token instead of the generic invalid copy', () => {
-    const error = new MarketplaceError('invalid', 'Only classic GitHub tokens (ghp_…) are supported')
+    const error = new MarketplaceError(
+      'invalid',
+      'Only classic GitHub tokens (ghp_…) are supported',
+    )
     expect(connectFailureText(messagesFor('en'), error)).toBe(
       messagesFor('en').marketplaceConnectInvalid,
     )
