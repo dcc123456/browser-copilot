@@ -1452,6 +1452,15 @@ const BLOCK_FORM_STRINGS = {
       '全自动：智能体可点击、输入、导航以完成任务；每一步都会写入运行日志。',
     'Read-only: the agent can read/snapshot the page and answer, but cannot click, type, or navigate.':
       '只读：智能体可读取/快照页面并回答，但不能点击、输入或导航。',
+    // — AI agent capability switches —
+    'Skills & tools': '技能与工具',
+    Skills: '技能',
+    Tools: '工具',
+    'Everything is enabled by default. Turning a skill or tool off removes it from the model request, which lowers token cost.':
+      '默认全部开启。关闭用不到的技能或工具会把它从模型请求中移除，从而减少 token 消耗。',
+    'No saved skills.': '暂无已保存的技能。',
+    'Could not load saved skills.': '无法加载已保存的技能。',
+    'Reload skills': '重新加载技能',
     'Allow the agent to act on the page (click, fill, navigate)':
       '允许智能体操作页面（点击、填写、导航）',
     'Off: the agent only reads and analyzes (read-only). On: it performs actions autonomously without per-step confirmation.':

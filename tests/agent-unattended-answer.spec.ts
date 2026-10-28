@@ -171,6 +171,41 @@ describe('runUnattendedPrompt answer assembly', () => {
     expect(result.error).toMatch(/snapshot_page/)
   })
 
+  it('merges the node capability switches into the global tool settings', async () => {
+    // The global Settings switches still win: a tool disabled everywhere stays
+    // off even when a workflow author left it checked, hence a union rather
+    // than a replacement.
+    getSettingsMock.mockResolvedValue({ disabledTools: ['screenshot', 'click'] })
+    let captured: { getToolConfig?: () => Promise<Record<string, unknown>> } | undefined
+    runAgentTurn.mockImplementation(async (_history: unknown, deps: unknown) => {
+      captured = deps as typeof captured
+      return null
+    })
+
+    await runUnattendedPrompt('do it', 'workflow-ai-agent:x', 'readonly', {
+      disabledTools: ['click', 'save_local'],
+      disabledSkills: ['xiaohongshu-writer'],
+    })
+
+    const config = await captured!.getToolConfig!()
+    expect(config.disabledTools).toEqual(['screenshot', 'click', 'save_local'])
+    expect(config.disabledSkills).toEqual(['xiaohongshu-writer'])
+  })
+
+  it('leaves the skill switches off the config when the node disabled none', async () => {
+    let captured: { getToolConfig?: () => Promise<Record<string, unknown>> } | undefined
+    runAgentTurn.mockImplementation(async (_history: unknown, deps: unknown) => {
+      captured = deps as typeof captured
+      return null
+    })
+
+    await runUnattendedPrompt('do it', 'workflow-ai-agent:x', 'readonly')
+
+    const config = await captured!.getToolConfig!()
+    expect(config.disabledTools).toEqual([])
+    expect('disabledSkills' in config).toBe(false)
+  })
+
   it('forwards an explicit attribution to the agent loop, and omits it otherwise', async () => {
     scriptTurn([{ type: 'delta', text: 'done' }])
     const attribution = {

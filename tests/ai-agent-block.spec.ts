@@ -75,6 +75,10 @@ describe('ai-agent block catalog wiring', () => {
     expect(b.data['useSnapshot']).toBe(true)
     expect(b.data['maxToolRounds']).toBe(20)
     expect(b.data['variableName']).toBe('lastAIAgent')
+    // Deny lists: empty = everything enabled, so capabilities added later are
+    // not silently excluded from nodes saved before they existed.
+    expect(b.data['disabledTools']).toEqual([])
+    expect(b.data['disabledSkills']).toEqual([])
   })
 
   it('does not collide with any Automa catalog id', () => {
@@ -96,6 +100,8 @@ describe('ai-agent block catalog wiring', () => {
     expect(data['actOnPage']).toBe(false)
     expect(data['findBy']).toBe('cssSelector')
     expect(data['variableName']).toBe('lastAIAgent')
+    expect(data['disabledTools']).toEqual([])
+    expect(data['disabledSkills']).toEqual([])
   })
 })
 
@@ -155,6 +161,25 @@ describe('buildAgentPrompt', () => {
     expect(p).toContain('<think>')
     expect(p).toContain('code fences')
     expect(p).toContain('Output requirements')
+  })
+
+  it('tells the model that only a tool-free reply is the answer', () => {
+    // The loop ends on the first reply with no tool calls; text streamed
+    // alongside a call is narration and gets dropped. Say so, or a model that
+    // already holds the answer spends rounds "verifying" it and the block
+    // stores the narration instead of the answer.
+    const p = buildAgentPrompt({
+      userPrompt: 'x',
+      selector: '',
+      elementText: '',
+      elementFound: false,
+      useSnapshot: false,
+      actOnPage: false,
+    })
+    expect(p).toContain('How to finish:')
+    expect(p).toContain('NO tool calls counts as your final answer')
+    expect(p).toContain('Do not call a tool to double-check')
+    expect(p).toContain('Call a tool only when a fact you still need is missing.')
   })
 })
 
@@ -328,6 +353,40 @@ describe('ai-agent executor', () => {
       { maxToolRounds: number },
     ]
     expect(options.maxToolRounds).toBe(12)
+  })
+
+  it('forwards the node capability switches, dropping empty and non-string entries', async () => {
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: 'done' })
+    const { ctx } = makeCtx()
+
+    await EXECUTORS['ai-agent']!(
+      { prompt: 'go', disabledTools: ['click', '', 42], disabledSkills: ['writer'] },
+      ctx,
+    )
+
+    const [, , , options] = runUnattended.mock.calls[0] as [
+      string,
+      string,
+      string,
+      Record<string, unknown>,
+    ]
+    expect(options.disabledTools).toEqual(['click'])
+    expect(options.disabledSkills).toEqual(['writer'])
+  })
+
+  it('omits the switch lists for a node that disabled nothing', async () => {
+    // Absent and empty both mean "every capability on"; omitting keeps the
+    // nested runner on its own default path instead of receiving empty arrays.
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: 'done' })
+    const { ctx } = makeCtx()
+
+    await EXECUTORS['ai-agent']!({ prompt: 'go', disabledTools: [], disabledSkills: [] }, ctx)
+
+    const [, , , options] = runUnattended.mock.calls[0] as [string, string, string, object]
+    expect('disabledTools' in options).toBe(false)
+    expect('disabledSkills' in options).toBe(false)
   })
 
   it('pins the nested unattended turn to the workflow window scope', async () => {

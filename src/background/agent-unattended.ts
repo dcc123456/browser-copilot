@@ -71,6 +71,17 @@ export interface UnattendedOptions {
    * really belongs to, so the dashboard can name and open it.
    */
   attribution?: TokenAttribution
+  /**
+   * Tools this call may not use, on top of the user's global disabled list.
+   * The workflow `ai-agent` block passes its per-node switches here; disabling
+   * a tool removes its schema from every request of the turn.
+   */
+  disabledTools?: string[]
+  /**
+   * Skill names this call may not load (per-node switches). A disabled skill
+   * also disappears from the skill catalogue, so it costs no prompt tokens.
+   */
+  disabledSkills?: string[]
 }
 
 /**
@@ -175,8 +186,15 @@ export async function runUnattendedPrompt(
       getMaxToolRounds: async () => options.maxToolRounds ?? settings.maxToolRounds,
       ...(options.provider ? { getProvider: async () => options.provider } : {}),
       getToolConfig: async () => ({
-        disabledTools: settings.disabledTools ?? [],
+        // The global switch still wins: a tool the user disabled everywhere
+        // stays disabled even if a workflow author left it checked.
+        disabledTools: [
+          ...new Set([...(settings.disabledTools ?? []), ...(options.disabledTools ?? [])]),
+        ],
         basePrompt: settings.systemPromptOverride ?? '',
+        ...(options.disabledSkills && options.disabledSkills.length > 0
+          ? { disabledSkills: options.disabledSkills }
+          : {}),
       }),
     })
 

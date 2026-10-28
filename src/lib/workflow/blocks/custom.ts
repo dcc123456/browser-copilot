@@ -52,6 +52,11 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
       // Have the agent take a page snapshot before acting so it can locate
       // interactive elements itself.
       useSnapshot: true,
+      // Capability switches: names the author switched OFF. Empty = everything
+      // enabled (the default), which is why these are deny lists — a tool or
+      // skill added later must not be silently excluded from old nodes.
+      disabledTools: [],
+      disabledSkills: [],
     },
     cloud: false,
   },

@@ -28,6 +28,20 @@ export interface ToolMeta {
 }
 
 /**
+ * Tools the model can reach only through the local-agent bridge: workflow
+ * generation/repair plus `reload_extension`. A panel turn and an unattended
+ * `ai-agent` turn never advertise them, so the block editor leaves them out of
+ * its capability list. Lives here (chrome-free) so the agent loop and the
+ * editor share one definition.
+ */
+export const BRIDGE_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  'generate_workflow',
+  'verify_workflow',
+  'repair_workflow',
+  'reload_extension',
+])
+
+/**
  * Every tool the agent can call. Order here drives the settings list order.
  * Disabling a tool removes its schema from the request and the agent simply
  * never sees it; warnings below describe the user-visible consequence.

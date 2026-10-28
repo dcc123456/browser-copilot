@@ -116,8 +116,13 @@ const MAX_CATALOG_CHARS = 32_100
  * compacted first — measured 62_201). Raised 62_300 → 62_700 for
  * `read_selected_element` (measured 62_610): reads stay in workflow mode, and
  * a picked selector is exactly what the operator schemas take as input.
+ * Raised 62_700 → 62_800 when the `ai-agent` block gained the `disabledTools` /
+ * `disabledSkills` capability lists (~67 chars in its derived operator schema,
+ * measured 62_677). Keeping them in the catalog default data is what lets a
+ * generated workflow prune its own node's capabilities, and `migrateNodeData`
+ * fills them for old nodes.
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 62_700
+const MAX_WORKFLOW_ROUND1_CHARS = 62_800
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~37.6k; the smallest (`general`)
@@ -149,8 +154,10 @@ const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_400
  * Raised 62_000 → 62_300 with the round-1 budget (`set-variable` — measured 62_201).
  * Raised 62_300 → 62_700 with the round-1 budget (`read_selected_element` —
  * measured 62_610).
+ * Raised 62_700 → 62_800 with the round-1 budget (the `ai-agent` capability
+ * keys — measured 62_677).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_700
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_800
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
@@ -164,8 +171,10 @@ const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_700
  * Raised 63_000 → 63_300 with the round-1 budget (`set-variable` — measured 63_248).
  * Raised 63_300 → 63_700 with the round-1 budget (`read_selected_element` —
  * measured 63_657).
+ * Raised 63_700 → 63_800 with the round-1 budget (the `ai-agent` capability
+ * keys — measured 63_724).
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 63_700
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 63_800
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
  * now deliberately carries EVERY operator schema, so workflow runs ~3× full

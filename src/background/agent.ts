@@ -84,6 +84,7 @@ import {
 import { BUILT_IN_SUPERVISOR_ID, getBuiltinI18nKeys } from '../lib/builtin-agents'
 import type { Messages } from '../lib/i18n'
 import { effectiveLocale, messagesFor } from '../lib/i18n'
+import { BRIDGE_ONLY_TOOLS } from '../lib/tool-catalog'
 import { runDelegateTool, type DelegationRuntime } from './orchestrator'
 import {
   addHistory,
@@ -1525,13 +1526,6 @@ export const TOOLS: WireTool[] = [
  * discovery; `agent-api.ts` intercepts the calls by name, so none is ever
  * resolved through `runToolStandalone`.
  */
-export const BRIDGE_ONLY_TOOLS = new Set([
-  'generate_workflow',
-  'verify_workflow',
-  'repair_workflow',
-  'reload_extension',
-])
-
 export type ConfirmFn = (name: string, argsPreview: string) => Promise<boolean>
 
 /** One structured suggestion on an `ask_user` card. */
@@ -2406,11 +2400,17 @@ export interface AgentDeps {
    */
   getProvider?: () => Promise<ProviderProfile | undefined>
   /**
-   * Returns the names of tools the user has disabled and their custom base
-   * system prompt (empty string = use the default). Read at turn start so
-   * toggles take effect on the next request without a worker restart.
+   * Returns the names of tools (and, for a workflow node, skills) the user has
+   * disabled plus their custom base system prompt (empty string = use the
+   * default). Read at turn start so toggles take effect on the next request
+   * without a worker restart.
    */
-  getToolConfig: () => Promise<{ disabledTools: string[]; basePrompt: string }>
+  getToolConfig: () => Promise<{
+    disabledTools: string[]
+    basePrompt: string
+    /** Skill names this turn may not load (workflow `ai-agent` block switches). */
+    disabledSkills?: string[]
+  }>
   /**
    * Window id of the side panel that sent this turn's message. Resolved to a
    * validated {@link ScopeWindow} at turn start and threaded through every
@@ -2556,6 +2556,11 @@ export interface ToolContext {
   lastUrl?: string
   /** Tools the user has disabled; the model should not call them. */
   disabled: Set<string>
+  /**
+   * Skill names this run may not load, lower-cased. Set by the workflow
+   * `ai-agent` block's per-node switches; absent when every skill is allowed.
+   */
+  disabledSkills?: ReadonlySet<string>
   /**
    * Ref → element cache from the LATEST snapshot (the devtools-mcp uid
    * pattern): snapshots and observations carry only short refs like "e12",
@@ -4217,9 +4222,19 @@ export async function executeTool(
             'in the chat composer (type "/plan") and resend the request.',
         })
       }
+      // The workflow node's switches are a hard boundary: the schema is still
+      // advertised (it is core), so a stale or hallucinated call must not load
+      // instructions the author switched off.
+      if (ctx.disabledSkills?.has(wanted.toLowerCase())) {
+        return JSON.stringify({
+          error: `The "${wanted}" skill is disabled for this block. Work from the page and the instructions you already have.`,
+        })
+      }
       const skill = await findSkillByName(wanted)
       if (!skill) {
-        const available = (await listSkills()).map((entry) => entry.name)
+        const available = (await listSkills())
+          .map((entry) => entry.name)
+          .filter((name) => !ctx.disabledSkills?.has(name.trim().toLowerCase()))
         return JSON.stringify({ error: `No skill named "${wanted}".`, available })
       }
       return JSON.stringify({
@@ -5032,6 +5047,17 @@ export async function runAgentTurn(
     getSettings(),
   ])
   const provider = preferredProvider ?? (await getActiveProvider())
+  // Skills the caller switched off for this turn (a workflow node's per-block
+  // list). Case-insensitive, matching validateSkill's name uniqueness.
+  const disabledSkills = new Set(
+    (toolConfig.disabledSkills ?? [])
+      .map((name) => name.trim().toLowerCase())
+      .filter((name) => name !== ''),
+  )
+  const visibleSkills =
+    disabledSkills.size === 0
+      ? skillList
+      : skillList.filter((skill) => !disabledSkills.has(skill.name.trim().toLowerCase()))
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
 
   // What every completion in this turn is for, as one pair of attributions
@@ -5066,6 +5092,8 @@ export async function runAgentTurn(
         BUILT_IN_SKILLS.find((skill) => skill.id === 'builtin-workflow-generator'))
       : undefined
 
+  const disabled = new Set(toolConfig.disabledTools)
+
   // The mounted skill must NOT also sit in the catalogue: the catalogue tells
   // the model to load skills via `use_skill`, which would spend a round
   // re-loading instructions that are already in the system prompt.
@@ -5074,14 +5102,17 @@ export async function runAgentTurn(
   // exception: its approved-execution phase is where OTHER saved skills
   // belong, so the catalogue stays visible (minus the plan skill itself and
   // any mounted mode skill) and the model can `use_skill` a match per step.
-  const catalogue: Skill[] = activeSkill
-    ? activeSkill.name === PLAN_SKILL_NAME
-      ? skillList.filter((skill) => skill.id !== activeSkill.id && skill.id !== modeSkill?.id)
-      : []
-    : modeSkill
-      ? skillList.filter((skill) => skill.id !== modeSkill.id)
-      : skillList
-  const disabled = new Set(toolConfig.disabledTools)
+  // With `use_skill` switched off there is no way to load any of them, so the
+  // list is pure prompt cost and is dropped whole.
+  const catalogue: Skill[] = disabled.has('use_skill')
+    ? []
+    : activeSkill
+      ? activeSkill.name === PLAN_SKILL_NAME
+        ? visibleSkills.filter((skill) => skill.id !== activeSkill.id && skill.id !== modeSkill?.id)
+        : []
+      : modeSkill
+        ? visibleSkills.filter((skill) => skill.id !== modeSkill.id)
+        : visibleSkills
   const messages: Messages = messagesFor(effectiveLocale(settings.locale, navigator.language))
 
   // --- Specialist sub-agent turn -------------------------------------------
@@ -5108,7 +5139,7 @@ export async function runAgentTurn(
     }
     systemPrompt = buildSystemPrompt({
       mode: initialMode,
-      subAgent: { agent, skills: skillList },
+      subAgent: { agent, skills: visibleSkills },
       messages,
     })
   } else {
@@ -5195,6 +5226,7 @@ export async function runAgentTurn(
     loadedGroups,
     navigated: false,
     disabled,
+    ...(disabledSkills.size > 0 ? { disabledSkills } : {}),
     failureStreaks: new Map(),
     ...(delegation ? { delegation } : {}),
     ...(deps.subAgent ? { subAgent: deps.subAgent } : {}),

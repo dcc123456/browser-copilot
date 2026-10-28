@@ -17,6 +17,8 @@
  *      - `actOnPage: true` → full-auto mode: the agent acts on the page
  *        without per-step confirmation (there is no panel to confirm on during
  *        a workflow run); every tool step is streamed into the run log.
+ *      - The node's `disabledTools` / `disabledSkills` switches ride along, so
+ *        a block pays only for the capabilities its author left enabled.
  *   4. Stores the agent's final text answer in the configured output variable
  *      (and `lastAIAgent`).
  *
@@ -173,6 +175,11 @@ export function buildAgentPrompt(parts: {
   lines.push(parts.userPrompt || '(no instruction provided)')
   lines.push(
     '',
+    'How to finish:',
+    '- Only a response with NO tool calls counts as your final answer. Text written in a response that also calls a tool is narration and is discarded, so put the answer in its own tool-free response.',
+    '- Once you already have the answer, write it and call no tool. Do not call a tool to double-check, recompute, or "confirm" a result you already hold — including arithmetic you can do yourself, content from the element above, or an earlier tool result.',
+    '- Call a tool only when a fact you still need is missing.',
+    '',
     'Output requirements for your FINAL reply (it is stored into a workflow variable and consumed verbatim by later steps — filled into form fields, compared, parsed):',
     '- Reply with the final result only. Do NOT include your reasoning, planning, or <think> blocks — thinking content is junk to the workflow.',
     '- Do NOT wrap the answer in markdown code fences unless the task explicitly asks for code.',
@@ -189,6 +196,16 @@ function asBool(value: unknown, fallback: boolean): boolean {
   return fallback
 }
 
+/**
+ * Read a block param as a list of names. Absent/partial data reads as "nothing
+ * disabled" — that is the block's default, so an old node or a hand-edited one
+ * keeps every capability.
+ */
+function asNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+}
+
 export const aiAgent: BlockExecutor = async (data, ctx) => {
   if (ctx.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
@@ -199,6 +216,8 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const findBy = typeof data['findBy'] === 'string' ? data['findBy'] : 'cssSelector'
   const userPrompt = interpolate(String(data['prompt'] ?? ''), ctx.variables, ctx.refData)
   const actOnPage = asBool(data['actOnPage'], false)
+  const disabledTools = asNames(data['disabledTools'])
+  const disabledSkills = asNames(data['disabledSkills'])
   const wantsPage = actOnPage || selector !== ''
   /**
    * `useSnapshot` orders the agent to OPEN with `snapshot_page` (see
@@ -285,6 +304,8 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
     // This node's model calls are the workflow's spend: the conversation id is
     // a per-run nonce, so the run's attribution has to ride along explicitly.
     ...(ctx.attribution ? { attribution: ctx.attribution } : {}),
+    ...(disabledTools.length > 0 ? { disabledTools } : {}),
+    ...(disabledSkills.length > 0 ? { disabledSkills } : {}),
     signal: ctx.signal,
     maxToolRounds: rounds,
     // Pin the nested turn to THIS workflow's window: without it the nested

@@ -14,17 +14,81 @@
  * @module workflow-editor/blocks/batchD/EditAiAgent
  */
 
+import { RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { messagesFor } from '../../../lib/i18n'
+import { sendCommand } from '../../../lib/messages'
+import { PLAN_SKILL_NAME } from '../../../lib/skills'
+import { BRIDGE_ONLY_TOOLS, TOOL_META } from '../../../lib/tool-catalog'
+import type { Skill } from '../../../lib/types'
 import type { EditFormProps } from '../EditForms'
 import { useEditorLocale } from '../../locale-context'
-import { Checkbox, Expand, Field, NumberInput, TextArea, TextInput } from '../shared/Field'
+import {
+  Checkbox,
+  Expand,
+  Field,
+  IconButton,
+  NumberInput,
+  TextArea,
+  TextInput,
+} from '../shared/Field'
 import { bool, num, str } from '../shared/InteractionBase'
 import SelectorField from '../shared/SelectorField'
 
+/**
+ * Tools with no meaning inside a workflow block: bridge-only tools never reach
+ * an unattended turn, `ask_user` is withheld without a panel to answer it, and
+ * `compose_workflow` exists only in workflow-generation mode. Listing them
+ * would offer switches that can never change anything.
+ */
+const BLOCK_UNAVAILABLE_TOOLS: ReadonlySet<string> = new Set([
+  ...BRIDGE_ONLY_TOOLS,
+  'ask_user',
+  'compose_workflow',
+])
+
+/** Read a stored deny list; absent reads as "nothing disabled". */
+function nameList(data: Record<string, unknown>, key: string): string[] {
+  const value = data[key]
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is string => typeof entry === 'string')
+}
+
+/** Add (disabled) or remove (enabled) one name, keeping the list order stable. */
+function toggledName(names: string[], name: string, enabled: boolean): string[] {
+  if (enabled) return names.filter((entry) => entry !== name)
+  return names.includes(name) ? names : [...names, name]
+}
+
 export default function EditAiAgent({ data, onChange }: EditFormProps) {
-  const { bt } = useEditorLocale()
+  const { bt, locale } = useEditorLocale()
   const findBy = str(data, 'findBy') || 'cssSelector'
   const selector = str(data, 'selector')
   const actOnPage = bool(data, 'actOnPage')
+  const disabledTools = nameList(data, 'disabledTools')
+  const disabledSkills = nameList(data, 'disabledSkills')
+
+  // The block's capability list needs the saved skills, which live in the
+  // worker's store. A failure only hides the skill toggles — the rest of the
+  // form (and the already-stored switches) keeps working, so the author can
+  // still save; the retry button reloads the list.
+  const [skills, setSkills] = useState<Skill[]>([])
+  const [skillsFailed, setSkillsFailed] = useState(false)
+  const reloadSkills = useCallback(() => {
+    setSkillsFailed(false)
+    void sendCommand({ type: 'skills.list' })
+      .then((result) => {
+        if (result.type === 'skills.list') setSkills(result.skills)
+      })
+      .catch(() => setSkillsFailed(true))
+  }, [])
+  useEffect(() => {
+    reloadSkills()
+  }, [reloadSkills])
+
+  const t = messagesFor(locale === 'zh' ? 'zh-CN' : 'en')
+  const selectableSkills = skills.filter((skill) => skill.name !== PLAN_SKILL_NAME)
+  const selectableTools = TOOL_META.filter((meta) => !BLOCK_UNAVAILABLE_TOOLS.has(meta.name))
 
   return (
     <div className="wf-form">
@@ -78,6 +142,64 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
               'Read-only: the agent can read/snapshot the page and answer, but cannot click, type, or navigate.',
             )}
       </p>
+
+      <Expand title="Skills & tools">
+        <p className="wf-form-note">
+          {bt(
+            'Everything is enabled by default. Turning a skill or tool off removes it from the model request, which lowers token cost.',
+          )}
+        </p>
+
+        <Field label="Skills">
+          {skillsFailed && (
+            <div className="flex items-center gap-2">
+              <p className="wf-form-note">{bt('Could not load saved skills.')}</p>
+              <IconButton icon={RefreshCw} title="Reload skills" onClick={reloadSkills} />
+            </div>
+          )}
+          {selectableSkills.length > 0 && (
+            <div className="flex max-h-40 flex-col gap-0.5 overflow-y-auto pr-1">
+              {selectableSkills.map((skill) => (
+                <Checkbox
+                  key={skill.id}
+                  checked={!disabledSkills.includes(skill.name)}
+                  label={<span className="text-xs">{skill.name}</span>}
+                  title={skill.description || skill.name}
+                  onChange={(enabled) =>
+                    onChange({
+                      disabledSkills: toggledName(disabledSkills, skill.name, enabled),
+                    })
+                  }
+                />
+              ))}
+            </div>
+          )}
+          {selectableSkills.length === 0 && !skillsFailed && (
+            <p className="wf-form-note">{bt('No saved skills.')}</p>
+          )}
+        </Field>
+
+        <Field label="Tools">
+          <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto pr-1">
+            {selectableTools.map((meta) => (
+              <Checkbox
+                key={meta.name}
+                checked={!disabledTools.includes(meta.name)}
+                label={
+                  <span className="flex items-baseline gap-2 text-xs">
+                    <span>{t[meta.labelKey]}</span>
+                    <span className="font-mono text-[11px] text-muted">{meta.name}</span>
+                  </span>
+                }
+                title={t[meta.warningKey]}
+                onChange={(enabled) =>
+                  onChange({ disabledTools: toggledName(disabledTools, meta.name, enabled) })
+                }
+              />
+            ))}
+          </div>
+        </Field>
+      </Expand>
 
       <Expand title="Advanced">
         <Field label="Max tool rounds">
