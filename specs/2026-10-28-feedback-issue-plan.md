@@ -74,20 +74,20 @@ issue 是公开的；诊断仅含版本、构建号、UA、界面语言，不含
 
 ## 文件与符号 / Files and symbols
 
-| 文件 | 变更 |
-|---|---|
-| `specs/2026-10-28-feedback-issue-plan.md` | 本文件 |
-| `src/lib/marketplace/connect.ts` | 新增 `connectMarketplaceToken(rawToken, options?)` |
-| `src/sidepanel/MarketplaceConnectPanel.tsx` | 新增连接控件组件 |
-| `src/sidepanel/marketplace-errors.ts` | 迁入 `connectFailureText`，补 `invalid` 分支 |
-| `src/sidepanel/PublishWorkflowDialog.tsx` | 删除内联连接状态/逻辑，改用面板；行为不变 |
-| `src/lib/marketplace/github-client.ts` | 新增 `GitHubCreatedIssue` 与 `createIssue` |
-| `src/lib/feedback/issue.ts` | 新增 `FEEDBACK_ISSUE_REPO`、上限、标题/正文构建 |
-| `src/lib/feedback/diagnostics.ts` | 新增 `collectFeedbackDiagnostics(locale)` |
-| `src/sidepanel/FeedbackCard.tsx` | 新增设置卡片（只持有开关） |
-| `src/sidepanel/FeedbackDialog.tsx` | 新增反馈对话框 |
-| `src/sidepanel/SettingsTab.tsx` | 渲染 `<FeedbackCard />` |
-| `src/lib/i18n.ts` | 新增 `feedback*` 文案（en + zh-CN + 接口） |
+| 文件                                        | 变更                                               |
+| ------------------------------------------- | -------------------------------------------------- |
+| `specs/2026-10-28-feedback-issue-plan.md`   | 本文件                                             |
+| `src/lib/marketplace/connect.ts`            | 新增 `connectMarketplaceToken(rawToken, options?)` |
+| `src/sidepanel/MarketplaceConnectPanel.tsx` | 新增连接控件组件                                   |
+| `src/sidepanel/marketplace-errors.ts`       | 迁入 `connectFailureText`，补 `invalid` 分支       |
+| `src/sidepanel/PublishWorkflowDialog.tsx`   | 删除内联连接状态/逻辑，改用面板；行为不变          |
+| `src/lib/marketplace/github-client.ts`      | 新增 `GitHubCreatedIssue` 与 `createIssue`         |
+| `src/lib/feedback/issue.ts`                 | 新增 `FEEDBACK_ISSUE_REPO`、上限、标题/正文构建    |
+| `src/lib/feedback/diagnostics.ts`           | 新增 `collectFeedbackDiagnostics(locale)`          |
+| `src/sidepanel/FeedbackCard.tsx`            | 新增设置卡片（只持有开关）                         |
+| `src/sidepanel/FeedbackDialog.tsx`          | 新增反馈对话框                                     |
+| `src/sidepanel/SettingsTab.tsx`             | 渲染 `<FeedbackCard />`                            |
+| `src/lib/i18n.ts`                           | 新增 `feedback*` 文案（en + zh-CN + 接口）         |
 
 ## 测试 / Tests
 
@@ -125,4 +125,11 @@ pnpm server:typecheck
 
 ## 落地偏差 / Deviations
 
-实现完成后回填；无偏差时保留空表。
+| 计划                         | 实现                                                 | 原因                                                                                     |
+| ---------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 计划未列 `feedbackTextLabel` | 新增该 key，作为 textarea 的可见标签                 | 无标签的 textarea 对读屏不友好                                                           |
+| 诊断信息“提交时读取”         | 提示文案用 `useMemo` 预览版本/构建号，提交时再读一次 | 让用户看到的内容与实际发出的内容一致                                                     |
+| 校验面板用 Tailwind 布局     | 复用 `.checkbox` 类并加 `items-start!`               | 全局 `label` 规则未分层，会覆盖分层里的 `flex`；`.checkbox` 本就是设置卡片内的复选框样式 |
+| 计划只靠按钮禁用防重复提交   | 额外用 `sendingRef` 同步守卫                         | 同一 React 批次内的两次点击都会看到旧的 `phase`                                          |
+
+真实浏览器验证：Playwright 加载 `dist/`，在面板里进入设置 → 反馈，确认对话框、禁用态、默认勾选与非法 token 的内联报错（无网络请求）。真实创建 issue 未验证——需要用户的 token，且不应在未授权时创建线上 issue。

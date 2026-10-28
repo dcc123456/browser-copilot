@@ -1364,6 +1364,20 @@ export interface Messages {
   settingsLocalAgentAllowReloadHint: string
 
   // Feedback
+  feedbackTitle: string
+  feedbackIntro: string
+  feedbackOpen: string
+  feedbackDialogTitle: string
+  feedbackTextLabel: string
+  feedbackPlaceholder: string
+  feedbackHint: (params: { max: number }) => string
+  feedbackDiagnosticsLabel: string
+  feedbackDiagnosticsHint: (params: { version: string; build: string }) => string
+  feedbackSubmit: string
+  feedbackSending: string
+  feedbackSent: (params: { number: number }) => string
+  feedbackSentHint: string
+  feedbackOpenIssue: string
   /** Issue body: the reporter's text followed by the diagnostics block. */
   feedbackIssueBody: (params: {
     text: string
@@ -2979,6 +2993,22 @@ const en: Messages = {
   settingsLocalAgentAllowReloadHint:
     'Exposes reload_extension on the bridge so a self-test script can pick up a fresh build without reopening chrome://extensions. Off by default; reload only restarts the service worker.',
 
+  feedbackTitle: 'Feedback & suggestions',
+  feedbackIntro:
+    'Report a bug or suggest an improvement. Sending opens a public GitHub issue in the project repository, so it needs a GitHub token.',
+  feedbackOpen: 'Send feedback…',
+  feedbackDialogTitle: 'Send feedback',
+  feedbackTextLabel: 'Your feedback',
+  feedbackPlaceholder: 'What happened, and what did you expect? Steps to reproduce help a lot.',
+  feedbackHint: ({ max }) => `Up to ${max} characters. GitHub issues are public.`,
+  feedbackDiagnosticsLabel: 'Include diagnostics',
+  feedbackDiagnosticsHint: ({ version, build }) =>
+    `Extension version ${version}, build ${build}, browser user agent and UI language. No page URLs or credentials.`,
+  feedbackSubmit: 'Create issue',
+  feedbackSending: 'Creating issue…',
+  feedbackSent: ({ number }) => `Issue #${number} was created.`,
+  feedbackSentHint: 'The maintainer replies on GitHub; keep the issue link to follow up.',
+  feedbackOpenIssue: 'Open issue',
   feedbackIssueBody: ({ text, version, build, userAgent, locale }) =>
     `${text}\n\n---\n\n**Diagnostics**\n\n- Extension version: ${version}\n- Build: ${build}\n- Browser: ${userAgent}\n- UI language: ${locale}\n`,
   feedbackIssueFallbackTitle: 'Feedback',
@@ -4550,6 +4580,22 @@ const zhCN: Messages = {
   settingsLocalAgentAllowReloadHint:
     '开启后桥接会暴露 reload_extension，自测脚本在 build 之后可自行重载扩展，不必再去 chrome://extensions 手点。默认关闭；重载只会重启 service worker。',
 
+  feedbackTitle: '反馈与建议',
+  feedbackIntro:
+    '报告问题或提出改进建议。提交后会在项目仓库创建公开的 GitHub issue，因此需要连接 GitHub 令牌。',
+  feedbackOpen: '发送反馈…',
+  feedbackDialogTitle: '发送反馈',
+  feedbackTextLabel: '反馈内容',
+  feedbackPlaceholder: '发生了什么，你期望的结果是什么？附上复现步骤会很有帮助。',
+  feedbackHint: ({ max }) => `最多 ${max} 个字符。GitHub issue 是公开的。`,
+  feedbackDiagnosticsLabel: '附带诊断信息',
+  feedbackDiagnosticsHint: ({ version, build }) =>
+    `扩展版本 ${version}、构建 ${build}、浏览器 UA 与界面语言；不包含页面 URL 或凭据。`,
+  feedbackSubmit: '创建 issue',
+  feedbackSending: '正在创建…',
+  feedbackSent: ({ number }) => `已创建 issue #${number}。`,
+  feedbackSentHint: '维护者会在 GitHub 上回复，保留 issue 链接以便跟进。',
+  feedbackOpenIssue: '打开 issue',
   feedbackIssueBody: ({ text, version, build, userAgent, locale }) =>
     `${text}\n\n---\n\n**诊断信息**\n\n- 扩展版本：${version}\n- 构建：${build}\n- 浏览器：${userAgent}\n- 界面语言：${locale}\n`,
   feedbackIssueFallbackTitle: '反馈',

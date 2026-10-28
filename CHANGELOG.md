@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added — Send feedback from Settings
+
+Settings ends with a feedback entry: write a report, keep the diagnostics box
+checked to attach the extension version, build, browser and UI language, and
+create a public issue in the project repository. Creating the issue uses the
+same classic GitHub token the marketplace stores; without one the dialog
+connects it in place, and a rejected token is cleared so the next attempt
+starts from a clean connect.
+
 ### Added — Belong to several teams at once
 
 Team sharing is no longer a single repository. Settings can connect any number
