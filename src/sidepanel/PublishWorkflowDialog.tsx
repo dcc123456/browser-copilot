@@ -58,7 +58,7 @@ import {
   saveDraft,
   type PublishDraft,
 } from '../lib/marketplace/draft'
-import { isClassicToken, setAuth, clearAuth, getAuth } from '../lib/marketplace/token'
+import { clearAuth, getAuth } from '../lib/marketplace/token'
 import {
   MARKETPLACE_CATEGORIES,
   MARKETPLACE_REPO_FULL,
@@ -67,14 +67,11 @@ import {
   MAX_PUBLISH_ATTACHMENT_BYTES,
   MAX_PUBLISH_ATTACHMENTS,
   MAX_PUBLISH_IMAGES,
-  MarketplaceError,
   type MarketplaceAuth,
 } from '../lib/marketplace/types'
 import { marketplaceErrorMessage } from './marketplace-errors'
+import MarketplaceConnectPanel from './MarketplaceConnectPanel'
 import type { Workflow } from '../lib/workflow/types'
-
-const TOKEN_URL =
-  'https://github.com/settings/tokens/new?scopes=public_repo&description=Browser%20Copilot'
 
 /** Select value that reveals the free-form category input. */
 const CUSTOM_CATEGORY = '__custom__'
@@ -93,18 +90,6 @@ const FORM_ERROR_KEY: Record<PublishFormError, keyof Messages> = {
   'image-type': 'marketplaceFormImageType',
   'too-many-attachments': 'marketplaceFormTooManyAttachments',
   'attachment-too-large': 'marketplaceFormAttachmentTooLarge',
-}
-
-/**
- * Translated reason plus the client's own detail.
- *
- * "The token was rejected" alone hides whether GitHub answered 403 or the
- * request never left the machine, which is exactly the difference a user
- * needs to fix it.
- */
-export function connectFailureText(t: Messages, error: unknown): string {
-  const label = marketplaceErrorMessage(t, error)
-  return error instanceof MarketplaceError && error.message ? `${label} (${error.message})` : label
 }
 
 interface SelectedImage {
@@ -219,9 +204,6 @@ export default function PublishWorkflowDialog({
   // Until the listing arrives every reference looks missing; say nothing yet.
   const missingCredentials = vault === null ? [] : secretPlan.missing
   const [auth, setAuthState] = useState<MarketplaceAuth | null | undefined>(initialAuth)
-  const [tokenInput, setTokenInput] = useState('')
-  const [connecting, setConnecting] = useState(false)
-  const [connectError, setConnectError] = useState<string | null>(null)
 
   // Re-editing a workflow published to a team repo starts on that repository.
   const [target, setTarget] = useState<PublishTarget>(
@@ -578,27 +560,6 @@ export default function PublishWorkflowDialog({
     edit()
   }
 
-  const connect = async (): Promise<void> => {
-    const token = tokenInput.trim()
-    setConnectError(null)
-    if (!isClassicToken(token)) {
-      setConnectError(t.marketplaceConnectInvalid)
-      return
-    }
-    setConnecting(true)
-    try {
-      const me = await new GitHubClient({ token }).getUser()
-      await setAuth({ token, login: me.login })
-      setAuthState({ token, login: me.login })
-      setTokenInput('')
-    } catch (caught) {
-      console.warn('[marketplace] connect failed', caught)
-      setConnectError(connectFailureText(t, caught))
-    } finally {
-      setConnecting(false)
-    }
-  }
-
   const disconnect = async (): Promise<void> => {
     await clearAuth()
     setAuthState(null)
@@ -622,7 +583,6 @@ export default function PublishWorkflowDialog({
     setPrepared(null)
     setPublishError(null)
     setFormError(null)
-    setConnectError(null)
   }
 
   const publish = async (acknowledged: boolean): Promise<void> => {
@@ -703,7 +663,6 @@ export default function PublishWorkflowDialog({
   const disabled =
     busy ||
     imageBusy ||
-    connecting ||
     !targetReady ||
     vault === null ||
     missingRefs.length > 0 ||
@@ -830,44 +789,7 @@ export default function PublishWorkflowDialog({
                   </button>
                 </div>
               ) : (
-                <>
-                  <p className="mt-1 mb-2 text-[11.5px] leading-snug text-muted">
-                    {t.marketplaceConnectHint}{' '}
-                    <a className="text-accent" href={TOKEN_URL} rel="noreferrer" target="_blank">
-                      {t.marketplaceConnectCreateToken}
-                    </a>
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <input
-                      autoComplete="off"
-                      className="min-w-0 flex-1"
-                      disabled={connecting}
-                      onChange={(event) => {
-                        setTokenInput(event.target.value)
-                        setConnectError(null)
-                      }}
-                      placeholder={t.marketplaceConnectTokenPlaceholder}
-                      type="password"
-                      value={tokenInput}
-                    />
-                    <button
-                      className="section-action"
-                      disabled={connecting || !tokenInput.trim()}
-                      onClick={() => void connect()}
-                      type="button"
-                    >
-                      {t.marketplaceConnectButton}
-                    </button>
-                  </div>
-                  <p className="mt-1 mb-0 text-[11px] leading-snug text-muted">
-                    {t.marketplaceConnectScopeHint}
-                  </p>
-                  {connectError && (
-                    <p className="mt-1 mb-0 text-[11.5px] text-err" role="alert">
-                      {connectError}
-                    </p>
-                  )}
-                </>
+                <MarketplaceConnectPanel disabled={busy} onConnected={setAuthState} />
               )}
             </section>
           )}

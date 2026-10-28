@@ -9,9 +9,8 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { I18nProvider } from '../src/sidepanel/i18n'
-import PublishWorkflowDialog, { connectFailureText } from '../src/sidepanel/PublishWorkflowDialog'
+import PublishWorkflowDialog from '../src/sidepanel/PublishWorkflowDialog'
 import { messagesFor, type Locale } from '../src/lib/i18n'
-import { MarketplaceError } from '../src/lib/marketplace/types'
 import type { TeamConnection, TeamRepoConfig } from '../src/lib/marketplace/team'
 import type { Workflow } from '../src/lib/workflow/types'
 
@@ -132,30 +131,6 @@ describe('publish dialog', () => {
 
     expect(markup).toContain('cannot be bundled')
     expect(markup).toContain('deleted-1')
-  })
-})
-
-describe('connect failure text', () => {
-  it('keeps the translated reason and appends the client detail', () => {
-    const text = connectFailureText(
-      messagesFor('en'),
-      new MarketplaceError('network', 'GitHub request failed: Failed to fetch'),
-    )
-    expect(text).toContain('Could not reach GitHub')
-    expect(text).toContain('Failed to fetch')
-  })
-
-  it('tells an invalid token apart from a network failure', () => {
-    const text = connectFailureText(
-      messagesFor('zh-CN'),
-      new MarketplaceError('unauthorized', 'GitHub rejected the token: Bad credentials', 401),
-    )
-    expect(text).toContain('判定令牌无效')
-    expect(text).toContain('Bad credentials')
-  })
-
-  it('falls back to a plain error message', () => {
-    expect(connectFailureText(messagesFor('en'), new Error('boom'))).toBe('boom')
   })
 })
 

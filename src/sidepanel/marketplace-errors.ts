@@ -25,3 +25,18 @@ export function marketplaceErrorMessage(t: Messages, error: unknown): string {
   if (error instanceof MarketplaceError) return t[ERROR_KEY[error.code]] as string
   return error instanceof Error ? error.message : String(error)
 }
+
+/**
+ * Translated reason plus the client's own detail.
+ *
+ * "The token was rejected" alone hides whether GitHub answered 403 or the
+ * request never left the machine, which is exactly the difference a user
+ * needs to fix it.
+ */
+export function connectFailureText(t: Messages, error: unknown): string {
+  if (error instanceof MarketplaceError && error.code === 'invalid') {
+    return t.marketplaceConnectInvalid
+  }
+  const label = marketplaceErrorMessage(t, error)
+  return error instanceof MarketplaceError && error.message ? `${label} (${error.message})` : label
+}
