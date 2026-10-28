@@ -122,11 +122,10 @@ export default function CanvasControls({ nodes, t }: { nodes: Node[]; t: Transla
     const data = n.data as unknown as {
       block?: { name?: string }
       blockData?: { description?: string }
-      label?: string
     }
     return {
       id: n.id,
-      name: data.label || data.block?.name || n.id,
+      name: data.block?.name || n.id,
       description: data.blockData?.description ?? '',
       position: n.position,
     }

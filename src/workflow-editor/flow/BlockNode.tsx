@@ -51,8 +51,6 @@ export interface BlockNodeActions extends Record<string, unknown> {
 export interface BlockNodeData extends Record<string, unknown> {
   /** Resolved catalog entry for the block. */
   block: BlockCatalogEntry
-  /** Node display name (falls back to the block name). */
-  label?: string
   /** The block's `data` payload (selector, url, description, ...). */
   blockData: Record<string, unknown>
   /** True when a run is currently executing this node. */
@@ -206,7 +204,9 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
               <TriangleAlert size={13} />
             </span>
           )}
-          <p className="wf-node-name">{node.label || displayName}</p>
+          {/* The title is the operator's own name, never its description —
+              the description has its own line below. */}
+          <p className="wf-node-name">{displayName}</p>
           {summary && <p className="wf-node-desc">{summary}</p>}
           {addedByAi && (
             <span

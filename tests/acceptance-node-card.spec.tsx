@@ -22,7 +22,7 @@ function data(hasGoal: boolean) {
         successCriteria: [{ kind: 'elementExists', target: { testId: 'btn' } }],
       })
     : base
-  return { block, blockData, label: 'Click element' }
+  return { block, blockData }
 }
 function render(nodeData: unknown): string {
   const value = makeEditorLocale(
@@ -39,6 +39,18 @@ function render(nodeData: unknown): string {
     ),
   )
 }
+describe('node card title and description', () => {
+  it('titles the card with the operator name, not its description', () => {
+    const html = render({
+      block,
+      blockData: { selector: '.btn', description: 'Click the login button' },
+    })
+    expect(html).toContain('<p class="wf-node-name">Click element</p>')
+    expect(html).toContain('wf-node-desc')
+    expect(html).toContain('Click the login button')
+  })
+})
+
 describe('V67 node goal viewable directly on the node card', () => {
   it('shows the goal pill on a goal-bearing card', () => {
     const html = render(data(true))

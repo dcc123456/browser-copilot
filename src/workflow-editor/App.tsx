@@ -175,7 +175,6 @@ function toFlowNode(n: WorkflowNode): FlowNode {
     position: n.position,
     data: {
       block: block as BlockCatalogEntry,
-      label: (n.data.description as string) || undefined,
       blockData: blockData as Record<string, unknown>,
     },
   }
@@ -1717,7 +1716,7 @@ export default function EditorApp() {
               // node.
               key={editNode.id}
               block={editBlock}
-              nodeName={String(editNode.data.blockData?.description ?? editBlock.name)}
+              nodeName={editorLocale.blockName(editBlock.id, editBlock.name)}
               data={editNode.data.blockData}
               onChange={(patch) => {
                 patchNode(editNode.id, patch)
