@@ -17,8 +17,11 @@
  *      - `actOnPage: true` → full-auto mode: the agent acts on the page
  *        without per-step confirmation (there is no panel to confirm on during
  *        a workflow run); every tool step is streamed into the run log.
- *      - The node's `disabledTools` / `disabledSkills` switches ride along, so
- *        a block pays only for the capabilities its author left enabled.
+ *      - The node's `disabledTools` deny list and `enabledSkills` allow list
+ *        ride along, so a block pays only for the capabilities its author left
+ *        enabled. A fixed set of tools is always denied (see
+ *        {@link AI_AGENT_FORBIDDEN_TOOLS}): they change state outside the page
+ *        being automated and no run has a panel to approve them.
  *   4. Stores the agent's final text answer in the configured output variable
  *      (and `lastAIAgent`).
  *
@@ -29,6 +32,7 @@
  */
 
 import { getSettings } from '../../lib/storage'
+import { AI_AGENT_FORBIDDEN_TOOLS } from '../../lib/tool-catalog'
 import { interpolate } from '../../lib/workflow/interpolate'
 import { sanitizeModelAnswer } from '../../lib/model-output'
 import type { AgentMode } from '../../lib/types'
@@ -197,13 +201,23 @@ function asBool(value: unknown, fallback: boolean): boolean {
 }
 
 /**
- * Read a block param as a list of names. Absent/partial data reads as "nothing
- * disabled" — that is the block's default, so an old node or a hand-edited one
- * keeps every capability.
+ * Read a block param as a list of names. Absent/partial data reads as an empty
+ * list, which for `disabledTools` means "nothing disabled" — the block's
+ * default, so an old node or a hand-edited one keeps every tool.
  */
 function asNames(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+}
+
+/**
+ * Skill access is an allowlist: an array limits the turn to those names, and an
+ * ABSENT key is the legacy all-on path (nodes saved before the switch existed).
+ * That is why the raw value decides — an empty array is meaningful ("no
+ * skills"), so it must not collapse into the absent case.
+ */
+function asOptionalNames(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? asNames(value) : undefined
 }
 
 export const aiAgent: BlockExecutor = async (data, ctx) => {
@@ -216,8 +230,13 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const findBy = typeof data['findBy'] === 'string' ? data['findBy'] : 'cssSelector'
   const userPrompt = interpolate(String(data['prompt'] ?? ''), ctx.variables, ctx.refData)
   const actOnPage = asBool(data['actOnPage'], false)
-  const disabledTools = asNames(data['disabledTools'])
-  const disabledSkills = asNames(data['disabledSkills'])
+  // The forbidden set is a floor, not a default: authored data, old runs and a
+  // hallucinated call all pass through this union, so none of those tools can
+  // reach dispatch.
+  const disabledTools = [
+    ...new Set([...asNames(data['disabledTools']), ...AI_AGENT_FORBIDDEN_TOOLS]),
+  ]
+  const enabledSkills = asOptionalNames(data['enabledSkills'])
   const wantsPage = actOnPage || selector !== ''
   /**
    * `useSnapshot` orders the agent to OPEN with `snapshot_page` (see
@@ -304,8 +323,9 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
     // This node's model calls are the workflow's spend: the conversation id is
     // a per-run nonce, so the run's attribution has to ride along explicitly.
     ...(ctx.attribution ? { attribution: ctx.attribution } : {}),
-    ...(disabledTools.length > 0 ? { disabledTools } : {}),
-    ...(disabledSkills.length > 0 ? { disabledSkills } : {}),
+    disabledTools,
+    // `[]` is a real value here (no skills); only an absent key means "all on".
+    ...(enabledSkills !== undefined ? { enabledSkills } : {}),
     signal: ctx.signal,
     maxToolRounds: rounds,
     // Pin the nested turn to THIS workflow's window: without it the nested

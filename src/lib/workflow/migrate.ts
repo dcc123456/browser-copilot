@@ -387,6 +387,21 @@ export function migrateWorkflow(wf: Workflow): Workflow {
       changed = true
     }
 
+    // `enabledSkills` is an allowlist whose catalog default is `[]` ("no
+    // skills"), which is right for NEW nodes. Nodes saved before the switch
+    // existed used every skill, so the backfilled default is dropped when the
+    // STORED data has no key — same stored-vs-merged test as `paths` above.
+    // The node stays all-on until its author edits the list.
+    if (blockId === 'ai-agent' && stored['enabledSkills'] === undefined) {
+      delete data['enabledSkills']
+    }
+    // The interim deny-list key never coexisted with `enabledSkills`; drop it
+    // so a later read cannot resurrect a preference the allowlist overrides.
+    if (blockId === 'ai-agent' && data['disabledSkills'] !== undefined) {
+      delete data['disabledSkills']
+      changed = true
+    }
+
     if (blockId !== rawBlockId || !isRecord(node.data) || node.data.values !== undefined) {
       changed = true
     }

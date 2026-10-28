@@ -52,11 +52,13 @@ export const CUSTOM_BLOCKS: BlockCatalogEntry[] = [
       // Have the agent take a page snapshot before acting so it can locate
       // interactive elements itself.
       useSnapshot: true,
-      // Capability switches: names the author switched OFF. Empty = everything
-      // enabled (the default), which is why these are deny lists — a tool or
-      // skill added later must not be silently excluded from old nodes.
+      // Capability switches. Tools are a deny list: empty = everything on, so a
+      // tool added later is not silently excluded from old nodes. Skills are an
+      // allowlist that starts EMPTY (new nodes get no skill); an absent key
+      // means "every skill", which is how nodes saved before this switch keep
+      // working — see the migration guard in `lib/workflow/migrate`.
       disabledTools: [],
-      disabledSkills: [],
+      enabledSkills: [],
     },
     cloud: false,
   },

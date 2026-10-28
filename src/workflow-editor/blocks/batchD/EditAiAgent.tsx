@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { messagesFor } from '../../../lib/i18n'
 import { sendCommand } from '../../../lib/messages'
 import { PLAN_SKILL_NAME } from '../../../lib/skills'
-import { BRIDGE_ONLY_TOOLS, TOOL_META } from '../../../lib/tool-catalog'
+import { AI_AGENT_FORBIDDEN_TOOLS, BRIDGE_ONLY_TOOLS, TOOL_META } from '../../../lib/tool-catalog'
 import type { Skill } from '../../../lib/types'
 import type { EditFormProps } from '../EditForms'
 import { useEditorLocale } from '../../locale-context'
@@ -36,13 +36,16 @@ import { bool, num, str } from '../shared/InteractionBase'
 import SelectorField from '../shared/SelectorField'
 
 /**
- * Tools with no meaning inside a workflow block: bridge-only tools never reach
- * an unattended turn, `ask_user` is withheld without a panel to answer it, and
- * `compose_workflow` exists only in workflow-generation mode. Listing them
- * would offer switches that can never change anything.
+ * Tools a workflow block cannot use: bridge-only tools never reach an
+ * unattended turn, the forbidden set is denied at runtime (state changes that
+ * outlive the run, or an approval no run can supply), `ask_user` is withheld
+ * without a panel to answer it, and `compose_workflow` exists only in
+ * workflow-generation mode. Listing them would offer switches that can never
+ * change anything.
  */
 const BLOCK_UNAVAILABLE_TOOLS: ReadonlySet<string> = new Set([
   ...BRIDGE_ONLY_TOOLS,
+  ...AI_AGENT_FORBIDDEN_TOOLS,
   'ask_user',
   'compose_workflow',
 ])
@@ -54,10 +57,34 @@ function nameList(data: Record<string, unknown>, key: string): string[] {
   return value.filter((entry): entry is string => typeof entry === 'string')
 }
 
-/** Add (disabled) or remove (enabled) one name, keeping the list order stable. */
+/**
+ * Read a stored allowlist. `null` means the key is absent — the legacy
+ * "every skill" path; an empty array is a real answer ("no skills").
+ */
+function enabledNameList(data: Record<string, unknown>, key: string): string[] | null {
+  return Array.isArray(data[key]) ? nameList(data, key) : null
+}
+
+/** Add (enabled) or remove (disabled) one name, keeping the list order stable. */
 function toggledName(names: string[], name: string, enabled: boolean): string[] {
   if (enabled) return names.filter((entry) => entry !== name)
   return names.includes(name) ? names : [...names, name]
+}
+
+/**
+ * Toggle one allowlist entry. A legacy node (`null`) shows every skill on, so
+ * the first change has to materialise the full list minus the switched-off
+ * name — otherwise the write would be indistinguishable from "no key".
+ */
+function toggledEnable(
+  allNames: string[],
+  names: string[] | null,
+  name: string,
+  enabled: boolean,
+): string[] {
+  const current = names ?? allNames
+  if (enabled) return current.includes(name) ? current : [...current, name]
+  return current.filter((entry) => entry !== name)
 }
 
 export default function EditAiAgent({ data, onChange }: EditFormProps) {
@@ -66,7 +93,7 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
   const selector = str(data, 'selector')
   const actOnPage = bool(data, 'actOnPage')
   const disabledTools = nameList(data, 'disabledTools')
-  const disabledSkills = nameList(data, 'disabledSkills')
+  const enabledSkills = enabledNameList(data, 'enabledSkills')
 
   // The block's capability list needs the saved skills, which live in the
   // worker's store. A failure only hides the skill toggles — the rest of the
@@ -88,6 +115,8 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
 
   const t = messagesFor(locale === 'zh' ? 'zh-CN' : 'en')
   const selectableSkills = skills.filter((skill) => skill.name !== PLAN_SKILL_NAME)
+  const allSkillNames = selectableSkills.map((skill) => skill.name)
+  const isSkillEnabled = (name: string) => enabledSkills === null || enabledSkills.includes(name)
   const selectableTools = TOOL_META.filter((meta) => !BLOCK_UNAVAILABLE_TOOLS.has(meta.name))
 
   return (
@@ -146,7 +175,7 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
       <Expand title="Skills & tools">
         <p className="wf-form-note">
           {bt(
-            'Everything is enabled by default. Turning a skill or tool off removes it from the model request, which lowers token cost.',
+            'New nodes start with every skill off — enable the ones this step needs; existing nodes keep every skill on. Tools are on unless you switch them off. Anything off is removed from the model request, which lowers token cost.',
           )}
         </p>
 
@@ -162,12 +191,17 @@ export default function EditAiAgent({ data, onChange }: EditFormProps) {
               {selectableSkills.map((skill) => (
                 <Checkbox
                   key={skill.id}
-                  checked={!disabledSkills.includes(skill.name)}
+                  checked={isSkillEnabled(skill.name)}
                   label={<span className="text-xs">{skill.name}</span>}
                   title={skill.description || skill.name}
                   onChange={(enabled) =>
                     onChange({
-                      disabledSkills: toggledName(disabledSkills, skill.name, enabled),
+                      enabledSkills: toggledEnable(
+                        allSkillNames,
+                        enabledSkills,
+                        skill.name,
+                        enabled,
+                      ),
                     })
                   }
                 />

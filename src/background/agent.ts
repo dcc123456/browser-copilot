@@ -2408,8 +2408,13 @@ export interface AgentDeps {
   getToolConfig: () => Promise<{
     disabledTools: string[]
     basePrompt: string
-    /** Skill names this turn may not load (workflow `ai-agent` block switches). */
-    disabledSkills?: string[]
+    /**
+     * Skill names this turn may load (workflow `ai-agent` block allowlist).
+     * Undefined = no filter (every skill); `[]` = none. The two must stay
+     * distinguishable: a new node starts with every skill off, while a node
+     * saved before the switch existed has no key and keeps every skill.
+     */
+    enabledSkills?: string[]
   }>
   /**
    * Window id of the side panel that sent this turn's message. Resolved to a
@@ -2557,10 +2562,11 @@ export interface ToolContext {
   /** Tools the user has disabled; the model should not call them. */
   disabled: Set<string>
   /**
-   * Skill names this run may not load, lower-cased. Set by the workflow
-   * `ai-agent` block's per-node switches; absent when every skill is allowed.
+   * Skill names this run may load, lower-cased. Set by the workflow `ai-agent`
+   * block's per-node allowlist; absent when every skill is allowed (the legacy
+   * path). An empty set means no skill may load.
    */
-  disabledSkills?: ReadonlySet<string>
+  enabledSkills?: ReadonlySet<string>
   /**
    * Ref → element cache from the LATEST snapshot (the devtools-mcp uid
    * pattern): snapshots and observations carry only short refs like "e12",
@@ -4222,19 +4228,19 @@ export async function executeTool(
             'in the chat composer (type "/plan") and resend the request.',
         })
       }
-      // The workflow node's switches are a hard boundary: the schema is still
+      // The workflow node's allowlist is a hard boundary: the schema is still
       // advertised (it is core), so a stale or hallucinated call must not load
-      // instructions the author switched off.
-      if (ctx.disabledSkills?.has(wanted.toLowerCase())) {
+      // instructions the author left switched off.
+      if (ctx.enabledSkills && !ctx.enabledSkills.has(wanted.toLowerCase())) {
         return JSON.stringify({
-          error: `The "${wanted}" skill is disabled for this block. Work from the page and the instructions you already have.`,
+          error: `The "${wanted}" skill is not enabled for this block. Work from the page and the instructions you already have.`,
         })
       }
       const skill = await findSkillByName(wanted)
       if (!skill) {
         const available = (await listSkills())
           .map((entry) => entry.name)
-          .filter((name) => !ctx.disabledSkills?.has(name.trim().toLowerCase()))
+          .filter((name) => !ctx.enabledSkills || ctx.enabledSkills.has(name.trim().toLowerCase()))
         return JSON.stringify({ error: `No skill named "${wanted}".`, available })
       }
       return JSON.stringify({
@@ -5047,17 +5053,21 @@ export async function runAgentTurn(
     getSettings(),
   ])
   const provider = preferredProvider ?? (await getActiveProvider())
-  // Skills the caller switched off for this turn (a workflow node's per-block
-  // list). Case-insensitive, matching validateSkill's name uniqueness.
-  const disabledSkills = new Set(
-    (toolConfig.disabledSkills ?? [])
-      .map((name) => name.trim().toLowerCase())
-      .filter((name) => name !== ''),
-  )
+  // Skills the caller allows for this turn (a workflow node's per-block list).
+  // Null = no filter (legacy nodes and every panel turn); an empty set = no
+  // skill may load. Case-insensitive, matching validateSkill's name uniqueness.
+  const enabledSkills =
+    toolConfig.enabledSkills === undefined
+      ? null
+      : new Set(
+          toolConfig.enabledSkills
+            .map((name) => name.trim().toLowerCase())
+            .filter((name) => name !== ''),
+        )
   const visibleSkills =
-    disabledSkills.size === 0
+    enabledSkills === null
       ? skillList
-      : skillList.filter((skill) => !disabledSkills.has(skill.name.trim().toLowerCase()))
+      : skillList.filter((skill) => enabledSkills.has(skill.name.trim().toLowerCase()))
   const activeSkill = deps.skillId ? await getSkill(deps.skillId) : undefined
 
   // What every completion in this turn is for, as one pair of attributions
@@ -5104,6 +5114,9 @@ export async function runAgentTurn(
   // any mounted mode skill) and the model can `use_skill` a match per step.
   // With `use_skill` switched off there is no way to load any of them, so the
   // list is pure prompt cost and is dropped whole.
+  // `visibleSkills` is already empty when the node allows no skill, so an
+  // empty allowlist collapses to the same no-catalogue path as disabling the
+  // loader itself.
   const catalogue: Skill[] = disabled.has('use_skill')
     ? []
     : activeSkill
@@ -5226,7 +5239,7 @@ export async function runAgentTurn(
     loadedGroups,
     navigated: false,
     disabled,
-    ...(disabledSkills.size > 0 ? { disabledSkills } : {}),
+    ...(enabledSkills ? { enabledSkills } : {}),
     failureStreaks: new Map(),
     ...(delegation ? { delegation } : {}),
     ...(deps.subAgent ? { subAgent: deps.subAgent } : {}),

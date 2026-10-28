@@ -42,6 +42,29 @@ export const BRIDGE_ONLY_TOOLS: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * Tools a workflow `ai-agent` node must never use. A run has no panel to
+ * approve a side effect and no human to answer a question, and these calls
+ * change state OUTSIDE the page being automated: closing/pinning tabs rewrites
+ * the user's own browser layout, `save_local` writes files, the skill and
+ * schedule tools mutate stores that outlive the run, `present_plan` waits for
+ * an approval that cannot arrive, and `delegate_to_agent` fans out into
+ * sub-agents (unattended turns never enable delegation). The block form omits
+ * them from its picker and the executor adds them to every run's deny set, so
+ * even a stale or hallucinated call is refused at dispatch.
+ */
+export const AI_AGENT_FORBIDDEN_TOOLS: ReadonlySet<string> = new Set([
+  'tab_close',
+  'pin_tab',
+  'unpin_tab',
+  'save_local',
+  'create_skill',
+  'list_scheduled_tasks',
+  'create_scheduled_task',
+  'present_plan',
+  'delegate_to_agent',
+])
+
+/**
  * Every tool the agent can call. Order here drives the settings list order.
  * Disabling a tool removes its schema from the request and the agent simply
  * never sees it; warnings below describe the user-visible consequence.

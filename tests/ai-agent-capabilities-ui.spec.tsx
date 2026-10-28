@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 /**
- * The AI-agent block form's "Skills & tools" fold-out: every switch starts ON,
- * turning one off writes a deny list into the node data, stored deny names
- * render unchecked after a reopen, and a failed skill fetch keeps the rest of
- * the form usable behind a retry.
+ * The AI-agent block form's "Skills & tools" fold-out: tools start ON (deny
+ * list) while skills start OFF for new nodes (allowlist) and ON for nodes saved
+ * before the switch existed; toggles write the expected node data, a reopen
+ * renders stored switches, forbidden tools are absent, and a failed skill fetch
+ * keeps the rest of the form usable behind a retry.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -124,20 +125,43 @@ afterEach(() => {
 })
 
 describe('the AI-agent capability fold-out', () => {
-  it('starts with every skill and tool enabled', async () => {
+  it('starts a new node with every skill off and every tool on', async () => {
     respondWithSkills([captchaSkill, writerSkill])
-    const container = await mount()
+    const container = await mount({ enabledSkills: [] })
 
-    expect(container.textContent).toContain('Everything is enabled by default')
+    expect(container.textContent).toContain('New nodes start with every skill off')
     expect(toolCheckbox(container, 'click').checked).toBe(true)
     expect(toolCheckbox(container, 'snapshot_page').checked).toBe(true)
+    expect(skillCheckboxes(container).every((input) => !input.checked)).toBe(true)
+  })
+
+  it('keeps every skill on for a node saved before the allowlist existed', async () => {
+    respondWithSkills([captchaSkill, writerSkill])
+    // No `enabledSkills` key = legacy node, which used every skill.
+    const container = await mount()
+
     expect(skillCheckboxes(container).every((input) => input.checked)).toBe(true)
-    expect(skillCheckbox(container, captchaSkill.name).checked).toBe(true)
+    expect(toolCheckbox(container, 'click').checked).toBe(true)
   })
 
   it('does not offer switches that could never change a workflow turn', async () => {
     const container = await mount()
-    for (const name of ['generate_workflow', 'verify_workflow', 'repair_workflow', 'ask_user']) {
+    for (const name of [
+      'generate_workflow',
+      'verify_workflow',
+      'repair_workflow',
+      'ask_user',
+      // Runtime-forbidden: state changes no workflow run can approve.
+      'tab_close',
+      'pin_tab',
+      'unpin_tab',
+      'save_local',
+      'create_skill',
+      'list_scheduled_tasks',
+      'create_scheduled_task',
+      'present_plan',
+      'delegate_to_agent',
+    ]) {
       expect(() => toolCheckbox(container, name)).toThrow()
     }
     expect(container.textContent).not.toContain('compose_workflow')
@@ -172,16 +196,28 @@ describe('the AI-agent capability fold-out', () => {
     expect(toolCheckbox(container, 'snapshot_page').checked).toBe(true)
   })
 
-  it('writes and restores skill deny entries by name', async () => {
+  it('writes an allowlist entry when a new node enables a skill', async () => {
+    respondWithSkills([captchaSkill, writerSkill])
+    const container = await mount({ enabledSkills: [] })
+    act(() => skillCheckbox(container, captchaSkill.name).click())
+    expect(patches.at(-1)).toEqual({ enabledSkills: [captchaSkill.name] })
+  })
+
+  it('materialises the full allowlist when a legacy node switches a skill off', async () => {
     respondWithSkills([captchaSkill, writerSkill])
     const container = await mount()
     act(() => skillCheckbox(container, writerSkill.name).click())
-    expect(patches.at(-1)).toEqual({ disabledSkills: [writerSkill.name] })
+    // Writing a one-name list here would read as "only captcha", which is the
+    // intended result — but it must come from the legacy all-on state, not
+    // from an accidental deny.
+    expect(patches.at(-1)).toEqual({ enabledSkills: [captchaSkill.name] })
+  })
 
+  it('renders stored allowlist entries checked after reopening', async () => {
     respondWithSkills([captchaSkill, writerSkill])
-    const reopened = await mount({ disabledSkills: [writerSkill.name] })
-    expect(skillCheckbox(reopened, writerSkill.name).checked).toBe(false)
-    expect(skillCheckbox(reopened, captchaSkill.name).checked).toBe(true)
+    const reopened = await mount({ enabledSkills: [writerSkill.name] })
+    expect(skillCheckbox(reopened, writerSkill.name).checked).toBe(true)
+    expect(skillCheckbox(reopened, captchaSkill.name).checked).toBe(false)
   })
 
   it('keeps the form usable when the skill list fails, and retries', async () => {

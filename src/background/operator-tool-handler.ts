@@ -265,12 +265,20 @@ export function appendOperatorNode(
     }
   }
 
+  // A generated node is new by definition, so it must carry the empty skill
+  // allowlist explicitly: an absent `enabledSkills` is the legacy "every
+  // skill" path, and this append copies only the model's args (no catalog
+  // defaults).
+  const nodeData: Record<string, unknown> = { ...data, blockId }
+  if (blockId === 'ai-agent' && nodeData['enabledSkills'] === undefined) {
+    nodeData['enabledSkills'] = []
+  }
   const nodeId = newId()
   const node: WorkflowNode = {
     id: nodeId,
     label: blockId,
     position: { x: draft.nodes.length * 220, y: 0 },
-    data: { ...data, blockId },
+    data: nodeData,
   }
   const from = opts.branch ?? draft.pendingBranch ?? tailBranch(draft)
   if (from) {

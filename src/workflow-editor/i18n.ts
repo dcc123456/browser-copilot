@@ -1456,8 +1456,8 @@ const BLOCK_FORM_STRINGS = {
     'Skills & tools': '技能与工具',
     Skills: '技能',
     Tools: '工具',
-    'Everything is enabled by default. Turning a skill or tool off removes it from the model request, which lowers token cost.':
-      '默认全部开启。关闭用不到的技能或工具会把它从模型请求中移除，从而减少 token 消耗。',
+    'New nodes start with every skill off — enable the ones this step needs; existing nodes keep every skill on. Tools are on unless you switch them off. Anything off is removed from the model request, which lowers token cost.':
+      '新建节点默认关闭全部技能，按需开启本步骤需要的技能；已有节点保持全部开启。工具默认开启，可手动关闭。关闭的项会从模型请求中移除，从而减少 token 消耗。',
     'No saved skills.': '暂无已保存的技能。',
     'Could not load saved skills.': '无法加载已保存的技能。',
     'Reload skills': '重新加载技能',

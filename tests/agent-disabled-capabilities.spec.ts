@@ -1,9 +1,9 @@
 /**
- * Per-node capability switches on the workflow `ai-agent` block: names listed in
- * `disabledSkills` leave the system prompt's skill catalogue and cannot be
- * loaded, and `disabledTools` keeps a tool schema out of the request. The lists
- * are deny lists, so an absent or empty value keeps every capability — the
- * default for old nodes and for tools/skills added later.
+ * Per-node capability switches on the workflow `ai-agent` block: skills are an
+ * allowlist (`enabledSkills`) — an absent key keeps the legacy all-on path, an
+ * empty array loads none, and listed names are the only ones in the catalogue
+ * or loadable via `use_skill`. `disabledTools` stays a deny list, so an absent
+ * or empty value keeps every tool.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentServerMessage } from '../src/lib/messages'
@@ -71,7 +71,7 @@ afterEach(() => {
   streamMock.mockReset()
 })
 
-function deps(toolConfig: { disabledTools: string[]; disabledSkills?: string[] }) {
+function deps(toolConfig: { disabledTools: string[]; enabledSkills?: string[] }) {
   return {
     send: (_message: AgentServerMessage): void => {},
     confirm: vi.fn(async () => true),
@@ -113,40 +113,47 @@ function advertisedNames(index: number): string[] {
 /** One completed turn; returns the system prompt the model saw. */
 async function promptFor(toolConfig: {
   disabledTools: string[]
-  disabledSkills?: string[]
+  enabledSkills?: string[]
 }): Promise<string> {
   streamMock.mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
   await runAgentTurn([{ role: 'user', content: 'hi' }] as never, deps(toolConfig) as never)
   return requestSystemPrompt(0)
 }
 
-describe('disabled skills leave the model request', () => {
-  it('lists every saved skill when nothing is switched off', async () => {
+describe('the skill allowlist bounds the model request', () => {
+  it('lists every saved skill when the turn has no allowlist (legacy nodes)', async () => {
     const prompt = await promptFor({ disabledTools: [] })
     expect(prompt).toContain('## Available skills')
     expect(prompt).toContain(captcha.name)
     expect(prompt).toContain(writer.name)
   })
 
-  it('drops a switched-off skill from the catalogue, case-insensitively', async () => {
+  it('lists only allowlisted skills, case-insensitively', async () => {
     const prompt = await promptFor({
       disabledTools: [],
-      disabledSkills: ['  XIAOHONGSHU-WRITER '],
+      enabledSkills: ['  XIAOHONGSHU-WRITER '],
     })
-    expect(prompt).toContain(captcha.name)
+    expect(prompt).toContain(writer.name)
+    expect(prompt).not.toContain(captcha.name)
+  })
+
+  it('drops the whole catalogue when the allowlist is empty', async () => {
+    // A new node starts here. The catalogue is instruction prose that only
+    // earns its tokens if the model can load one of the entries.
+    const prompt = await promptFor({ disabledTools: [], enabledSkills: [] })
+    expect(prompt).not.toContain('## Available skills')
+    expect(prompt).not.toContain(captcha.name)
     expect(prompt).not.toContain(writer.name)
   })
 
   it('drops the whole catalogue when use_skill itself is disabled', async () => {
-    // The catalogue is instruction prose that only earns its tokens if the
-    // model can act on it. With the loader switched off it is pure cost.
     const prompt = await promptFor({ disabledTools: ['use_skill'] })
     expect(prompt).not.toContain('## Available skills')
     expect(prompt).not.toContain(captcha.name)
     expect(prompt).not.toContain(writer.name)
   })
 
-  it('refuses to load a switched-off skill even when the schema is advertised', async () => {
+  it('refuses to load a skill outside the allowlist even when the schema is advertised', async () => {
     // `use_skill` is a core tool, so the node's switches cannot remove its
     // schema; a stale or hallucinated call must still be refused.
     streamMock
@@ -165,16 +172,16 @@ describe('disabled skills leave the model request', () => {
     ]
     await runAgentTurn(
       history as never,
-      deps({ disabledTools: [], disabledSkills: ['captcha-helper'] }) as never,
+      deps({ disabledTools: [], enabledSkills: ['xiaohongshu-writer'] }) as never,
     )
 
     const result = toolResult(history, 'use_skill')
-    expect(String(result['error'])).toContain('disabled for this block')
+    expect(String(result['error'])).toContain('not enabled for this block')
     expect(result['instructions']).toBeUndefined()
     expect(findSkillByNameMock).not.toHaveBeenCalled()
   })
 
-  it('leaves switched-off names out of the "available skills" hint', async () => {
+  it('leaves non-allowlisted names out of the "available skills" hint', async () => {
     streamMock
       .mockResolvedValueOnce({
         content: '',
@@ -189,9 +196,14 @@ describe('disabled skills leave the model request', () => {
     const history: { role: string; name?: string; content?: string }[] = [
       { role: 'user', content: 'solve it' },
     ]
+    // The unknown name has to be allowlisted or the allowlist refusal fires
+    // first; this keeps the lookup path (and its hint) under test.
     await runAgentTurn(
       history as never,
-      deps({ disabledTools: [], disabledSkills: ['captcha-helper'] }) as never,
+      deps({
+        disabledTools: [],
+        enabledSkills: ['xiaohongshu-writer', 'no-such-skill'],
+      }) as never,
     )
 
     const result = toolResult(history, 'use_skill')

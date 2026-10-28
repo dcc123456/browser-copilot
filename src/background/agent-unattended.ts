@@ -78,10 +78,12 @@ export interface UnattendedOptions {
    */
   disabledTools?: string[]
   /**
-   * Skill names this call may not load (per-node switches). A disabled skill
-   * also disappears from the skill catalogue, so it costs no prompt tokens.
+   * Skill names this call may load (per-node allowlist). An empty array means
+   * "no skills"; undefined leaves the caller's default (every skill). A skill
+   * outside the list also disappears from the catalogue, so it costs no prompt
+   * tokens.
    */
-  disabledSkills?: string[]
+  enabledSkills?: string[]
 }
 
 /**
@@ -192,9 +194,8 @@ export async function runUnattendedPrompt(
           ...new Set([...(settings.disabledTools ?? []), ...(options.disabledTools ?? [])]),
         ],
         basePrompt: settings.systemPromptOverride ?? '',
-        ...(options.disabledSkills && options.disabledSkills.length > 0
-          ? { disabledSkills: options.disabledSkills }
-          : {}),
+        // `[]` must survive the merge: it is how a node says "no skills".
+        ...(options.enabledSkills !== undefined ? { enabledSkills: options.enabledSkills } : {}),
       }),
     })
 

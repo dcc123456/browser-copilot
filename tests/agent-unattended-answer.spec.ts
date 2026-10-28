@@ -184,15 +184,30 @@ describe('runUnattendedPrompt answer assembly', () => {
 
     await runUnattendedPrompt('do it', 'workflow-ai-agent:x', 'readonly', {
       disabledTools: ['click', 'save_local'],
-      disabledSkills: ['xiaohongshu-writer'],
+      enabledSkills: ['xiaohongshu-writer'],
     })
 
     const config = await captured!.getToolConfig!()
     expect(config.disabledTools).toEqual(['screenshot', 'click', 'save_local'])
-    expect(config.disabledSkills).toEqual(['xiaohongshu-writer'])
+    expect(config.enabledSkills).toEqual(['xiaohongshu-writer'])
   })
 
-  it('leaves the skill switches off the config when the node disabled none', async () => {
+  it('forwards an empty skill allowlist, which is not the same as no allowlist', async () => {
+    // A new node stores `[]` = "no skills"; dropping it here would silently
+    // restore the legacy all-on path.
+    let captured: { getToolConfig?: () => Promise<Record<string, unknown>> } | undefined
+    runAgentTurn.mockImplementation(async (_history: unknown, deps: unknown) => {
+      captured = deps as typeof captured
+      return null
+    })
+
+    await runUnattendedPrompt('do it', 'workflow-ai-agent:x', 'readonly', { enabledSkills: [] })
+
+    const config = await captured!.getToolConfig!()
+    expect(config.enabledSkills).toEqual([])
+  })
+
+  it('leaves the skill allowlist off the config when the caller has none', async () => {
     let captured: { getToolConfig?: () => Promise<Record<string, unknown>> } | undefined
     runAgentTurn.mockImplementation(async (_history: unknown, deps: unknown) => {
       captured = deps as typeof captured
@@ -203,7 +218,7 @@ describe('runUnattendedPrompt answer assembly', () => {
 
     const config = await captured!.getToolConfig!()
     expect(config.disabledTools).toEqual([])
-    expect('disabledSkills' in config).toBe(false)
+    expect('enabledSkills' in config).toBe(false)
   })
 
   it('forwards an explicit attribution to the agent loop, and omits it otherwise', async () => {

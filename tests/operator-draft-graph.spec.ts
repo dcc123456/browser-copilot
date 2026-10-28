@@ -37,6 +37,7 @@ beforeEach(() => {
 
 import {
   actionNodesOf,
+  appendOperatorNode,
   clearDraft,
   composeWorkflowFromDraft,
   ensureTriggerHead,
@@ -68,6 +69,30 @@ function inboundHandle(draft: WorkflowDraft, nodeId: string): string | undefined
 }
 
 describe('operator draft graph', () => {
+  it('gives a generated ai-agent node the empty skill allowlist', () => {
+    // Generated nodes are new by definition; an absent key would be read as
+    // the legacy "every skill" path at runtime.
+    const draft: WorkflowDraft = {
+      conversationId: 'c-ai',
+      name: 'Generated',
+      nodes: [],
+      edges: [],
+      tail: null,
+      source: 'chat-generate',
+    }
+
+    appendOperatorNode(draft, 'ai-agent', { prompt: 'go' })
+    expect(draft.nodes[0]!.data.enabledSkills).toEqual([])
+
+    // A model-supplied allowlist is preserved.
+    appendOperatorNode(draft, 'ai-agent', { prompt: 'go', enabledSkills: ['writer'] })
+    expect(draft.nodes[1]!.data.enabledSkills).toEqual(['writer'])
+
+    // Other blocks do not gain the key.
+    appendOperatorNode(draft, 'event-click', { selector: '#x' })
+    expect('enabledSkills' in draft.nodes[2]!.data).toBe(false)
+  })
+
   it('starts every draft at a trigger head node', async () => {
     const draft = await append('c-trigger', 'wf_op_event-click', { selector: '#go' })
 

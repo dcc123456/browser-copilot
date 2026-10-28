@@ -28,7 +28,8 @@ import { PALETTE_BLOCKS, BLOCK_BY_ID, CATALOG_BY_ID } from '../src/lib/workflow/
 import { CUSTOM_BLOCKS, CUSTOM_BLOCK_IDS, isCustomBlock } from '../src/lib/workflow/blocks/custom'
 import { isCloudBlock } from '../src/lib/workflow/blocks/cloud-blocks'
 import { blockDisplayName } from '../src/workflow-editor/block-i18n'
-import { migrateNodeData } from '../src/lib/workflow/migrate'
+import { migrateNodeData, migrateWorkflow } from '../src/lib/workflow/migrate'
+import { AI_AGENT_FORBIDDEN_TOOLS } from '../src/lib/tool-catalog'
 import { buildAgentPrompt } from '../src/background/workflow-engine/ai-agent-executor'
 import { EXECUTORS, type WorkflowExecCtx } from '../src/background/workflow-engine/executors'
 
@@ -75,10 +76,10 @@ describe('ai-agent block catalog wiring', () => {
     expect(b.data['useSnapshot']).toBe(true)
     expect(b.data['maxToolRounds']).toBe(20)
     expect(b.data['variableName']).toBe('lastAIAgent')
-    // Deny lists: empty = everything enabled, so capabilities added later are
-    // not silently excluded from nodes saved before they existed.
+    // Tools are a deny list (empty = all on, so a tool added later is not
+    // silently excluded); skills are an allowlist that starts empty.
     expect(b.data['disabledTools']).toEqual([])
-    expect(b.data['disabledSkills']).toEqual([])
+    expect(b.data['enabledSkills']).toEqual([])
   })
 
   it('does not collide with any Automa catalog id', () => {
@@ -101,7 +102,45 @@ describe('ai-agent block catalog wiring', () => {
     expect(data['findBy']).toBe('cssSelector')
     expect(data['variableName']).toBe('lastAIAgent')
     expect(data['disabledTools']).toEqual([])
-    expect(data['disabledSkills']).toEqual([])
+    expect(data['enabledSkills']).toEqual([])
+  })
+
+  it('keeps every skill for a workflow saved before the allowlist existed', () => {
+    // The catalog default `[]` means "no skills" for NEW nodes, but a stored
+    // node without the key predates the switch and used every skill: the
+    // migration drops the backfilled default instead of switching it off.
+    const legacy = {
+      id: 'wf-legacy',
+      name: 'Legacy',
+      createdAt: 0,
+      updatedAt: 0,
+      settings: {},
+      drawflow: {
+        nodes: [
+          {
+            id: 'n1',
+            label: 'AI agent',
+            position: { x: 0, y: 0 },
+            data: { blockId: 'ai-agent', prompt: 'go' },
+          },
+        ],
+        edges: [],
+      },
+    } as never
+    const migrated = migrateWorkflow(legacy)
+    expect(migrated.drawflow.nodes[0]!.data['enabledSkills']).toBeUndefined()
+
+    // A node that stored an allowlist keeps exactly that list.
+    const configured = structuredClone(legacy) as {
+      drawflow: { nodes: { data: Record<string, unknown> }[] }
+    }
+    configured.drawflow.nodes[0]!.data = {
+      blockId: 'ai-agent',
+      enabledSkills: ['xiaohongshu-writer'],
+    }
+    expect(migrateWorkflow(configured as never).drawflow.nodes[0]!.data['enabledSkills']).toEqual([
+      'xiaohongshu-writer',
+    ])
   })
 })
 
@@ -361,7 +400,7 @@ describe('ai-agent executor', () => {
     const { ctx } = makeCtx()
 
     await EXECUTORS['ai-agent']!(
-      { prompt: 'go', disabledTools: ['click', '', 42], disabledSkills: ['writer'] },
+      { prompt: 'go', disabledTools: ['click', '', 42], enabledSkills: ['writer', '', 7] },
       ctx,
     )
 
@@ -371,22 +410,55 @@ describe('ai-agent executor', () => {
       string,
       Record<string, unknown>,
     ]
-    expect(options.disabledTools).toEqual(['click'])
-    expect(options.disabledSkills).toEqual(['writer'])
+    // The author's denies come first; the forbidden-floor names always follow.
+    expect(options.disabledTools).toEqual(['click', ...AI_AGENT_FORBIDDEN_TOOLS])
+    expect(options.enabledSkills).toEqual(['writer'])
   })
 
-  it('omits the switch lists for a node that disabled nothing', async () => {
-    // Absent and empty both mean "every capability on"; omitting keeps the
-    // nested runner on its own default path instead of receiving empty arrays.
+  it('always denies the forbidden tools, even for an untouched node', async () => {
+    // State-changing tools a run cannot ask permission for are a floor, not a
+    // default: absent authored data must not leave any of them callable.
     configuredSettings()
     runUnattended.mockResolvedValue({ ok: true, answer: 'done' })
     const { ctx } = makeCtx()
 
-    await EXECUTORS['ai-agent']!({ prompt: 'go', disabledTools: [], disabledSkills: [] }, ctx)
+    await EXECUTORS['ai-agent']!({ prompt: 'go' }, ctx)
+
+    const [, , , options] = runUnattended.mock.calls[0] as [
+      string,
+      string,
+      string,
+      { disabledTools: string[] },
+    ]
+    for (const name of AI_AGENT_FORBIDDEN_TOOLS) expect(options.disabledTools).toContain(name)
+  })
+
+  it('keeps an absent skill allowlist off the nested options (legacy all-on)', async () => {
+    // `undefined` is the old "every skill" path; only `[]` means "no skills".
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: 'done' })
+    const { ctx } = makeCtx()
+
+    await EXECUTORS['ai-agent']!({ prompt: 'go', disabledTools: [] }, ctx)
 
     const [, , , options] = runUnattended.mock.calls[0] as [string, string, string, object]
-    expect('disabledTools' in options).toBe(false)
-    expect('disabledSkills' in options).toBe(false)
+    expect('enabledSkills' in options).toBe(false)
+  })
+
+  it('forwards an empty skill allowlist so a new node loads no skill', async () => {
+    configuredSettings()
+    runUnattended.mockResolvedValue({ ok: true, answer: 'done' })
+    const { ctx } = makeCtx()
+
+    await EXECUTORS['ai-agent']!({ prompt: 'go', enabledSkills: [] }, ctx)
+
+    const [, , , options] = runUnattended.mock.calls[0] as [
+      string,
+      string,
+      string,
+      { enabledSkills?: string[] },
+    ]
+    expect(options.enabledSkills).toEqual([])
   })
 
   it('pins the nested unattended turn to the workflow window scope', async () => {
