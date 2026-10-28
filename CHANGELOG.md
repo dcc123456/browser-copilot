@@ -6,7 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-_To be released._
+### Fixed — Republishing a workflow no longer fails as a conflict
+
+Updating a listing reused the GitHub Contents API call without the existing
+blob's `sha`, which GitHub rejects with 422, surfaced as "conflicting changes".
+An overwrite now echoes each file's `sha` and deletes files the listing no
+longer produces, so a same-author republish is a normal update PR. The apply
+button also reads "Update" when an installed workflow has a newer listing.
 
 ## [0.6.15] - 2026-10-28
 
