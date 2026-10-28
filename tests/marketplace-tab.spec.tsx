@@ -1,6 +1,7 @@
 /**
  * The marketplace tab's first paint: with no snapshot loaded yet it must show
- * the empty state (not an error), and every control must be translated.
+ * the empty state (not an error), every control must be translated, and the
+ * team view must cope with zero, one and several connected repositories.
  */
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
@@ -8,17 +9,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { I18nProvider } from '../src/sidepanel/i18n'
 import MarketplaceTab from '../src/sidepanel/MarketplaceTab'
 import { messagesFor, type Locale } from '../src/lib/i18n'
-import type { TeamRepoConfig } from '../src/lib/marketplace/team'
+import type { TeamConnection, TeamRepoConfig } from '../src/lib/marketplace/team'
 
 const TOKEN = `ghp_${'a'.repeat(36)}`
 
 function render(
   locale: Locale = 'en',
-  initial?: {
-    source: 'public' | 'team'
-    teamConfig: TeamRepoConfig | null
-    teamAuth: { token: string; login: string } | null
-  },
+  initial?: { source: 'public' | 'team'; teamConnections: TeamConnection[] },
 ): string {
   return renderToStaticMarkup(
     createElement(
@@ -38,6 +35,10 @@ function teamConfig(overrides: Partial<TeamRepoConfig> = {}): TeamRepoConfig {
     isPublic: false,
     ...overrides,
   }
+}
+
+function connection(overrides: Partial<TeamRepoConfig> = {}, login = 'octocat'): TeamConnection {
+  return { config: teamConfig(overrides), auth: { token: TOKEN, login } }
 }
 
 describe('marketplace tab', () => {
@@ -66,19 +67,40 @@ describe('marketplace tab', () => {
   })
 
   it('points at Settings when no team repository is connected', () => {
-    const markup = render('en', { source: 'team', teamConfig: null, teamAuth: null })
+    const markup = render('en', { source: 'team', teamConnections: [] })
     expect(markup).toContain('Team sharing is not connected.')
     expect(markup).toContain('Settings → Team sharing')
     expect(markup).not.toContain('No workflows have been published yet.')
+    expect(markup).not.toContain('All team repositories')
   })
 
   it('explains a read-only team token in the team view', () => {
     const markup = render('en', {
       source: 'team',
-      teamConfig: teamConfig({ canPush: false }),
-      teamAuth: { token: TOKEN, login: 'reader' },
+      teamConnections: [connection({ canPush: false }, 'reader')],
     })
     expect(markup).toContain('Only collaborators on that repository can read them.')
-    expect(markup).toContain('publishing needs write access')
+    expect(markup).toContain('acme/workflows · This token can read the repository but cannot push')
+    // A single team needs no filter: the dropdown only appears with several.
+    expect(markup).not.toContain('All teams')
+  })
+
+  it('merges several teams and offers a per-repository filter', () => {
+    const markup = render('en', {
+      source: 'team',
+      teamConnections: [
+        connection(),
+        connection({ owner: 'beta', repo: 'automations', canPush: false }, 'beta-dev'),
+      ],
+    })
+    expect(markup).toContain('aria-label="Team repository"')
+    expect(markup).toContain('<option value="all" selected="">All teams</option>')
+    expect(markup).toContain('<option value="acme/workflows">acme/workflows</option>')
+    expect(markup).toContain('<option value="beta/automations">beta/automations</option>')
+    // Each repository's warning is labelled with its own address.
+    expect(markup).toContain(
+      'beta/automations · This token can read the repository but cannot push',
+    )
+    expect(markup).not.toContain('acme/workflows · This token')
   })
 })

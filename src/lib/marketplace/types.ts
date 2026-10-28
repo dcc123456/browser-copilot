@@ -182,6 +182,11 @@ export interface MarketplaceCard {
   prNumber: number | null
   likes: number
   comments: number
+  /**
+   * Repository the card was read from, `owner/repo`. Set when several team
+   * repositories are merged into one list; absent means the public repo.
+   */
+  repo?: string
 }
 
 /** Stable error codes, so the UI can translate instead of parsing messages. */

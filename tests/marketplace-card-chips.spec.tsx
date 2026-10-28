@@ -23,11 +23,10 @@ vi.mock('../src/lib/marketplace/token', () => ({
   clearAuth: async () => {},
   readAuth: async () => null,
 }))
-vi.mock('../src/lib/marketplace/team', () => ({
-  getTeamRepo: async () => null,
-  getTeamAuth: async () => null,
-  teamRepoRef: () => null,
-}))
+vi.mock('../src/lib/marketplace/team', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../src/lib/marketplace/team')>()
+  return { ...original, getTeamConnections: async () => [] }
+})
 
 const { default: MarketplaceTab } = await import('../src/sidepanel/MarketplaceTab')
 const { I18nProvider } = await import('../src/sidepanel/i18n')

@@ -21,7 +21,7 @@ import { categoryKey, categoryLabel, categoryOptions } from '../lib/marketplace/
 import {
   chromeCatalogCache,
   loadCatalog,
-  TEAM_CATALOG_CACHE_KEY,
+  teamCatalogCacheKey,
   type LoadCatalogResult,
 } from '../lib/marketplace/catalog'
 import {
@@ -34,9 +34,14 @@ import {
 import { GitHubClient, type GitHubComment } from '../lib/marketplace/github-client'
 import { assetRepoPath, needsUpdate, workflowDir } from '../lib/marketplace/meta'
 import { unpublishWorkflow } from '../lib/marketplace/publish'
-import { fetchRepoAsset, rawUrl, type RepoReadAccess } from '../lib/marketplace/raw'
+import { fetchRepoAsset, rawUrl } from '../lib/marketplace/raw'
 import { PUBLIC_REPO, repoFullName, type RepoRef } from '../lib/marketplace/repo'
-import { getTeamAuth, getTeamRepo, teamRepoRef, type TeamRepoConfig } from '../lib/marketplace/team'
+import {
+  connectionKey,
+  connectionRepo,
+  getTeamConnections,
+  type TeamConnection,
+} from '../lib/marketplace/team'
 import { clearAuth, getAuth } from '../lib/marketplace/token'
 import {
   MARKETPLACE_REPO_FULL,
@@ -51,7 +56,7 @@ import { marketplaceErrorMessage } from './marketplace-errors'
 
 type SortMode = 'recent' | 'likes'
 
-/** Which repository the tab is reading: the public one or the team one. */
+/** Which repository the tab is reading: the public one or the team ones. */
 type Source = 'public' | 'team'
 
 /** `all` plus a built-in slug or a publisher-defined label. */
@@ -60,8 +65,8 @@ type CategoryFilter = string
 interface Props {
   /** The tab is mounted from startup; the catalog loads on first activation. */
   active: boolean
-  /** Test/preview seam: start on a source with the stored connection known. */
-  initial?: { source: Source; teamConfig: TeamRepoConfig | null; teamAuth: MarketplaceAuth | null }
+  /** Test/preview seam: start on a source with the stored connections known. */
+  initial?: { source: Source; teamConnections: TeamConnection[] }
 }
 
 function matchesQuery(card: MarketplaceCard, query: string): boolean {
@@ -189,20 +194,23 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
   const [sort, setSort] = useState<SortMode>('recent')
 
   const [installed, setInstalled] = useState<Workflow[]>([])
+  /** Card identity (`repo/slug`) whose apply or removal is running. */
   const [busySlug, setBusySlug] = useState<string | null>(null)
-  /** Slug whose removal PR is being opened. */
   const [removingSlug, setRemovingSlug] = useState<string | null>(null)
-  /** Slugs whose published file failed validation; retried only on refresh. */
+  /** Card identities whose published file failed validation; retried on refresh. */
   const [unavailable, setUnavailable] = useState<Set<string>>(new Set())
 
   const [auth, setAuth] = useState<MarketplaceAuth | null | undefined>(undefined)
   const [source, setSource] = useState<Source>(initial?.source ?? 'public')
-  /** Undefined while loading; null when no team repository is connected. */
-  const [teamConfig, setTeamConfig] = useState<TeamRepoConfig | null | undefined>(
-    initial ? initial.teamConfig : undefined,
+  /** Every connected team repository; undefined while loading. */
+  const [teamConnections, setTeamConnections] = useState<TeamConnection[] | undefined>(
+    initial ? initial.teamConnections : undefined,
   )
-  const [teamAuth, setTeamAuth] = useState<MarketplaceAuth | null>(initial?.teamAuth ?? null)
-  /** Slug whose discussion panel is expanded; one at a time. */
+  /** `all` or one connection key; only offered with more than one team. */
+  const [teamFilter, setTeamFilter] = useState('all')
+  /** Team repositories whose last refresh failed without a cached snapshot. */
+  const [failedTeams, setFailedTeams] = useState<string[]>([])
+  /** Card identity whose discussion panel is expanded; one at a time. */
   const [openSlug, setOpenSlug] = useState<string | null>(null)
   const [threads, setThreads] = useState<Record<number, ThreadState>>({})
   const [likeStates, setLikeStates] = useState<Record<number, LikeState>>({})
@@ -218,53 +226,127 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
   /** Guards against a slow public load overwriting a newer team result. */
   const requestIdRef = useRef(0)
 
-  const teamReady = !!teamConfig && !!teamAuth
-  const sourceClient = useMemo(
+  const publicClient = useMemo(() => new GitHubClient(), [])
+  /** One authenticated client per connected repository, keyed by `owner/repo`. */
+  const teamClients = useMemo(
     () =>
-      source === 'team'
-        ? teamAuth
-          ? new GitHubClient({ token: teamAuth.token })
-          : null
-        : new GitHubClient(),
-    [source, teamAuth],
+      new Map(
+        (teamConnections ?? []).map((connection) => [
+          connectionKey(connection),
+          new GitHubClient({ token: connection.auth.token }),
+        ]),
+      ),
+    [teamConnections],
   )
-  const sourceRepo = useMemo(
-    () => (source === 'team' && teamConfig ? teamRepoRef(teamConfig) : PUBLIC_REPO),
-    [source, teamConfig],
+  const teamReady = (teamConnections?.length ?? 0) > 0
+
+  /**
+   * Where a card lives: its repository, the client that may read it, and the
+   * connection (for the login and push permission). Public cards carry no
+   * `repo`, so they resolve to the shared marketplace.
+   */
+  const cardSource = useCallback(
+    (
+      card: MarketplaceCard,
+    ): { repo: RepoRef; client: GitHubClient; connection: TeamConnection | null } => {
+      const name = card.repo
+      if (!name || name === MARKETPLACE_REPO_FULL) {
+        return { repo: PUBLIC_REPO, client: publicClient, connection: null }
+      }
+      const connection = (teamConnections ?? []).find((entry) => connectionKey(entry) === name)
+      if (!connection) return { repo: PUBLIC_REPO, client: publicClient, connection: null }
+      return {
+        repo: connectionRepo(connection),
+        client: teamClients.get(name) ?? publicClient,
+        connection,
+      }
+    },
+    [teamConnections, teamClients, publicClient],
   )
-  const sourceRepoName = repoFullName(sourceRepo)
-  const sourceAccess: RepoReadAccess | undefined =
-    source === 'team' && sourceClient ? { client: sourceClient } : undefined
+
+  /** Card identity across sources: the same slug may exist in two teams. */
+  const cardKey = (card: MarketplaceCard): string =>
+    `${card.repo ?? MARKETPLACE_REPO_FULL}/${card.meta.slug}`
+
+  /** Every connected team's catalog, merged into one list. */
+  const readTeamCatalog = useCallback(
+    async (force: boolean): Promise<{ result: LoadCatalogResult; failed: string[] }> => {
+      const connections = teamConnections ?? []
+      const settled = await Promise.allSettled(
+        connections.map(async (connection) => {
+          const key = connectionKey(connection)
+          const client = teamClients.get(key) ?? new GitHubClient({ token: connection.auth.token })
+          const result = await loadCatalog({
+            client,
+            cache: chromeCatalogCache(teamCatalogCacheKey(connection.config)),
+            force,
+            repo: connectionRepo(connection),
+            access: { client },
+            includeEngagement: false,
+          })
+          return { key, result }
+        }),
+      )
+      const fulfilled = settled.filter(
+        (entry): entry is PromiseFulfilledResult<{ key: string; result: LoadCatalogResult }> =>
+          entry.status === 'fulfilled',
+      )
+      const failed = connections
+        .filter((_, index) => settled[index]!.status === 'rejected')
+        .map((connection) => connectionKey(connection))
+      if (fulfilled.length === 0) {
+        const reason = settled.find(
+          (entry): entry is PromiseRejectedResult => entry.status === 'rejected',
+        )?.reason
+        throw reason ?? new MarketplaceError('network', 'No team repository could be read')
+      }
+      const results = fulfilled.map((entry) => entry.value.result)
+      const result: LoadCatalogResult = {
+        fetchedAt: Math.max(...results.map((entry) => entry.fetchedAt)),
+        cards: fulfilled.flatMap(({ value }) =>
+          value.result.cards.map((card) => ({
+            ...card,
+            repo: value.key,
+          })),
+        ),
+        truncated: results.some((entry) => entry.truncated),
+        fromCache: results.every((entry) => entry.fromCache),
+        stale: results.some((entry) => entry.stale),
+        staleError: results.find((entry) => entry.staleError)?.staleError,
+      }
+      return { result, failed }
+    },
+    [teamConnections, teamClients],
+  )
 
   const refresh = useCallback(
     async (force: boolean, quiet = false): Promise<void> => {
       const requestId = ++requestIdRef.current
-      if (source === 'team' && !(teamConfig && teamAuth && sourceClient)) {
+      if (source === 'team' && teamConnections !== undefined && teamConnections.length === 0) {
         setSnapshot(null)
         setError(null)
+        setFailedTeams([])
         setLoading(false)
         return
       }
       if (!quiet) setLoading(true)
       setError(null)
       try {
-        const result =
-          source === 'team' && teamConfig && sourceClient
-            ? await loadCatalog({
-                client: sourceClient,
-                cache: chromeCatalogCache(TEAM_CATALOG_CACHE_KEY),
-                force,
-                repo: teamRepoRef(teamConfig),
-                access: { client: sourceClient },
-                includeEngagement: false,
-              })
-            : await loadCatalog({
-                client: sourceClient ?? new GitHubClient(),
-                cache: chromeCatalogCache(),
-                force,
-              })
-        if (requestIdRef.current !== requestId) return
-        setSnapshot(result)
+        if (source === 'team') {
+          const { result, failed } = await readTeamCatalog(force)
+          if (requestIdRef.current !== requestId) return
+          setSnapshot(result)
+          setFailedTeams(failed)
+        } else {
+          const result = await loadCatalog({
+            client: publicClient,
+            cache: chromeCatalogCache(),
+            force,
+          })
+          if (requestIdRef.current !== requestId) return
+          setSnapshot(result)
+          setFailedTeams([])
+        }
         if (force) setUnavailable(new Set())
       } catch (caught) {
         if (requestIdRef.current !== requestId) return
@@ -274,7 +356,7 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
         if (requestIdRef.current === requestId) setLoading(false)
       }
     },
-    [t, source, teamConfig, teamAuth, sourceClient],
+    [t, source, teamConnections, readTeamCatalog, publicClient],
   )
 
   useEffect(() => {
@@ -305,10 +387,7 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
   useEffect(() => {
     if (!active) return
     void getAuth().then(setAuth)
-    void Promise.all([getTeamRepo(), getTeamAuth()]).then(([config, token]) => {
-      setTeamConfig(config)
-      setTeamAuth(token)
-    })
+    void getTeamConnections().then(setTeamConnections)
   }, [active])
 
   // Cards, threads and removals all belong to one repository; carrying any of
@@ -318,6 +397,8 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
     setError(null)
     setOpenSlug(null)
     setUnavailable(new Set())
+    setFailedTeams([])
+    setTeamFilter('all')
   }, [source])
 
   // The catalog knows the public counts, not whether this device reacted; the
@@ -350,12 +431,13 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
   const issueUrl = (issueNumber: number): string =>
     `https://github.com/${MARKETPLACE_REPO_FULL}/pull/${issueNumber}`
 
-  /** The account that can write to the active source, if any. */
-  const sourceAuth = source === 'team' ? teamAuth : auth
-
+  /**
+   * Client for writes to the public marketplace. Team likes and comments do
+   * not exist (team cards carry no issue number), so this stays public-only.
+   */
   const clientForWrites = (): GitHubClient => {
-    if (!sourceAuth) throw new MarketplaceError('auth-required', 'Connect GitHub first')
-    return new GitHubClient({ token: sourceAuth.token })
+    if (!auth) throw new MarketplaceError('auth-required', 'Connect GitHub first')
+    return new GitHubClient({ token: auth.token })
   }
 
   const forgetRejectedToken = async (): Promise<void> => {
@@ -387,11 +469,12 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
   const openDetail = (card: MarketplaceCard): void => {
     const issueNumber = card.prNumber
     if (issueNumber === null) return
-    if (openSlug === card.meta.slug) {
+    const identity = cardKey(card)
+    if (openSlug === identity) {
       setOpenSlug(null)
       return
     }
-    setOpenSlug(card.meta.slug)
+    setOpenSlug(identity)
     setDraft('')
     if (!threads[issueNumber]) void loadThread(issueNumber)
   }
@@ -464,17 +547,25 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
   }
 
   const cards = useMemo(() => {
-    const list = (snapshot?.cards ?? []).filter(
-      (card) =>
+    // A disconnected team keeps its cached cards for a while; they are not
+    // browsable or appliable any more, so drop them from the merged list.
+    const teamKeys = new Set((teamConnections ?? []).map(connectionKey))
+    const list = (snapshot?.cards ?? []).filter((card) => {
+      if (source === 'team') {
+        if (!card.repo || !teamKeys.has(card.repo)) return false
+        if (teamFilter !== 'all' && card.repo !== teamFilter) return false
+      }
+      return (
         (category === 'all' || categoryKey(card.meta.category) === categoryKey(category)) &&
-        matchesQuery(card, query.trim()),
-    )
+        matchesQuery(card, query.trim())
+      )
+    })
     return list.sort((a, b) =>
       sort === 'likes'
         ? b.likes - a.likes || updatedAtOf(b) - updatedAtOf(a)
         : updatedAtOf(b) - updatedAtOf(a),
     )
-  }, [snapshot, category, query, sort])
+  }, [snapshot, category, query, sort, source, teamConnections, teamFilter])
 
   const filterCategories = useMemo(() => categoryOptions(snapshot?.cards ?? []), [snapshot])
 
@@ -501,10 +592,10 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
     repo: RepoRef,
     slug: string,
     file: { name: string; path: string },
+    client: GitHubClient,
   ): Promise<void> => {
-    if (!sourceClient) return
     try {
-      const blob = await fetchRepoAsset(repo, slug, file.path, { client: sourceClient })
+      const blob = await fetchRepoAsset(repo, slug, file.path, { client })
       if (!blob) {
         setBanner({ kind: 'error', text: t.marketplaceAttachmentFailed })
         return
@@ -516,7 +607,9 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
   }
 
   const apply = async (card: MarketplaceCard): Promise<void> => {
-    const existing = findInstalled(installed, card.meta.slug, sourceRepoName)
+    const where = cardSource(card)
+    const repoName = repoFullName(where.repo)
+    const existing = findInstalled(installed, card.meta.slug, repoName)
     const isUpdate = !!existing && needsUpdate(card.meta, existing.marketplace)
     const bundled = (card.meta.dependencies ?? []).map((entry) => entry.name)
     const credentials = (card.meta.secrets ?? []).map((entry) => entry.label || entry.id)
@@ -540,11 +633,11 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
     })
     if (!confirmed) return
 
-    setBusySlug(card.meta.slug)
+    setBusySlug(cardKey(card))
     try {
       const plan = await installFromCard(card, existing, installed, {
-        repo: sourceRepo,
-        access: sourceAccess,
+        repo: where.repo,
+        access: where.connection ? { client: where.client } : undefined,
       })
       setBanner({
         kind: 'ok',
@@ -558,7 +651,7 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
       await loadInstalled()
     } catch (caught) {
       if (caught instanceof MarketplaceError && caught.code === 'invalid') {
-        setUnavailable((prev) => new Set(prev).add(card.meta.slug))
+        setUnavailable((prev) => new Set(prev).add(cardKey(card)))
       }
       setBanner({ kind: 'error', text: marketplaceErrorMessage(t, caught) })
     } finally {
@@ -573,7 +666,9 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
    * every copy already applied keeps working afterwards.
    */
   const unpublish = async (card: MarketplaceCard): Promise<void> => {
-    if (!sourceAuth) return
+    const where = cardSource(card)
+    const writer = where.connection ? where.connection.auth : auth
+    if (!writer) return
     const confirmed = await confirmDialog({
       title: t.marketplaceUnpublishTitle,
       message: t.marketplaceUnpublishMessage({ title: card.meta.title }),
@@ -582,11 +677,15 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
     })
     if (!confirmed) return
 
-    setRemovingSlug(card.meta.slug)
+    setRemovingSlug(cardKey(card))
     try {
       const result = await unpublishWorkflow(
         { slug: card.meta.slug, title: card.meta.title },
-        { client: clientForWrites(), auth: sourceAuth, repo: sourceRepo },
+        {
+          client: new GitHubClient({ token: writer.token }),
+          auth: writer,
+          repo: where.repo,
+        },
       )
       setBanner({
         kind: 'ok',
@@ -594,7 +693,7 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
       })
     } catch (caught) {
       if (
-        source === 'public' &&
+        !where.connection &&
         caught instanceof MarketplaceError &&
         caught.code === 'unauthorized'
       ) {
@@ -662,10 +761,32 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
       <p className="mt-0 mb-3 text-[12px] leading-snug text-muted">
         {source === 'team' ? t.marketplaceTeamIntro : t.marketplaceIntro}
       </p>
-      {source === 'team' && teamConfig && !teamConfig.canPush && (
-        <p className="mt-0 mb-3 text-[11.5px] leading-snug text-warn">
-          {t.settingsTeamReadOnlyWarning}
-        </p>
+      {source === 'team' &&
+        (teamConnections ?? [])
+          .filter((connection) => !connection.config.canPush)
+          .map((connection) => (
+            <p
+              className="mt-0 mb-3 text-[11.5px] leading-snug text-warn"
+              key={connectionKey(connection)}
+            >
+              {connectionKey(connection)} · {t.settingsTeamReadOnlyWarning}
+            </p>
+          ))}
+
+      {source === 'team' && (teamConnections?.length ?? 0) > 1 && (
+        <select
+          aria-label={t.marketplaceTeamFilter}
+          className="mb-2 w-full"
+          onChange={(event) => setTeamFilter(event.target.value)}
+          value={teamFilter}
+        >
+          <option value="all">{t.marketplaceTeamFilterAll}</option>
+          {(teamConnections ?? []).map((connection) => (
+            <option key={connectionKey(connection)} value={connectionKey(connection)}>
+              {connectionKey(connection)}
+            </option>
+          ))}
+        </select>
       )}
 
       <input
@@ -706,12 +827,17 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
           {staleText}
         </div>
       )}
+      {failedTeams.length > 0 && (
+        <div className="banner" data-kind="error" role="status">
+          {t.marketplaceTeamPartialFailed({ repos: failedTeams.join(', ') })}
+        </div>
+      )}
       {snapshot?.truncated && (
         <p className="mt-0 mb-2 text-[11.5px] text-muted">{t.marketplaceTruncated}</p>
       )}
 
       {source === 'team' && !teamReady ? (
-        teamConfig === undefined ? (
+        teamConnections === undefined ? (
           <p className="m-0 text-[12.5px] text-muted">{t.marketplaceLoading}</p>
         ) : (
           <div className="empty-state">
@@ -739,31 +865,34 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
         <ul className="task-list">
           {cards.map((card) => {
             const meta = card.meta
-            const existing = findInstalled(installed, meta.slug, sourceRepoName)
+            const where = cardSource(card)
+            const repoName = repoFullName(where.repo)
+            const identity = cardKey(card)
+            const existing = findInstalled(installed, meta.slug, repoName)
             const hasUpdate = !!existing && needsUpdate(meta, existing.marketplace)
-            const isUnavailable = unavailable.has(meta.slug)
-            const sourceLogin = source === 'team' ? teamAuth?.login : auth?.login
-            const canWriteHere = source === 'public' || teamConfig?.canPush === true
+            const isUnavailable = unavailable.has(identity)
+            const sourceLogin = where.connection ? where.connection.auth.login : auth?.login
+            const canWriteHere = !where.connection || where.connection.config.canPush
             const isMine =
               !!sourceLogin &&
               canWriteHere &&
               sourceLogin.toLowerCase() === meta.author.toLowerCase()
             const cover = meta.images[0]
-            const sourceUrl = `https://github.com/${sourceRepoName}/tree/${sourceRepo.branch}/${workflowDir(meta.slug)}`
+            const sourceUrl = `https://github.com/${repoName}/tree/${where.repo.branch}/${workflowDir(meta.slug)}`
             const issueNumber = card.prNumber
             const likeState = issueNumber === null ? undefined : likeStates[issueNumber]
             const liked = likeState?.liked ?? false
             const thread = issueNumber === null ? undefined : threads[issueNumber]
-            const isOpen = openSlug === meta.slug
+            const isOpen = openSlug === identity
             const bundleCount = meta.dependencies?.length ?? 0
             return (
-              <li className="task-item" key={meta.slug}>
+              <li className="task-item" key={identity}>
                 {cover &&
-                  (source === 'team' && sourceClient ? (
+                  (where.connection ? (
                     <RepoImage
-                      client={sourceClient}
+                      client={where.client}
                       path={assetRepoPath(meta.slug, cover)}
-                      repo={sourceRepo}
+                      repo={where.repo}
                       slug={meta.slug}
                     />
                   ) : (
@@ -771,7 +900,7 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
                       alt=""
                       className="mb-2 aspect-video w-full rounded-md border border-border object-cover"
                       loading="lazy"
-                      src={rawUrl(sourceRepo, assetRepoPath(meta.slug, cover))}
+                      src={rawUrl(where.repo, assetRepoPath(meta.slug, cover))}
                     />
                   ))}
                 <div className="task-item-head">
@@ -829,11 +958,13 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px]">
                     <span className="text-muted">{t.marketplaceCardAttachments}</span>
                     {meta.attachments.map((file) =>
-                      source === 'team' ? (
+                      where.connection ? (
                         <button
                           className="cursor-pointer border-0! bg-transparent! p-0! text-[11.5px]! text-accent!"
                           key={file.path}
-                          onClick={() => void downloadAttachment(sourceRepo, meta.slug, file)}
+                          onClick={() =>
+                            void downloadAttachment(where.repo, meta.slug, file, where.client)
+                          }
                           type="button"
                         >
                           {file.name} ({formatAttachmentSize(file.size)})
@@ -841,7 +972,7 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
                       ) : (
                         <a
                           className="text-accent"
-                          href={rawUrl(sourceRepo, assetRepoPath(meta.slug, file.path))}
+                          href={rawUrl(where.repo, assetRepoPath(meta.slug, file.path))}
                           key={file.path}
                           rel="noreferrer"
                           target="_blank"

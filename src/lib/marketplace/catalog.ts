@@ -36,8 +36,16 @@ export const MAX_CATALOG_ENTRIES = 300
 export const MAX_CATALOG_PAGES = 3
 
 export const CATALOG_CACHE_KEY = 'marketplaceCatalog'
-export const TEAM_CATALOG_CACHE_KEY = 'teamCatalog'
 export const CATALOG_LAST_CHECK_KEY = 'marketplaceLastCheck'
+
+/**
+ * Cache key for one team repository. Each connection gets its own snapshot:
+ * several teams are one list in the UI but separate reads, and one expired
+ * cache must not hide the other team's workflows.
+ */
+export function teamCatalogCacheKey(config: { owner: string; repo: string }): string {
+  return `teamCatalog:${config.owner}/${config.repo}`
+}
 
 const PAGE_SIZE = 100
 const META_PATH_RE = /^workflows\/([a-z0-9]+(?:-[a-z0-9]+)*)\/meta\.json$/

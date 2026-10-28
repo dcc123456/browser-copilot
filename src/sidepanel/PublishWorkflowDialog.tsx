@@ -39,9 +39,14 @@ import {
   fetchRepoMeta,
   type RepoReadAccess,
 } from '../lib/marketplace/raw'
-import { invalidateCatalogCache, TEAM_CATALOG_CACHE_KEY } from '../lib/marketplace/catalog'
+import { invalidateCatalogCache, teamCatalogCacheKey } from '../lib/marketplace/catalog'
 import { PUBLIC_REPO, repoFullName, type RepoRef } from '../lib/marketplace/repo'
-import { getTeamAuth, getTeamRepo, teamRepoRef, type TeamRepoConfig } from '../lib/marketplace/team'
+import {
+  connectionKey,
+  connectionRepo,
+  getTeamConnections,
+  type TeamConnection,
+} from '../lib/marketplace/team'
 import { sendCommand } from '../lib/messages'
 import type { PasswordEntry } from '../lib/types'
 import {
@@ -74,8 +79,8 @@ const TOKEN_URL =
 /** Select value that reveals the free-form category input. */
 const CUSTOM_CATEGORY = '__custom__'
 
-/** Which repository the listing goes to. */
-type PublishTarget = 'public' | 'team'
+/** Which repository the listing goes to: `public` or a team's `owner/repo`. */
+type PublishTarget = string
 
 const FORM_ERROR_KEY: Record<PublishFormError, keyof Messages> = {
   'title-required': 'marketplaceFormTitleRequired',
@@ -154,8 +159,8 @@ interface Props {
   onPublished?: (result: PublishResult) => void
   /** Test/preview seam: skip reading `chrome.storage.local`. */
   initialAuth?: MarketplaceAuth | null
-  /** Test/preview seam: the stored team connection; `null` means none. */
-  initialTeam?: { config: TeamRepoConfig; auth: MarketplaceAuth } | null
+  /** Test/preview seam: the stored team connections; `null` means none. */
+  initialTeams?: TeamConnection[] | null
 }
 
 function Field({
@@ -182,7 +187,7 @@ export default function PublishWorkflowDialog({
   onClose,
   onPublished,
   initialAuth,
-  initialTeam,
+  initialTeams,
 }: Props): React.ReactElement {
   const t = useT()
   /**
@@ -218,39 +223,37 @@ export default function PublishWorkflowDialog({
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
 
-  // Re-editing a workflow published to the team repo starts on that target.
+  // Re-editing a workflow published to a team repo starts on that repository.
   const [target, setTarget] = useState<PublishTarget>(
     workflow.marketplace?.repo && workflow.marketplace.repo !== MARKETPLACE_REPO_FULL
-      ? 'team'
+      ? workflow.marketplace.repo
       : 'public',
   )
-  /** Undefined while loading; null when no team repository is connected. */
-  const [teamConfig, setTeamConfig] = useState<TeamRepoConfig | null | undefined>(
-    initialTeam === undefined ? undefined : (initialTeam?.config ?? null),
+  /** Every connected team repository; undefined while loading. */
+  const [teams, setTeams] = useState<TeamConnection[] | undefined>(
+    initialTeams === undefined ? undefined : (initialTeams ?? []),
   )
-  const [teamAuth, setTeamAuth] = useState<MarketplaceAuth | null>(initialTeam?.auth ?? null)
 
   useEffect(() => {
-    if (initialTeam !== undefined) return
-    void Promise.all([getTeamRepo(), getTeamAuth()]).then(([config, token]) => {
-      setTeamConfig(config)
-      setTeamAuth(token)
-    })
-  }, [initialTeam])
+    if (initialTeams !== undefined) return
+    void getTeamConnections().then(setTeams)
+  }, [initialTeams])
 
-  const teamRef = useMemo(() => (teamConfig ? teamRepoRef(teamConfig) : null), [teamConfig])
-  const targetRepo: RepoRef = target === 'team' && teamRef ? teamRef : PUBLIC_REPO
+  const selectedTeam = useMemo(
+    () => (teams ?? []).find((connection) => connectionKey(connection) === target) ?? null,
+    [teams, target],
+  )
+  const targetRepo: RepoRef = selectedTeam ? connectionRepo(selectedTeam) : PUBLIC_REPO
   const targetRepoName = repoFullName(targetRepo)
-  const targetAuth = target === 'team' ? teamAuth : auth
-  const teamUnavailable = target === 'team' && (!teamRef || !teamAuth)
-  const teamReadOnly = target === 'team' && teamConfig?.canPush === false
-  const targetReady = target === 'team' ? !teamUnavailable && !teamReadOnly : !!auth
+  const targetAuth = selectedTeam ? selectedTeam.auth : auth
+  const teamUnavailable = target !== 'public' && !selectedTeam
+  const teamReadOnly = selectedTeam?.config.canPush === false
+  const targetReady = selectedTeam ? !teamReadOnly : target === 'public' ? !!auth : false
   /**
    * Credential overrides typed for one repository must never be restored into
-   * the other's form, so a draft belongs to one target (and one team repo).
+   * another's form, so a draft belongs to one target (and one team repo).
    */
-  const draftKey =
-    target === 'team' ? `${workflow.id}@${teamRef ? repoFullName(teamRef) : 'team'}` : workflow.id
+  const draftKey = target === 'public' ? workflow.id : `${workflow.id}@${target}`
   const draftKeyRef = useRef(draftKey)
   draftKeyRef.current = draftKey
 
@@ -466,14 +469,18 @@ export default function PublishWorkflowDialog({
   /** Where the current listing lives; null until the team connection loads. */
   const publishedRepo = useMemo<RepoRef | null>(() => {
     if (publishedRepoName === MARKETPLACE_REPO_FULL) return PUBLIC_REPO
-    return teamRef && repoFullName(teamRef) === publishedRepoName ? teamRef : null
-  }, [publishedRepoName, teamRef])
+    const connection = (teams ?? []).find((entry) => connectionKey(entry) === publishedRepoName)
+    return connection ? connectionRepo(connection) : null
+  }, [publishedRepoName, teams])
 
   useEffect(() => {
     if (!publishedSlug || !publishedRepo) return
+    const publishedAuth = (teams ?? []).find(
+      (entry) => connectionKey(entry) === publishedRepoName,
+    )?.auth
     const access: RepoReadAccess | undefined =
-      publishedRepo !== PUBLIC_REPO && teamAuth
-        ? { client: new GitHubClient({ token: teamAuth.token }) }
+      publishedRepo !== PUBLIC_REPO && publishedAuth
+        ? { client: new GitHubClient({ token: publishedAuth.token }) }
         : undefined
     if (publishedRepo !== PUBLIC_REPO && !access) return
     let cancelled = false
@@ -521,7 +528,7 @@ export default function PublishWorkflowDialog({
     return () => {
       cancelled = true
     }
-  }, [publishedSlug, publishedRepo, teamAuth])
+  }, [publishedSlug, publishedRepo, publishedRepoName, teams])
 
   const addImages = async (files: FileList | null): Promise<void> => {
     if (!files || files.length === 0) return
@@ -636,7 +643,7 @@ export default function PublishWorkflowDialog({
     setPublishError(null)
     setBusy(true)
     try {
-      const isTeam = target === 'team'
+      const isTeam = target !== 'public'
       let ready = prepared
       if (!ready) {
         ready = await preparePublish(
@@ -675,7 +682,9 @@ export default function PublishWorkflowDialog({
       resultRef.current = pushed
       void clearDraft(draftKeyRef.current).catch(() => {})
       if (pushed.merged) {
-        void invalidateCatalogCache(isTeam ? TEAM_CATALOG_CACHE_KEY : undefined).catch(() => {})
+        void invalidateCatalogCache(isTeam ? teamCatalogCacheKey(targetRepo) : undefined).catch(
+          () => {},
+        )
       }
       onPublished?.(pushed)
     } catch (error) {
@@ -744,11 +753,15 @@ export default function PublishWorkflowDialog({
             value={target}
           >
             <option value="public">{t.marketplacePublishTargetPublic}</option>
-            <option value="team">{t.marketplacePublishTargetTeam}</option>
+            {(teams ?? []).map((connection) => (
+              <option key={connectionKey(connection)} value={connectionKey(connection)}>
+                {t.marketplacePublishTargetTeam({ repo: connectionKey(connection) })}
+              </option>
+            ))}
           </select>
         </label>
       )}
-      {!(target === 'team' && teamUnavailable) && (
+      {!(target !== 'public' && teamUnavailable) && (
         <p className="mb-3 text-[12px] leading-snug text-muted">
           {t.marketplacePublishRepoHint({ repo: targetRepoName })}
         </p>
@@ -766,11 +779,11 @@ export default function PublishWorkflowDialog({
           )}
           <p className="mt-1 mb-0 text-[12px] text-muted">{result.prUrl}</p>
         </div>
-      ) : (target === 'team' ? teamConfig === undefined : auth === undefined) ? (
+      ) : (target !== 'public' ? teams === undefined : auth === undefined) ? (
         <p className="m-0 text-[12.5px] text-muted">{t.marketplaceConnectLoading}</p>
       ) : (
         <>
-          {target === 'team' ? (
+          {target !== 'public' ? (
             <section className="mb-4 rounded-lg border border-border bg-panel-2 p-3">
               <h3 className="m-0 text-[12.5px] font-semibold text-ink">
                 {t.marketplaceConnectTitle}
@@ -785,7 +798,7 @@ export default function PublishWorkflowDialog({
                     <span className="text-[12.5px] text-ink">
                       {t.marketplacePublishTeamConnected({
                         repo: targetRepoName,
-                        login: teamAuth?.login ?? '',
+                        login: selectedTeam?.auth.login ?? '',
                       })}
                     </span>
                   </div>

@@ -1,7 +1,7 @@
 # 团队工作流共享（私有 GitHub 仓库）设计
 
 - 日期：2026-10-27
-- 状态：已实现（2026-10-27）
+- 状态：已实现（2026-10-27）；单仓库约束已被 `specs/2026-10-28-team-multi-repo-design.md` 取代（缓存键现为 `teamCatalog:<owner>/<repo>`）
 - 相关：`specs/2026-10-25-workflow-marketplace-design.md`、`src/lib/marketplace/**`
 
 ## 1. 背景与目标

@@ -1,11 +1,13 @@
 /**
- * Settings card: connect the panel to a private team repository.
+ * Settings card: connect the panel to private team repositories.
  *
- * The card owns the whole lifecycle of the connection — probe, store, warn,
- * disconnect — because the repo address and token are a single unit: a token
- * without its repository is useless and a repository without a token only
- * produces 404s. Browsing and applying happen in the marketplace tab; this
- * card never reads workflows itself.
+ * The card owns the whole lifecycle of every connection — probe, store, warn,
+ * disconnect — because a repository address and its token are a single unit: a
+ * token without its repository is useless and a repository without a token only
+ * produces 404s. A user can belong to several teams, each with its own token, so
+ * the card lists what is connected and keeps the form ready for one more.
+ * Browsing and applying happen in the marketplace tab; this card never reads
+ * workflows itself.
  *
  * Tailwind semantic tokens only (light + dark).
  *
@@ -13,19 +15,19 @@
  */
 
 import { useEffect, useState, type ReactElement } from 'react'
-import { TEAM_CATALOG_CACHE_KEY, invalidateCatalogCache } from '../lib/marketplace/catalog'
+import { teamCatalogCacheKey, invalidateCatalogCache } from '../lib/marketplace/catalog'
 import { GitHubClient } from '../lib/marketplace/github-client'
 import { parseRepoFullName } from '../lib/marketplace/repo'
 import {
   clearTeamConnection,
-  getTeamAuth,
-  getTeamRepo,
+  connectionKey,
+  getTeamConnections,
   resolveTeamConnection,
   setTeamConnection,
-  type TeamRepoConfig,
+  type TeamConnection,
 } from '../lib/marketplace/team'
 import { isClassicToken } from '../lib/marketplace/token'
-import { MarketplaceError, type MarketplaceAuth } from '../lib/marketplace/types'
+import { MarketplaceError } from '../lib/marketplace/types'
 import { PRIMARY_BUTTON, SECONDARY_BUTTON } from '../ui/button-styles'
 import { marketplaceErrorMessage } from './marketplace-errors'
 import { useT } from './i18n'
@@ -35,30 +37,29 @@ const TOKEN_URL =
 
 interface Props {
   /** Test/preview seam: skip reading `chrome.storage.local`. */
-  initial?: { config: TeamRepoConfig | null; auth: MarketplaceAuth | null }
+  initialConnections?: TeamConnection[]
 }
 
-export default function TeamSharingCard({ initial }: Props): ReactElement {
+export default function TeamSharingCard({ initialConnections }: Props): ReactElement {
   const t = useT()
-  const [config, setConfig] = useState<TeamRepoConfig | null | undefined>(initial?.config)
-  const [auth, setAuth] = useState<MarketplaceAuth | null>(initial?.auth ?? null)
+  const [connections, setConnections] = useState<TeamConnection[] | undefined>(initialConnections)
   const [repoInput, setRepoInput] = useState('')
   const [tokenInput, setTokenInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Card-level error for a failed disconnect; connect errors stay in the form. */
+  const [listError, setListError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (initial) return
+    if (initialConnections) return
     let cancelled = false
-    void Promise.all([getTeamRepo(), getTeamAuth()]).then(([storedConfig, storedAuth]) => {
-      if (cancelled) return
-      setConfig(storedConfig)
-      setAuth(storedAuth)
+    void getTeamConnections().then((stored) => {
+      if (!cancelled) setConnections(stored)
     })
     return () => {
       cancelled = true
     }
-  }, [initial])
+  }, [initialConnections])
 
   const connect = async (): Promise<void> => {
     setError(null)
@@ -81,11 +82,13 @@ export default function TeamSharingCard({ initial }: Props): ReactElement {
         token,
       )
       await setTeamConnection(resolved.config, resolved.auth)
-      // A different repository has a different catalog; keeping the old cache
-      // would show the previous team's workflows for up to two hours.
-      await invalidateCatalogCache(TEAM_CATALOG_CACHE_KEY)
-      setConfig(resolved.config)
-      setAuth(resolved.auth)
+      // Only this repository's catalog is stale after (re)connecting it.
+      await invalidateCatalogCache(teamCatalogCacheKey(resolved.config))
+      setConnections((current) => {
+        const key = connectionKey(resolved)
+        const rest = (current ?? []).filter((entry) => connectionKey(entry) !== key)
+        return [...rest, resolved]
+      })
       setRepoInput('')
       setTokenInput('')
     } catch (caught) {
@@ -99,49 +102,66 @@ export default function TeamSharingCard({ initial }: Props): ReactElement {
     }
   }
 
-  const disconnect = async (): Promise<void> => {
-    setError(null)
+  const disconnect = async (connection: TeamConnection): Promise<void> => {
+    setListError(null)
+    const key = connectionKey(connection)
     try {
-      await clearTeamConnection()
-      await invalidateCatalogCache(TEAM_CATALOG_CACHE_KEY)
-      setConfig(null)
-      setAuth(null)
+      await clearTeamConnection(key)
+      await invalidateCatalogCache(teamCatalogCacheKey(connection.config))
+      setConnections((current) => (current ?? []).filter((entry) => connectionKey(entry) !== key))
     } catch (caught) {
-      setError(marketplaceErrorMessage(t, caught))
+      setListError(marketplaceErrorMessage(t, caught))
     }
   }
 
+  const connected = connections ?? []
   return (
     <div className="mb-2.5 rounded-[10px] border border-border bg-panel p-3">
       <span className="font-semibold">{t.settingsTeamTitle}</span>
       <p className="mt-1.5 mb-2.5 text-[11px] leading-relaxed text-muted">{t.settingsTeamIntro}</p>
-      {config && (
-        <div>
-          <p className="m-0 text-[12px] leading-relaxed text-ink">
-            {t.settingsTeamConnected({
-              repo: `${config.owner}/${config.repo}`,
-              login: auth?.login ?? '',
-            })}
-          </p>
-          {config.isPublic && (
-            <p className="mt-1 mb-0 text-[11px] leading-relaxed text-warn">
-              {t.settingsTeamPublicWarning}
-            </p>
-          )}
-          {!config.canPush && (
-            <p className="mt-1 mb-0 text-[11px] leading-relaxed text-warn">
-              {t.settingsTeamReadOnlyWarning}
-            </p>
-          )}
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            <button className={SECONDARY_BUTTON} onClick={() => void disconnect()} type="button">
-              {t.settingsTeamDisconnect}
-            </button>
-          </div>
-        </div>
+
+      {connected.length > 0 && (
+        <ul className="mb-2.5 flex list-none flex-col gap-1.5 p-0">
+          {connected.map((connection) => {
+            const key = connectionKey(connection)
+            return (
+              <li className="rounded-md border border-border bg-panel-2 p-2" key={key}>
+                <p className="m-0 text-[12px] leading-relaxed text-ink">
+                  {t.settingsTeamConnected({ repo: key, login: connection.auth.login })}
+                </p>
+                {connection.config.isPublic && (
+                  <p className="mt-1 mb-0 text-[11px] leading-relaxed text-warn">
+                    {t.settingsTeamPublicWarning}
+                  </p>
+                )}
+                {!connection.config.canPush && (
+                  <p className="mt-1 mb-0 text-[11px] leading-relaxed text-warn">
+                    {t.settingsTeamReadOnlyWarning}
+                  </p>
+                )}
+                <button
+                  className={`${SECONDARY_BUTTON} mt-2`}
+                  onClick={() => void disconnect(connection)}
+                  type="button"
+                >
+                  {t.settingsTeamDisconnect}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
       )}
-      {config === null && (
+      {listError && (
+        <p className="mt-0 mb-2 text-[11.5px] leading-relaxed text-err" role="alert">
+          {listError}
+        </p>
+      )}
+
+      {connections !== undefined && (
         <div className="flex flex-col gap-2">
+          {connected.length > 0 && (
+            <span className="text-[12px] font-medium text-muted">{t.settingsTeamAddAnother}</span>
+          )}
           <label className="block">
             <span className="mb-1 block text-[12px] font-medium text-muted">
               {t.settingsTeamRepoLabel}
@@ -198,11 +218,6 @@ export default function TeamSharingCard({ initial }: Props): ReactElement {
             </button>
           </div>
         </div>
-      )}
-      {config && error && (
-        <p className="mt-1.5 mb-0 text-[11.5px] leading-relaxed text-err" role="alert">
-          {error}
-        </p>
       )}
     </div>
   )

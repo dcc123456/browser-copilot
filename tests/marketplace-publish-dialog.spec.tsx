@@ -12,7 +12,7 @@ import { I18nProvider } from '../src/sidepanel/i18n'
 import PublishWorkflowDialog, { connectFailureText } from '../src/sidepanel/PublishWorkflowDialog'
 import { messagesFor, type Locale } from '../src/lib/i18n'
 import { MarketplaceError } from '../src/lib/marketplace/types'
-import type { TeamRepoConfig } from '../src/lib/marketplace/team'
+import type { TeamConnection, TeamRepoConfig } from '../src/lib/marketplace/team'
 import type { Workflow } from '../src/lib/workflow/types'
 
 function makeWorkflow(): Workflow {
@@ -43,7 +43,7 @@ function render(
   options: {
     workflow?: Workflow
     library?: Workflow[]
-    team?: { config: TeamRepoConfig; auth: { token: string; login: string } } | null
+    teams?: TeamConnection[] | null
   } = {},
 ): string {
   const workflow = options.workflow ?? makeWorkflow()
@@ -56,7 +56,7 @@ function render(
         library: options.library ?? [workflow],
         onClose: () => {},
         initialAuth,
-        initialTeam: options.team ?? null,
+        initialTeams: options.teams ?? null,
       }),
     ),
   )
@@ -240,7 +240,7 @@ describe('prefilling a published workflow', () => {
             library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
-            initialTeam: null,
+            initialTeams: null,
           }),
         ),
       )
@@ -315,7 +315,7 @@ describe('prefilling a published workflow', () => {
             library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
-            initialTeam: null,
+            initialTeams: null,
           }),
         ),
       )
@@ -382,7 +382,7 @@ describe('prefilling a published workflow', () => {
             library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
-            initialTeam: null,
+            initialTeams: null,
           }),
         ),
       )
@@ -422,7 +422,7 @@ describe('prefilling a published workflow', () => {
             library: [makeWorkflow()],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
-            initialTeam: null,
+            initialTeams: null,
           }),
         ),
       )
@@ -463,7 +463,7 @@ describe('prefilling a published workflow', () => {
             library: [makeWorkflow()],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
-            initialTeam: null,
+            initialTeams: null,
           }),
         ),
       )
@@ -515,7 +515,7 @@ describe('publish target', () => {
   it('opens on the team target for a workflow last published there', () => {
     const markup = render(null, 'en', {
       workflow: teamWorkflow(),
-      team: { config: CONFIG, auth: TEAM_AUTH },
+      teams: [{ config: CONFIG, auth: TEAM_AUTH }],
     })
 
     expect(markup).toContain('Publishing to acme/workflows as @writer.')
@@ -526,8 +526,29 @@ describe('publish target', () => {
     expect(markup).toContain('>Publish</button>')
   })
 
+  it('offers every connected team as a target, opening on the last one used', () => {
+    const markup = render(null, 'en', {
+      workflow: teamWorkflow(),
+      teams: [
+        { config: CONFIG, auth: TEAM_AUTH },
+        {
+          config: { ...CONFIG, owner: 'beta', repo: 'automations', branch: 'trunk' },
+          auth: { token: `ghp_${'c'.repeat(30)}`, login: 'writer' },
+        },
+      ],
+    })
+
+    expect(markup).toContain('<option value="public">Public marketplace</option>')
+    expect(markup).toContain(
+      '<option value="acme/workflows" selected="">Team repository · acme/workflows</option>',
+    )
+    expect(markup).toContain(
+      '<option value="beta/automations">Team repository · beta/automations</option>',
+    )
+  })
+
   it('stops when no team repository is connected', () => {
-    const markup = render(null, 'en', { workflow: teamWorkflow(), team: null })
+    const markup = render(null, 'en', { workflow: teamWorkflow(), teams: null })
 
     expect(markup).toContain('No team repository is connected.')
     expect(markup).toMatch(/<button[^>]*disabled[^>]*>Publish<\/button>/)
@@ -536,7 +557,7 @@ describe('publish target', () => {
   it('blocks a read-only team member from publishing', () => {
     const markup = render(null, 'en', {
       workflow: teamWorkflow(),
-      team: { config: { ...CONFIG, canPush: false }, auth: TEAM_AUTH },
+      teams: [{ config: { ...CONFIG, canPush: false }, auth: TEAM_AUTH }],
     })
 
     expect(markup).toContain('publishing needs write access')
@@ -657,7 +678,7 @@ describe('publish drafts', () => {
   function mount(
     options: {
       workflow?: Workflow
-      team?: { config: TeamRepoConfig; auth: { token: string; login: string } } | null
+      teams?: TeamConnection[] | null
     } = {},
   ): void {
     const workflow = options.workflow ?? makeWorkflow()
@@ -674,7 +695,7 @@ describe('publish drafts', () => {
             library: [workflow],
             onClose: () => {},
             initialAuth: { token: `ghp_${'a'.repeat(30)}`, login: 'octocat' },
-            initialTeam: options.team === undefined ? null : options.team,
+            initialTeams: options.teams === undefined ? null : options.teams,
           }),
         ),
       )
@@ -687,7 +708,7 @@ describe('publish drafts', () => {
     })
   }
 
-  async function chooseTarget(value: 'public' | 'team'): Promise<void> {
+  async function chooseTarget(value: 'public' | `${string}/${string}`): Promise<void> {
     const select = container.querySelector(
       'select[aria-label="Publish to"]',
     ) as HTMLSelectElement | null
@@ -794,7 +815,7 @@ describe('publish drafts', () => {
     seedTwoTargets()
     mount({
       workflow: teamWorkflow(),
-      team: { config: TEAM_CONFIG, auth: TEAM_AUTH },
+      teams: [{ config: TEAM_CONFIG, auth: TEAM_AUTH }],
     })
     await settle()
 
@@ -808,7 +829,7 @@ describe('publish drafts', () => {
   })
 
   it('saves a team-target draft under its own key', async () => {
-    mount({ workflow: teamWorkflow(), team: { config: TEAM_CONFIG, auth: TEAM_AUTH } })
+    mount({ workflow: teamWorkflow(), teams: [{ config: TEAM_CONFIG, auth: TEAM_AUTH }] })
     await settle()
     await typeTitle('Half-written title')
 
@@ -823,10 +844,10 @@ describe('publish drafts', () => {
   })
 
   it('keeps the outgoing target’s draft when switching', async () => {
-    mount({ team: { config: TEAM_CONFIG, auth: TEAM_AUTH } })
+    mount({ teams: [{ config: TEAM_CONFIG, auth: TEAM_AUTH }] })
     await typeTitle('Half-written title')
 
-    await chooseTarget('team')
+    await chooseTarget('acme/workflows')
 
     const drafts = store.get('marketplaceDrafts') as Record<string, { title: string }>
     expect(drafts['local-1']?.title).toBe('Half-written title')

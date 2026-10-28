@@ -51,10 +51,10 @@ import PublishWorkflowDialog from './PublishWorkflowDialog'
 import { installFromCard, type InstallSource } from './marketplace-install'
 import { marketplaceErrorMessage } from './marketplace-errors'
 import { pendingUpdates, removedSources } from '../lib/marketplace/apply'
-import { chromeCatalogCache, loadCatalog, TEAM_CATALOG_CACHE_KEY } from '../lib/marketplace/catalog'
+import { chromeCatalogCache, loadCatalog, teamCatalogCacheKey } from '../lib/marketplace/catalog'
 import { GitHubClient } from '../lib/marketplace/github-client'
 import { PUBLIC_REPO, repoFullName } from '../lib/marketplace/repo'
-import { getTeamAuth, getTeamRepo, teamRepoRef } from '../lib/marketplace/team'
+import { connectionRepo, getTeamConnection, getTeamConnections } from '../lib/marketplace/team'
 import {
   MARKETPLACE_CACHE_TTL_MS,
   MARKETPLACE_REPO_FULL,
@@ -532,8 +532,8 @@ export default function WorkflowsTab() {
   const nextUpdateCheckRef = useRef(0)
 
   /**
-   * Reads the public and team catalogs (30-minute cached) and marks installed
-   * workflows the publisher has moved ahead of.
+   * Reads the public and every connected team catalog (30-minute cached) and
+   * marks installed workflows the publisher has moved ahead of.
    *
    * The tab refreshes every 5s, so the check is throttled: a normal pass costs
    * nothing beyond the cached catalog reads, and an offline failure waits ten
@@ -545,17 +545,14 @@ export default function WorkflowsTab() {
     if (Date.now() < nextUpdateCheckRef.current) return
     nextUpdateCheckRef.current = Date.now() + MARKETPLACE_CACHE_TTL_MS
 
-    const sourceOf = (wf: Workflow): string => wf.marketplace?.repo ?? MARKETPLACE_REPO_FULL
-    const publicFlows = list.filter((wf) => sourceOf(wf) === MARKETPLACE_REPO_FULL)
-    const [teamConfig, teamAuth] = await Promise.all([getTeamRepo(), getTeamAuth()])
-    const teamRepo = teamConfig ? teamRepoRef(teamConfig) : null
-    const teamRepoName = teamRepo ? repoFullName(teamRepo) : null
-    const teamFlows = teamRepoName ? list.filter((wf) => sourceOf(wf) === teamRepoName) : []
-
-    const publicTask: Promise<{
+    interface SourceCheck {
       updates: Record<string, MarketplaceCard>
       removed: Set<string>
-    }> | null =
+    }
+    const sourceOf = (wf: Workflow): string => wf.marketplace?.repo ?? MARKETPLACE_REPO_FULL
+    const publicFlows = list.filter((wf) => sourceOf(wf) === MARKETPLACE_REPO_FULL)
+
+    const publicTask: Promise<SourceCheck> | null =
       publicFlows.length > 0
         ? (async () => {
             const catalog = await loadCatalog({
@@ -573,44 +570,44 @@ export default function WorkflowsTab() {
           })()
         : null
 
-    const teamTask: Promise<{
-      updates: Record<string, MarketplaceCard>
-      removed: Set<string>
-    }> | null =
-      teamRepo && teamAuth && teamFlows.length > 0
-        ? (async () => {
-            const client = new GitHubClient({ token: teamAuth.token })
-            const catalog = await loadCatalog({
-              client,
-              cache: chromeCatalogCache(TEAM_CATALOG_CACHE_KEY),
-              repo: teamRepo,
-              access: { client },
-              includeEngagement: false,
-            })
-            return {
-              updates: pendingUpdates(teamFlows, catalog.cards, repoFullName(teamRepo)),
-              removed: removedSources(
-                teamFlows,
-                catalog.cards,
-                !catalog.truncated && !catalog.stale,
-                repoFullName(teamRepo),
-              ),
-            }
-          })()
-        : null
+    // One task per connected team that actually supplied an installed workflow.
+    const connections = await getTeamConnections()
+    const teamTasks: Array<Promise<SourceCheck>> = []
+    for (const connection of connections) {
+      const repo = connectionRepo(connection)
+      const repoName = repoFullName(repo)
+      const flows = list.filter((wf) => sourceOf(wf) === repoName)
+      if (flows.length === 0) continue
+      teamTasks.push(
+        (async () => {
+          const client = new GitHubClient({ token: connection.auth.token })
+          const catalog = await loadCatalog({
+            client,
+            cache: chromeCatalogCache(teamCatalogCacheKey(repo)),
+            repo,
+            access: { client },
+            includeEngagement: false,
+          })
+          return {
+            updates: pendingUpdates(flows, catalog.cards, repoName),
+            removed: removedSources(
+              flows,
+              catalog.cards,
+              !catalog.truncated && !catalog.stale,
+              repoName,
+            ),
+          }
+        })(),
+      )
+    }
 
-    const tasks = [publicTask, teamTask].filter(
-      (task): task is Exclude<typeof task, null> => task !== null,
+    const tasks = [publicTask, ...teamTasks].filter(
+      (task): task is Promise<SourceCheck> => task !== null,
     )
     if (tasks.length === 0) return
     const results = await Promise.allSettled(tasks)
     const succeeded = results.filter(
-      (
-        entry,
-      ): entry is PromiseFulfilledResult<{
-        updates: Record<string, MarketplaceCard>
-        removed: Set<string>
-      }> => entry.status === 'fulfilled',
+      (entry): entry is PromiseFulfilledResult<SourceCheck> => entry.status === 'fulfilled',
     )
     if (succeeded.length === 0) {
       // Offline: keep the last known state, no banner for an unasked check.
@@ -649,15 +646,14 @@ export default function WorkflowsTab() {
       const repoName = wf.marketplace?.repo ?? MARKETPLACE_REPO_FULL
       let source: InstallSource = { repo: PUBLIC_REPO }
       if (repoName !== MARKETPLACE_REPO_FULL) {
-        const [config, teamToken] = await Promise.all([getTeamRepo(), getTeamAuth()])
-        const repo = config ? teamRepoRef(config) : null
-        if (!repo || !teamToken || repoFullName(repo) !== repoName) {
+        const connection = await getTeamConnection(repoName)
+        if (!connection) {
           setBanner({ kind: 'error', text: t.settingsTeamRepoNotFound })
           return
         }
         source = {
-          repo,
-          access: { client: new GitHubClient({ token: teamToken.token }) },
+          repo: connectionRepo(connection),
+          access: { client: new GitHubClient({ token: connection.auth.token }) },
         }
       }
       const plan = await installFromCard(card, wf, workflows, source)

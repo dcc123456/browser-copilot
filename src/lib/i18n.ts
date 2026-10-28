@@ -91,6 +91,7 @@ export interface Messages {
   settingsTeamConnecting: string
   settingsTeamConnected: ({ repo, login }: { repo: string; login: string }) => string
   settingsTeamDisconnect: string
+  settingsTeamAddAnother: string
   settingsTeamRepoInvalid: string
   settingsTeamTokenInvalid: string
   settingsTeamRepoNotFound: string
@@ -267,7 +268,7 @@ export interface Messages {
   marketplacePublishRepoHint: (params: { repo: string }) => string
   marketplacePublishTarget: string
   marketplacePublishTargetPublic: string
-  marketplacePublishTargetTeam: string
+  marketplacePublishTargetTeam: (params: { repo: string }) => string
   marketplacePublishTeamMissing: string
   marketplacePublishTeamConnected: (params: { repo: string; login: string }) => string
   /** Success banner after the pull request is opened. */
@@ -383,6 +384,9 @@ export interface Messages {
   marketplaceTeamIntro: string
   marketplaceTeamNotConnected: string
   marketplaceTeamNotConnectedHint: string
+  marketplaceTeamFilter: string
+  marketplaceTeamFilterAll: string
+  marketplaceTeamPartialFailed: (params: { repos: string }) => string
   marketplaceAttachmentFailed: string
   marketplaceSearchPlaceholder: string
   marketplaceFilterAll: string
@@ -1817,7 +1821,7 @@ const en: Messages = {
   // Settings: team workflow sharing (private GitHub repository)
   settingsTeamTitle: 'Team sharing',
   settingsTeamIntro:
-    'Connect a private GitHub repository to share workflows only with its collaborators. Create the repository yourself, invite teammates as collaborators, then connect it here with your own token.',
+    'Connect one or more private GitHub repositories to share workflows only with their collaborators. Create each repository yourself, invite teammates, then connect it here with your own token. You can belong to several teams at once.',
   settingsTeamRepoLabel: 'Repository',
   settingsTeamRepoPlaceholder: 'your-team/workflows',
   settingsTeamTokenLabel: 'GitHub token',
@@ -1829,6 +1833,7 @@ const en: Messages = {
   settingsTeamConnecting: 'Connecting…',
   settingsTeamConnected: ({ repo, login }) => `Connected to ${repo} as @${login}.`,
   settingsTeamDisconnect: 'Disconnect',
+  settingsTeamAddAnother: 'Connect another repository',
   settingsTeamRepoInvalid: 'Enter the repository as owner/name.',
   settingsTeamTokenInvalid: 'Enter a classic GitHub token that starts with ghp_.',
   settingsTeamRepoNotFound: 'Repository not found, or this token cannot access it.',
@@ -2005,7 +2010,7 @@ const en: Messages = {
     `Opens a pull request against ${repo}. It is merged automatically when your token can write to that repository; otherwise the maintainer merges it.`,
   marketplacePublishTarget: 'Publish to',
   marketplacePublishTargetPublic: 'Public marketplace',
-  marketplacePublishTargetTeam: 'Team repository',
+  marketplacePublishTargetTeam: ({ repo }) => `Team repository · ${repo}`,
   marketplacePublishTeamMissing:
     'No team repository is connected. Connect one in Settings → Team sharing first.',
   marketplacePublishTeamConnected: ({ repo, login }) => `Publishing to ${repo} as @${login}.`,
@@ -2134,6 +2139,10 @@ const en: Messages = {
   marketplaceTeamNotConnected: 'Team sharing is not connected.',
   marketplaceTeamNotConnectedHint:
     'Open Settings → Team sharing to connect your team’s private GitHub repository.',
+  marketplaceTeamFilter: 'Team repository',
+  marketplaceTeamFilterAll: 'All teams',
+  marketplaceTeamPartialFailed: ({ repos }) =>
+    `Could not read ${repos}. Its workflows are missing from this list.`,
   marketplaceAttachmentFailed: 'Could not download the attachment.',
   marketplaceSearchPlaceholder: 'Search workflows',
   marketplaceFilterAll: 'All categories',
@@ -3469,7 +3478,7 @@ const zhCN: Messages = {
   // Settings: team workflow sharing (private GitHub repository)
   settingsTeamTitle: '团队共享',
   settingsTeamIntro:
-    '连接一个私有 GitHub 仓库，只把工作流共享给该仓库的协作者。仓库由你自己创建并邀请团队成员为协作者，然后在这里用自己的令牌连接。',
+    '连接一个或多个私有 GitHub 仓库，只把工作流共享给该仓库的协作者。仓库由你自己创建并邀请成员，然后在这里用自己的令牌连接；可以同时属于多个团队。',
   settingsTeamRepoLabel: '仓库',
   settingsTeamRepoPlaceholder: 'your-team/workflows',
   settingsTeamTokenLabel: 'GitHub 令牌',
@@ -3481,6 +3490,7 @@ const zhCN: Messages = {
   settingsTeamConnecting: '正在连接…',
   settingsTeamConnected: ({ repo, login }) => `已连接到 ${repo}，身份 @${login}。`,
   settingsTeamDisconnect: '断开连接',
+  settingsTeamAddAnother: '再连接一个仓库',
   settingsTeamRepoInvalid: '仓库请按 owner/仓库名 的格式填写。',
   settingsTeamTokenInvalid: '请填写以 ghp_ 开头的 classic GitHub 令牌。',
   settingsTeamRepoNotFound: '找不到该仓库，或当前令牌无权访问。',
@@ -3649,7 +3659,7 @@ const zhCN: Messages = {
     `将向 ${repo} 提交一个 PR；令牌对该仓库有写权限时会自动合并，否则由维护者合并后才会出现在工作流广场中。`,
   marketplacePublishTarget: '发布到',
   marketplacePublishTargetPublic: '公共广场',
-  marketplacePublishTargetTeam: '团队仓库',
+  marketplacePublishTargetTeam: ({ repo }) => `团队仓库 · ${repo}`,
   marketplacePublishTeamMissing: '还没有连接团队仓库，请先在「设置 → 团队共享」中连接。',
   marketplacePublishTeamConnected: ({ repo, login }) => `将以 @${login} 的身份发布到 ${repo}。`,
   marketplacePublishBanner: ({ number }) => `已创建 PR #${number}。`,
@@ -3771,6 +3781,9 @@ const zhCN: Messages = {
   marketplaceTeamIntro: '团队仓库内共享的工作流。只有该仓库的协作者可以读取。',
   marketplaceTeamNotConnected: '还没有连接团队仓库。',
   marketplaceTeamNotConnectedHint: '在「设置 → 团队共享」中连接团队私有 GitHub 仓库。',
+  marketplaceTeamFilter: '团队仓库',
+  marketplaceTeamFilterAll: '全部团队',
+  marketplaceTeamPartialFailed: ({ repos }) => `无法读取 ${repos}，该仓库的工作流未显示。`,
   marketplaceAttachmentFailed: '无法下载附件。',
   marketplaceSearchPlaceholder: '搜索工作流',
   marketplaceFilterAll: '全部分类',

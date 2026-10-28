@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added — Belong to several teams at once
+
+Team sharing is no longer a single repository. Settings can connect any number
+of private repositories, each with its own classic token — teams often live
+under different GitHub accounts, so a token belongs to one connection. The
+marketplace's Team view reads every connected repository and merges the
+results, adding a source filter (all teams, or one repository) once more than
+one is connected; each card keeps its own repository, so applying, updating
+and unpublishing go back where the workflow came from. A repository that fails
+to load only drops its own cards and is named in a banner. Publishing lists
+the public marketplace plus every connected repository as targets, reopens on
+the repository the workflow was last published to, and keeps drafts separate
+per repository. A connection made before this version keeps working and is
+migrated on the next change.
+
 ### Fixed — Republishing a workflow no longer fails as a conflict
 
 Updating a listing reused the GitHub Contents API call without the existing

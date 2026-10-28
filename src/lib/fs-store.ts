@@ -113,10 +113,18 @@ export const CONFIG_KEYS: ReadonlySet<string> = new Set([
   // The marketplace PAT is a credential: it must stay in chrome.storage.local
   // and never be written into the user's data folder (which may be synced).
   'marketplaceAuth',
-  // The team repository, its token, and its catalog snapshot. The token is a
-  // credential for the same reason as above; the address/cache are config.
+  // The team repositories and their tokens. The tokens are credentials for the
+  // same reason as above; the addresses are config. Their per-repository
+  // catalog snapshots are covered by the `teamCatalog:` prefix below.
+  'teamRepos',
+  'teamRepoAuths',
+  // The single-connection pair from before multiple teams were supported: read
+  // until the user's next write migrates it, and kept out of the directory so a
+  // migration can never lose a credential.
   'teamRepo',
   'teamRepoAuth',
+  // The single snapshot under the old key; ignored now, listed so a leftover
+  // copy is not mistaken for user content and migrated into the directory.
   'teamCatalog',
   // The marketplace catalog is a throwaway HTTP cache: rebuilding it costs a
   // few GitHub reads, and a synced copy would only go stale in the folder.
@@ -136,7 +144,10 @@ export const CONFIG_KEYS: ReadonlySet<string> = new Set([
 
 /** Whether `key` is extension configuration rather than user content. */
 export function isConfigKey(key: string): boolean {
-  return CONFIG_KEYS.has(key)
+  // Per-repository team snapshots (`teamCatalog:<owner>/<repo>`) are the same
+  // throwaway HTTP cache as `marketplaceCatalog`; keying them into the set is
+  // impossible because the address is only known at runtime.
+  return CONFIG_KEYS.has(key) || key.startsWith('teamCatalog:')
 }
 
 /** Whether a `chrome.storage.local` key belongs to one of the fallback structures. */
