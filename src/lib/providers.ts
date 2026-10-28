@@ -418,6 +418,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   autoRepairOnRun: boolean
   elementPickerEnabled: boolean
   elementPickerFormat: ElementPickerFormat
+  elementPickerHideCard: boolean
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -518,5 +519,7 @@ export function normalizeSettingsPayload(raw: unknown): {
     elementPickerEnabled:
       typeof value.elementPickerEnabled === 'boolean' ? value.elementPickerEnabled : false,
     elementPickerFormat: normalizeElementPickerFormat(value.elementPickerFormat),
+    elementPickerHideCard:
+      typeof value.elementPickerHideCard === 'boolean' ? value.elementPickerHideCard : false,
   }
 }

@@ -60,6 +60,7 @@ function settingsWith(provider: Partial<ProviderProfile>): Settings {
     autoRepairOnRun: false,
     elementPickerEnabled: false,
     elementPickerFormat: 'html',
+    elementPickerHideCard: false,
   } as Settings
 }
 

@@ -955,6 +955,7 @@ async function broadcastElementPicker(
   enabled: boolean,
   locale: 'en' | 'zh',
   format: ElementPickerFormat,
+  hideCard: boolean,
 ): Promise<void> {
   const tabs = await chrome.tabs.query({}).catch(() => [])
   await Promise.all(
@@ -973,6 +974,7 @@ async function broadcastElementPicker(
             enabled,
             locale,
             format,
+            hideCard,
           } satisfies ElementPickerControl,
           enabled ? contentScriptFile('element-picker-launcher') : undefined,
         )
@@ -1172,9 +1174,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           enabled: settings.elementPickerEnabled,
           locale: pickerLocale(settings.locale),
           format: settings.elementPickerFormat,
+          hideCard: settings.elementPickerHideCard,
         })
       })
-      .catch(() => sendResponse({ enabled: false, locale: 'en', format: 'html' }))
+      .catch(() => sendResponse({ enabled: false, locale: 'en', format: 'html', hideCard: false }))
     return true
   }
 
@@ -1203,8 +1206,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return
       }
 
-      // 2. Element picker start/verify/result/cancel.
-      const picker = await handlePickerMessage(message)
+      // 2. Element picker start/verify/result/cancel/selection.
+      const picker = await handlePickerMessage(message, sender?.tab?.id)
       if (picker.handled) {
         sendResponse(picker.response)
         return
@@ -1418,12 +1421,14 @@ async function handleCommand(
       if (
         previous.elementPickerEnabled !== settings.elementPickerEnabled ||
         previous.elementPickerFormat !== settings.elementPickerFormat ||
+        previous.elementPickerHideCard !== settings.elementPickerHideCard ||
         previous.locale !== settings.locale
       ) {
         void broadcastElementPicker(
           settings.elementPickerEnabled,
           pickerLocale(settings.locale),
           settings.elementPickerFormat,
+          settings.elementPickerHideCard,
         )
       }
       return { type: 'settings', settings }

@@ -60,6 +60,7 @@ function settingsWith(model: string, baseUrl: string): Settings {
     autoRepairOnRun: false,
     elementPickerEnabled: false,
     elementPickerFormat: 'html',
+    elementPickerHideCard: false,
   } as Settings
 }
 

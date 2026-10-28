@@ -594,7 +594,7 @@ root after build); the file does not need to sit inside the extension folder.
 > [`examples/local-agent/MCP-SETUP-PROMPT.md`](examples/local-agent/MCP-SETUP-PROMPT.md).
 
 Tools appear as `browser-copilot` MCP tools (`read_current_page`,
-`snapshot_page`, `click`, `fill`, `open_url`, `run_javascript`,
+`snapshot_page`, `read_selected_element`, `click`, `fill`, `open_url`, `run_javascript`,
 `recognize_image`, `get_secret`, `use_skill`, …). Security: the adapter binds
 loopback only; an optional shared token keeps other local processes out;
 passwords are filled via `get_secret` without their values ever reaching the

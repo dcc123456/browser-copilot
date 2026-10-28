@@ -331,6 +331,7 @@ function toMcpTools(tools) {
 const STATIC_TOOLS = [
   { name: 'read_current_page', description: 'Read the title, URL, selection, and visible text of the active tab.', properties: { maxChars: { type: 'number' } } },
   { name: 'snapshot_page', description: 'Read the active page AND list its interactive elements (buttons, links, inputs) with refs. Call before clicking or filling.', properties: { maxChars: { type: 'number' }, maxElements: { type: 'number' } } },
+  { name: 'read_selected_element', description: 'Read the element the user picked with the Browser Copilot crosshair button: CSS selector, tag, text and capped HTML, plus a ready `target` for click/fill.', properties: {} },
   { name: 'click', description: 'Click an element (button, link, tab, etc.) by its ref from a snapshot.', properties: { ref: { type: 'string' }, target: { type: 'object' }, label: { type: 'string' }, withScreenshot: { type: 'boolean' } } },
   { name: 'recognize_image', description: 'Recognize text/content of an image (CAPTCHA). Pass an `image` data URL/URL, a CSS `selector` to capture, or nothing to screenshot the page.', properties: { image: { type: 'string' }, selector: { type: 'string' }, prompt: { type: 'string' } } },
   { name: 'screenshot', description: 'Capture the page or an element and send it to the vision model for inspection.', properties: { target: { type: 'string' }, prompt: { type: 'string' } } },

@@ -11,6 +11,10 @@
  * for its own pickerId — so the background does NOT need to relay them (and
  * re-sending would re-enter the message listener). We simply acknowledge them.
  *
+ * `picker:selection` (copy mode) is different: it carries what the user picked
+ * so the local agent can act on it, and only the worker keeps that record
+ * (per sender tab, see `element-selection-store`).
+ *
  * @module background/picker-bridge
  */
 
@@ -18,6 +22,7 @@ import { startPicker } from '../inpage/element-picker'
 import { isInjectablePage } from '../lib/pages'
 import { resolveAutomationTab } from './driver'
 import { normalScopeFromWindowId, type ScopeWindow } from './automation-scope'
+import { rememberPickedElement } from './element-selection-store'
 
 export interface PickerStartMessage {
   type: 'picker:start'
@@ -110,9 +115,15 @@ async function injectPicker(args: {
  * Handle a runtime message for the picker protocol. Returns a discriminated
  * result so the single background listener can route exactly one response.
  */
-export async function handlePickerMessage(message: unknown): Promise<PickerHandleResult> {
+export async function handlePickerMessage(
+  message: unknown,
+  senderTabId?: number,
+): Promise<PickerHandleResult> {
   const msg = message as
-    PickerStartMessage | PickerVerifyMessage | { type: 'picker:result' | 'picker:cancel' }
+    | PickerStartMessage
+    | PickerVerifyMessage
+    | { type: 'picker:result' | 'picker:cancel' }
+    | { type: 'picker:selection'; selection?: unknown }
 
   if (msg.type === 'picker:start') {
     const response = await injectPicker({
@@ -136,6 +147,16 @@ export async function handlePickerMessage(message: unknown): Promise<PickerHandl
       windowId: msg.windowId,
     })
     return { handled: true, response }
+  }
+
+  if (msg.type === 'picker:selection') {
+    // The sender tab is the only tab this record belongs to. A message with no
+    // sender tab (e.g. from an extension page) cannot be keyed, so it is
+    // acknowledged and dropped.
+    if (typeof senderTabId === 'number') {
+      await rememberPickedElement(senderTabId, (msg as { selection?: unknown }).selection)
+    }
+    return { handled: true, response: { ok: true } }
   }
 
   if (msg.type === 'picker:result' || msg.type === 'picker:cancel') {

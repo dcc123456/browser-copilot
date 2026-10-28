@@ -122,6 +122,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoRepairOnRun: false,
   elementPickerEnabled: false,
   elementPickerFormat: 'html',
+  elementPickerHideCard: false,
 }
 
 /**
@@ -276,6 +277,8 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     elementPickerEnabled:
       typeof value.elementPickerEnabled === 'boolean' ? value.elementPickerEnabled : false,
     elementPickerFormat: normalizeElementPickerFormat(value.elementPickerFormat),
+    elementPickerHideCard:
+      typeof value.elementPickerHideCard === 'boolean' ? value.elementPickerHideCard : false,
   }
 }
 

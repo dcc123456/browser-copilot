@@ -23,6 +23,12 @@
  * view for a short beat before replying with the count — the reply raises the
  * editor window, so answering instantly would hide what was verified.
  *
+ * Copy mode can run `hideCard`: no card is drawn, the dim overlay and the
+ * highlight stay, and the first click confirms the element outright. Every copy
+ * confirmation also reports the element to the worker
+ * (`picker:selection` → `read_selected_element`), so a local agent can act on
+ * exactly what the user picked; the clipboard output stays unchanged.
+ *
  * IMPORTANT: this function is serialized via `func.toString()` and run in the
  * page world by chrome.scripting.executeScript. EVERYTHING it uses — styles,
  * icons, helpers — MUST be declared INSIDE the function body. Module-level
@@ -59,6 +65,12 @@ export interface PickerArgs {
    * debt; only new strings are localized.
    */
   locale?: 'en' | 'zh'
+  /**
+   * Copy mode only: render no card. The dim overlay and the highlight stay; the
+   * first click on an element confirms it outright (the page never sees the
+   * press), and Escape cancels. Set from the `elementPickerHideCard` setting.
+   */
+  hideCard?: boolean
 }
 
 /** Entry signature used by chrome.scripting.executeScript({ func }). */
@@ -73,6 +85,7 @@ export const startPicker: PickerStart = async (args) => {
     selector: initial = '',
     multiple = false,
     locale = 'en',
+    hideCard = false,
   } = args
 
   // --- styles (inlined so the serialized function is self-contained) --------
@@ -555,6 +568,9 @@ export const startPicker: PickerStart = async (args) => {
     confirmBtn.textContent = copyAction
     hintEl.textContent = STRINGS.copyHint(copyAction)
     countEl.textContent = STRINGS.copyLockHint
+    // Headless picking: the overlay and the highlight still show what is being
+    // aimed at; the card is only the confirm button, which a click replaces.
+    if (hideCard) card.style.display = 'none'
   }
 
   let locked: Element | null = null
@@ -619,6 +635,42 @@ export const startPicker: PickerStart = async (args) => {
       : copyFormat === 'text'
         ? visibleTextOf(el)
         : el.outerHTML
+
+  /** Caps for the payload the local agent reads back. A tool result is re-sent
+   *  every round, so the recording stays small; the worker truncates again. */
+  const MAX_REPORTED_TEXT = 2000
+  const MAX_REPORTED_HTML = 20_000
+
+  /**
+   * Reports the confirmed element to the worker so a local agent can read and
+   * act on it (`read_selected_element`). Independent of the clipboard: a refused
+   * copy still leaves the agent something to work with.
+   */
+  function reportSelection(el: Element): void {
+    const text = visibleTextOf(el)
+    const html = el.outerHTML
+    try {
+      void chrome.runtime
+        .sendMessage({
+          type: 'picker:selection',
+          selection: {
+            selector: selectorFor(el),
+            tag: el.tagName.toLowerCase(),
+            ...(el.id ? { id: el.id } : {}),
+            ...(el.classList.length ? { classes: Array.from(el.classList).slice(0, 12) } : {}),
+            text: text.slice(0, MAX_REPORTED_TEXT),
+            html: html.slice(0, MAX_REPORTED_HTML),
+            ...(html.length > MAX_REPORTED_HTML ? { htmlTruncated: true } : {}),
+            url: location.href,
+            title: document.title,
+            pickedAt: Date.now(),
+          },
+        })
+        .catch(() => {})
+    } catch {
+      /* the clipboard result must not depend on messaging being available */
+    }
+  }
 
   /** Copy mode: the target and its payload size, no selector machinery. */
   function refreshCopy() {
@@ -862,6 +914,11 @@ export const startPicker: PickerStart = async (args) => {
     swallowPress(e)
     // A click with no press at all (a synthetic `el.click()`) still picks.
     if (!pressed) lockTo(e)
+    // Headless copy mode has no confirm button, so the click that aimed is also
+    // the click that takes it. Committing here (not on pointerdown) keeps the
+    // whole gesture swallowed: cleanup() unbinds the listeners, and any later
+    // event of this same press would otherwise reach the page and activate it.
+    if (mode === 'copy' && hideCard) confirmPick()
   }
   /**
    * Mirrors src/lib/clipboard.ts. This function is serialized into the page, so
@@ -886,8 +943,8 @@ export const startPicker: PickerStart = async (args) => {
     }
   }
 
-  /** Brief confirmation after the card (and overlay) are gone. */
-  function showCopiedToast(text: string): void {
+  /** Brief confirmation (or failure) after the card (and overlay) are gone. */
+  function showCopiedToast(text: string, isError = false): void {
     document.getElementById('bc-element-picker-toast')?.remove()
     const toastHost = document.createElement('div')
     toastHost.id = 'bc-element-picker-toast'
@@ -901,9 +958,13 @@ export const startPicker: PickerStart = async (args) => {
           font: 13px -apple-system, "Segoe UI", Roboto, sans-serif; padding: 10px 14px;
           border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
           pointer-events: none; z-index: 2147483648; max-width: 70vw; }
+        .toast.is-error { background: #dc2626; }
         .check { color: #a7f3d0; display: inline-flex; flex: none; }
+        .toast.is-error .check { color: #fff; }
       </style>
-      <div class="toast"><span class="check">${ICON.check}</span><span data-role="toast-text"></span></div>`
+      <div class="toast${isError ? ' is-error' : ''}"><span class="check">${
+        isError ? ICON.close : ICON.check
+      }</span><span data-role="toast-text"></span></div>`
     const label = toastRoot.querySelector('[data-role="toast-text"]')
     if (label) label.textContent = text
     document.documentElement.appendChild(toastHost)
@@ -919,7 +980,18 @@ export const startPicker: PickerStart = async (args) => {
       const el = target()
       if (!el) return
       const value = copyValueFor(el)
-      if (!copyPlainText(value)) {
+      const copied = copyPlainText(value)
+      // Recorded before the copy result is judged: a refused clipboard must not
+      // rob the local agent of the element the user picked.
+      reportSelection(el)
+      if (!copied) {
+        // The inline note lives on the card; with the card hidden there is no
+        // retry affordance, so close and say so.
+        if (hideCard) {
+          cleanup()
+          showCopiedToast(STRINGS.copyFailed, true)
+          return
+        }
         noteEl.style.display = 'block'
         noteEl.style.color = '#dc2626'
         noteEl.textContent = STRINGS.copyFailed

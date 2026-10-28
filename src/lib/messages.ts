@@ -1191,6 +1191,8 @@ export type ElementPickerControl = {
   enabled: boolean
   locale: 'en' | 'zh'
   format: ElementPickerFormat
+  /** Pick without the card: the first click confirms the element. */
+  hideCard: boolean
 }
 
 /** Reply to `elementPicker.status`. */
@@ -1198,6 +1200,29 @@ export interface ElementPickerStatusResponse {
   enabled: boolean
   locale: 'en' | 'zh'
   format: ElementPickerFormat
+  hideCard: boolean
+}
+
+/**
+ * One element the user confirmed in copy mode, reported to the worker so the
+ * local agent can read and act on it (`read_selected_element`). Payload fields
+ * are capped in the picker AND re-capped by the worker's store.
+ */
+export interface PickedElement {
+  /** CSS selector the picker resolved to exactly this element. */
+  selector: string
+  tag: string
+  id?: string
+  classes?: string[]
+  /** Visible text, capped. */
+  text: string
+  /** `outerHTML`, capped; `htmlTruncated` marks a cut. */
+  html: string
+  htmlTruncated?: boolean
+  /** Page the element was picked on; a different current URL means stale. */
+  url: string
+  title: string
+  pickedAt: number
 }
 
 // --- Multi-window picker (unattended window policy = "ask") --------------------

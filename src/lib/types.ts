@@ -259,6 +259,12 @@ export interface Settings {
    * `'html'`.
    */
   elementPickerFormat: ElementPickerFormat
+  /**
+   * When on, picking shows only the dim overlay and the highlight — no card in
+   * the bottom-left corner. The first click on an element confirms it right
+   * away (copy + record for the local agent); Escape still cancels. Default off.
+   */
+  elementPickerHideCard: boolean
 }
 
 /** Payload the on-page element picker writes to the clipboard. */

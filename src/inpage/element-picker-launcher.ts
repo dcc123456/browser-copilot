@@ -47,6 +47,7 @@ type CopyFormat = ElementPickerControl['format']
 
 let locale: PickerLocale = 'en'
 let copyFormat: CopyFormat = 'html'
+let hideCard = false
 let enabled = false
 
 // --- instance ownership -------------------------------------------------------
@@ -123,7 +124,7 @@ function createHost(): HTMLElement {
     // A second click while the picker is open would stack listeners on the
     // same document; the open card is the signal to wait.
     if (document.getElementById('bc-element-picker')) return
-    void startPicker({ pickerId: PICKER_ID, mode: 'copy', copyFormat, locale })
+    void startPicker({ pickerId: PICKER_ID, mode: 'copy', copyFormat, locale, hideCard })
   })
   return host
 }
@@ -195,6 +196,7 @@ void chrome.runtime
     const status = response as ElementPickerStatusResponse | undefined
     locale = status?.locale === 'zh' ? 'zh' : 'en'
     copyFormat = copyFormatOf(status?.format)
+    hideCard = status?.hideCard === true
     enabled = status?.enabled === true
     if (enabled) mount()
   })
@@ -207,6 +209,7 @@ chrome.runtime.onMessage.addListener(
     if (msg?.type !== 'elementPicker.set') return
     locale = msg.locale === 'zh' ? 'zh' : 'en'
     copyFormat = copyFormatOf(msg.format)
+    hideCard = msg.hideCard === true
     enabled = msg.enabled === true
     if (enabled) mount()
     else unmount()

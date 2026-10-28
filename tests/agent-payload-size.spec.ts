@@ -78,8 +78,11 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
  * `create_scheduled_task` then learned cron (~200 chars: the kind enum entry,
  * the `expression` argument and its description). It rides the same `ops`
  * group, so again only this catalog cap moves. Measured 31_400 → 31_597.
+ * Raised 31_600 → 32_100 for `read_selected_element` (~430: the read tool that
+ * hands the model the element the user picked with the crosshair, plus a ready
+ * `target`; measured 32_026).
  */
-const MAX_CATALOG_CHARS = 31_600
+const MAX_CATALOG_CHARS = 32_100
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the
@@ -110,9 +113,11 @@ const MAX_CATALOG_CHARS = 31_600
  * schema (~340: the required array-of-`{name,value}` schema plus the
  * `workflow-file` file-field descriptions; `loop-breakpoint` stays out of the
  * operator set even though it gained an edit form, and the new prose was
- * compacted first — measured 62_201).
+ * compacted first — measured 62_201). Raised 62_300 → 62_700 for
+ * `read_selected_element` (measured 62_610): reads stay in workflow mode, and
+ * a picked selector is exactly what the operator schemas take as input.
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 62_300
+const MAX_WORKFLOW_ROUND1_CHARS = 62_700
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~37.6k; the smallest (`general`)
@@ -125,8 +130,10 @@ const MAX_WORKFLOW_ROUND1_CHARS = 62_300
  * Raised 37_650 → 37_900 with the round-1 budget (`file-path` — measured 37_808).
  * Kept at 37_900 for the `set-variable` schema (the largest category,
  * `interaction`, moved 37_808 → 37_875 because `upload-file` is in it).
+ * Raised 37_900 → 38_400 with the round-1 budget (`read_selected_element` —
+ * measured 38_304).
  */
-const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_900
+const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_400
 /**
  * The ceiling for the worst case the model can actually reach: every category
  * declared at once, which is the same set as `operators_author` (~42.9k of tool
@@ -140,8 +147,10 @@ const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 37_900
  * 59_900 → 61_500 with the round-1 budget (`parse-excel` — measured 61_445).
  * Raised 61_500 → 62_000 with the round-1 budget (`file-path` — measured 61_875).
  * Raised 62_000 → 62_300 with the round-1 budget (`set-variable` — measured 62_201).
+ * Raised 62_300 → 62_700 with the round-1 budget (`read_selected_element` —
+ * measured 62_610).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_300
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_700
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
@@ -153,8 +162,10 @@ const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_300
  * 61_000 → 62_550 with the round-1 budget (`parse-excel` — measured 62_492).
  * Raised 62_550 → 63_000 with the round-1 budget (`file-path` — measured 62_922).
  * Raised 63_000 → 63_300 with the round-1 budget (`set-variable` — measured 63_248).
+ * Raised 63_300 → 63_700 with the round-1 budget (`read_selected_element` —
+ * measured 63_657).
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 63_300
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 63_700
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
  * now deliberately carries EVERY operator schema, so workflow runs ~3× full

@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added — Let a local agent read the element you picked
+
+Picking an element now also records it for the assistant: the crosshair's copy
+confirmation reports the CSS selector, tag, visible text and capped HTML to the
+worker, and the new `read_selected_element` tool (MCP: `read_selected_element`)
+returns that record with a ready `target` for `click` / `fill`. A pick made on a
+different URL comes back flagged `stale` instead of being mistaken for the
+current page. The tool is listed in Settings under the assistant's tools, so it
+can be switched off like any other read tool.
+
+### Added — Hide the picker card
+
+Settings → page element picker has a new switch: hide the card. With it on,
+picking shows only the dim overlay and the element highlight; the first click on
+an element confirms it (copy + record) without a confirm button, and Escape
+still cancels. Hidden-card mode applies to the crosshair, not to the workflow
+editor's element picker, which still needs its card.
+
 ### Fixed — The two page buttons move as one
 
 Dragging the crosshair now moves the plugin icon with it, not only the other way

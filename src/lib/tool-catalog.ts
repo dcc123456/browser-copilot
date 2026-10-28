@@ -46,6 +46,12 @@ export const TOOL_META: ToolMeta[] = [
     warningKey: 'toolSnapshotWarn',
   },
   {
+    name: 'read_selected_element',
+    category: 'read',
+    labelKey: 'toolReadPicked',
+    warningKey: 'toolReadPickedWarn',
+  },
+  {
     name: 'list_tabs',
     category: 'nav',
     labelKey: 'toolListTabs',

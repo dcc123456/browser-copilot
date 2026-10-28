@@ -852,6 +852,15 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             <option value="html">{t.settingsElementPickerFormatHtml}</option>
           </select>
         </div>
+        <div className="mt-2.5">
+          <Switch
+            checked={settings.elementPickerHideCard}
+            label={t.settingsElementPickerHideCard}
+            onChange={(elementPickerHideCard) =>
+              void mutate({ type: 'settings.set', patch: { elementPickerHideCard } })
+            }
+          />
+        </div>
       </div>
 
       {/* --- Unattended window policy --- */}

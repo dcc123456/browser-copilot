@@ -157,6 +157,7 @@ import {
   waitForNetworkIdle,
 } from './cdp-monitor'
 import { activeTab, readActivePage } from './page'
+import { getPickedElement } from './element-selection-store'
 import { captureVisiblePage } from './capture'
 import { captureElementRobust } from './element-capture'
 import {
@@ -244,6 +245,7 @@ const ACTION_TOOLS = new Set([
 const READ_TOOLS = new Set([
   'read_current_page',
   'snapshot_page',
+  'read_selected_element',
   'list_tabs',
   'list_network_requests',
 ])
@@ -680,6 +682,15 @@ export const TOOLS: WireTool[] = [
           maxElements: { type: 'number' },
         },
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_selected_element',
+      description:
+        'Read the element the user picked with the Browser Copilot crosshair button on the page: CSS selector, tag, text and capped HTML. The result carries a ready `target` for click/fill, so act on exactly what the user chose. `stale` means the tab has navigated since the pick. Read-only; requires approval.',
+      parameters: { type: 'object', properties: {} },
     },
   },
   {
@@ -2898,6 +2909,8 @@ function describeAction(
       return 'Read the text of the current page'
     case 'snapshot_page':
       return 'Read the current page and list its buttons, links, and fields'
+    case 'read_selected_element':
+      return 'Read the element picked on the page'
     case 'list_console_messages':
       return 'Read browser console messages'
     case 'click':
@@ -3440,6 +3453,32 @@ export async function executeTool(
       // Honor the requested element budget (up to the hard cap) instead of the
       // old fixed 80, so a takeover agent asking for 200 actually receives 200.
       return JSON.stringify(compactSnapshot(snapshot, maxElements))
+    }
+
+    case 'read_selected_element': {
+      throwIfAborted()
+      const tab = await resolveAutomationTab(undefined, ctx.scope)
+      if (!tab || typeof tab.id !== 'number') {
+        return JSON.stringify({ ok: false, error: '没有可读取的标签页。' })
+      }
+      const picked = await getPickedElement(tab.id)
+      if (!picked) {
+        return JSON.stringify({
+          ok: false,
+          error:
+            'No element has been picked on this tab yet. Ask the user to click the crosshair button on the page, click the element, then retry (the picker must be enabled in Settings).',
+        })
+      }
+      ctx.lastUrl = tab.url
+      // A pick made on another URL does not locate anything on this document;
+      // report it rather than letting the model act on a stale selector.
+      const stale = typeof tab.url === 'string' && tab.url !== picked.url
+      return JSON.stringify({
+        ok: true,
+        ...picked,
+        stale,
+        target: { primary: { how: 'css', value: picked.selector }, fallbacks: [] },
+      })
     }
 
     case 'recognize_image': {

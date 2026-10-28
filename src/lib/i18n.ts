@@ -1168,6 +1168,8 @@ export interface Messages {
   toolReadPageWarn: string
   toolSnapshot: string
   toolSnapshotWarn: string
+  toolReadPicked: string
+  toolReadPickedWarn: string
   toolListTabs: string
   toolListTabsWarn: string
   toolNetworkRequests: string
@@ -1262,6 +1264,7 @@ export interface Messages {
   settingsElementPicker: string
   settingsElementPickerIntro: string
   settingsElementPickerEnable: string
+  settingsElementPickerHideCard: string
   settingsElementPickerFormat: string
   settingsElementPickerFormatSelector: string
   settingsElementPickerFormatText: string
@@ -2753,6 +2756,9 @@ const en: Messages = {
   toolSnapshot: 'Snapshot page elements',
   toolSnapshotWarn:
     'When off: the assistant cannot see buttons, links, or fields, so it cannot reliably click or fill anything.',
+  toolReadPicked: 'Read the element you picked',
+  toolReadPickedWarn:
+    'When off: the assistant cannot read the element you picked with the crosshair button.',
   toolListTabs: 'List open tabs',
   toolListTabsWarn: 'When off: the assistant cannot see or refer to your other open tabs.',
   toolNetworkRequests: 'Inspect recent network requests',
@@ -2859,6 +2865,7 @@ const en: Messages = {
   settingsElementPickerIntro:
     "Show a crosshair button on web pages. Click it, pick an element, and that element's HTML (children included) is copied to the clipboard so you can paste it into the chat.",
   settingsElementPickerEnable: 'Show the picker button on pages',
+  settingsElementPickerHideCard: 'Hide the picker card — click an element to take it',
   settingsElementPickerFormat: 'Copy on confirm',
   settingsElementPickerFormatSelector: 'CSS selector only',
   settingsElementPickerFormatText: 'Visible text only',
@@ -4335,6 +4342,8 @@ const zhCN: Messages = {
   toolReadPageWarn: '关闭后：助手无法读取当前页面的文本。',
   toolSnapshot: '快照页面元素',
   toolSnapshotWarn: '关闭后：助手无法看到按钮、链接、输入框，因此无法可靠地点击或填写。',
+  toolReadPicked: '读取你在页面上选中的元素',
+  toolReadPickedWarn: '关闭后：助手无法读取你用准星按钮选中的元素。',
   toolListTabs: '列出标签页',
   toolListTabsWarn: '关闭后：助手无法查看或引用你打开的其他标签页。',
   toolNetworkRequests: '查看最近网络请求',
@@ -4422,6 +4431,7 @@ const zhCN: Messages = {
   settingsElementPickerIntro:
     '在网页上显示一个十字准星按钮。点击后在页面中选择元素，该元素及其子元素的 HTML 会复制到剪贴板，粘贴到对话里即可。',
   settingsElementPickerEnable: '在网页上显示元素选择按钮',
+  settingsElementPickerHideCard: '隐藏拾取卡片（点击元素即选中）',
   settingsElementPickerFormat: '确认后复制',
   settingsElementPickerFormatSelector: '仅 CSS 选择器',
   settingsElementPickerFormatText: '仅文本',
