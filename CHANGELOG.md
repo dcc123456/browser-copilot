@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+_To be released._
+
+## [0.6.15] - 2026-10-28
+
+### Added — Give each AI-agent block its own skills and tools
+
+An AI-agent node's form now has a "Skills & tools" fold-out. Every tool is on
+unless switched off; every skill is off unless switched on — new nodes start
+with all skills off, nodes saved before this release keep every skill on, and
+generated nodes start empty. Anything switched off is removed from the model
+request (a disabled tool's schema, a disabled skill's catalogue line), which
+lowers token cost, and a switched-off skill cannot be summoned with `use_skill`
+either. Nine state-changing tools — closing, pinning and unpinning tabs,
+saving content to a file, creating or updating a skill, listing and creating
+scheduled tasks, presenting a plan and delegating to a sub-agent — are no
+longer offered to an AI-agent block at all: they are hidden in the form and
+refused at dispatch in every run. The node prompt now also states that only a
+tool-free reply counts as the answer.
+
 ### Added — Let a local agent read the element you picked
 
 Picking an element now also records it for the assistant: every copy-mode click
@@ -26,6 +45,35 @@ choice, and a second click or Escape dismisses — so the user can mark an eleme
 and then ask the local agent to read it. Hidden-card mode applies to the
 crosshair, not to the workflow editor's element picker, which still needs its
 card.
+
+### Changed — Chat turns keep running past one round budget
+
+A panel chat turn treats the configured max action steps as one batch: when it
+spends the batch it reports progress and starts another, up to ten batches, so
+a long task reaches a result instead of ending halfway. Each checkpoint re-arms
+context compaction and the over-length retry; the tools-off wrap-up stays only
+as the safety valve at the absolute ceiling. Unattended runs and sub-agents keep
+their single hard cap. Step counts are no longer narrated in the transcript: a
+turn that does hit the ceiling ends with a count-free localized reason.
+
+### Fixed — Repeated unchangeable tool failures end the streak, not the turn
+
+When a tool keeps failing for a reason repeating cannot change — a page policy,
+a permission — it is refused for the rest of the turn after three identical
+failures, while retryable errors stay retryable. A panel turn that exhausts its
+round budget now gets one tools-off completion that summarises progress,
+blockers and the next step, and that answer is persisted instead of the panel
+going quiet. The DevTools fallback reports why it failed instead of a bare
+null, and the page-forbids-JS error says that repeating the call cannot work.
+
+### Fixed — Image reads work in read-only agent turns
+
+A read-only AI-agent block aimed at an image or captcha could not see it: image
+recognition and screenshots were treated as actions, so both the advertised
+tools and dispatch withheld them and the turn burned its budget on text-only
+page snapshots before ending without an answer. Observation tools are now
+exempt from the read-only gates, and the block's guidance points at
+recognising the image directly.
 
 ### Fixed — The two page buttons move as one
 
