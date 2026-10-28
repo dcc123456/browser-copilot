@@ -77,7 +77,14 @@ export interface PublishClient {
     owner: string,
     repo: string,
     path: string,
-    input: { message: string; contentBase64: string; branch: string },
+    input: { message: string; contentBase64: string; branch: string; sha?: string },
+  ): Promise<unknown>
+  listTree(owner: string, repo: string, branch: string): Promise<GitHubTree>
+  deleteFile(
+    owner: string,
+    repo: string,
+    path: string,
+    input: { message: string; sha: string; branch: string },
   ): Promise<unknown>
   createPull(
     owner: string,
@@ -160,16 +167,8 @@ export interface PublishResult {
   merged: boolean
 }
 
-/** Everything an unpublish needs beyond the publish client. */
-export interface UnpublishClient extends PublishClient {
-  listTree(owner: string, repo: string, branch: string): Promise<GitHubTree>
-  deleteFile(
-    owner: string,
-    repo: string,
-    path: string,
-    input: { message: string; sha: string; branch: string },
-  ): Promise<unknown>
-}
+/** Kept as a name for the publish client a removal needs (they are the same). */
+export type UnpublishClient = PublishClient
 
 export interface UnpublishDeps {
   client: UnpublishClient
@@ -515,6 +514,27 @@ export async function pushPublish(
   const writable = isPublic ? await writableOwner(deps.client, login, sleep) : repo.owner
   const baseRef = await deps.client.getRef(writable, repo.repo, base)
   const commitMessage = `Add workflow: ${prepared.meta.title} [wf:${prepared.slug}]`
+  // A republish writes over the listing that is already on the base branch.
+  // GitHub refuses such a write unless the blob sha it replaces is sent back,
+  // and files the new version no longer carries (a dropped screenshot or
+  // attachment) would otherwise linger in the repository.
+  const baseTree = await deps.client.listTree(writable, repo.repo, base)
+  const baseBlobs = new Map(
+    baseTree.tree
+      .filter((entry) => entry.type === 'blob')
+      .map((entry) => [entry.path, entry.sha] as const),
+  )
+  const replacing = prepared.files.map((file) => ({
+    file,
+    sha: baseBlobs.get(file.path),
+  }))
+  const writing = new Set(prepared.files.map((file) => file.path))
+  const dropped = baseTree.tree.filter(
+    (entry) =>
+      entry.type === 'blob' &&
+      entry.path.startsWith(`${workflowDir(prepared.slug)}/`) &&
+      !writing.has(entry.path),
+  )
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const branch = `${MARKETPLACE_PR_BRANCH_PREFIX}${prepared.slug}-${branchStamp(now, attempt)}`
@@ -525,10 +545,18 @@ export async function pushPublish(
       throw error
     }
 
-    for (const file of prepared.files) {
+    for (const { file, sha } of replacing) {
       await deps.client.putFile(writable, repo.repo, file.path, {
         message: commitMessage,
         contentBase64: file.contentBase64,
+        branch,
+        ...(sha ? { sha } : {}),
+      })
+    }
+    for (const entry of dropped) {
+      await deps.client.deleteFile(writable, repo.repo, entry.path, {
+        message: commitMessage,
+        sha: entry.sha,
         branch,
       })
     }

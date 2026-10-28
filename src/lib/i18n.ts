@@ -401,6 +401,7 @@ export interface Messages {
   marketplaceApply: string
   marketplaceApplied: string
   marketplaceUpdate: string
+  marketplaceUpdateAction: string
   marketplaceUnavailable: string
   marketplaceViewOnGithub: string
   marketplaceByAuthor: (params: { author: string }) => string
@@ -2152,7 +2153,8 @@ const en: Messages = {
   marketplaceLoadFailed: 'Could not load the marketplace.',
   marketplaceApply: 'Apply',
   marketplaceApplied: 'Added',
-  marketplaceUpdate: 'Update',
+  marketplaceUpdate: 'Update available',
+  marketplaceUpdateAction: 'Update',
   marketplaceUnavailable: 'Unavailable',
   marketplaceViewOnGithub: 'View on GitHub',
   marketplaceByAuthor: ({ author }) => `by @${author}`,
@@ -3788,6 +3790,7 @@ const zhCN: Messages = {
   marketplaceApply: '应用',
   marketplaceApplied: '已添加',
   marketplaceUpdate: '可更新',
+  marketplaceUpdateAction: '更新',
   marketplaceUnavailable: '暂不可用',
   marketplaceViewOnGithub: '在 GitHub 查看',
   marketplaceByAuthor: ({ author }) => `作者 @${author}`,

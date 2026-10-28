@@ -8,8 +8,11 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { MarketplaceCard } from '../src/lib/marketplace/types'
+import type { Workflow } from '../src/lib/workflow/types'
 
 const cards: MarketplaceCard[] = []
+/** Local library the panel reads; empty unless a test installs something. */
+const installed: Workflow[] = []
 const mocked = vi.hoisted(() => ({
   auth: null as { token: string; login: string } | null,
   /** Issue numbers this device already reacted to. */
@@ -21,7 +24,7 @@ vi.mock('../src/lib/marketplace/catalog', () => ({
   chromeCatalogCache: () => ({}),
 }))
 vi.mock('../src/lib/messages', () => ({
-  sendCommand: async () => ({ type: 'workflows.list', workflows: [] }),
+  sendCommand: async () => ({ type: 'workflows.list', workflows: installed }),
 }))
 vi.mock('../src/lib/store-events', () => ({ onStoreChanged: () => () => {} }))
 vi.mock('../src/lib/marketplace/token', () => ({
@@ -96,6 +99,7 @@ describe('marketplace card actions', () => {
     act(() => root?.unmount())
     container?.remove()
     cards.length = 0
+    installed.length = 0
     mocked.auth = null
     mocked.likedIssues.clear()
   })
@@ -193,5 +197,50 @@ describe('marketplace card actions', () => {
     const actions = container.querySelector<HTMLElement>('.task-actions')
     expect(actions?.textContent).toContain(zh.marketplaceUnpublish)
     expect(zh.marketplaceUnpublish).toBe('下架')
+  })
+
+  it('offers an installed-but-stale copy as an update, not an apply', async () => {
+    cards.push({
+      meta: buildMeta({
+        slug: 'scrape-orders-abcdef',
+        title: 'Scrape orders',
+        description: '',
+        category: 'ecommerce',
+        tags: [],
+        author: 'octocat',
+        version: 2,
+        hash: 'b'.repeat(64),
+      }),
+      prNumber: null,
+      likes: 0,
+      comments: 0,
+    })
+    installed.push({
+      id: 'local-1',
+      name: 'Scrape orders',
+      createdAt: 1,
+      updatedAt: 1,
+      drawflow: { nodes: [], edges: [] },
+      settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
+      marketplace: {
+        repo: 'dcc123456/BC-workflow',
+        slug: 'scrape-orders-abcdef',
+        version: 1,
+        hash: 'a'.repeat(64),
+        author: 'octocat',
+        appliedAt: 1,
+      },
+    })
+    await render()
+
+    // The chip names the state, the action names the click.
+    expect(container.textContent).toContain(zh.marketplaceUpdate)
+    expect(zh.marketplaceUpdate).toBe('可更新')
+    const action = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === zh.marketplaceUpdateAction,
+    )
+    expect(action).toBeDefined()
+    expect(action?.disabled).toBe(false)
+    expect(zh.marketplaceUpdateAction).toBe('更新')
   })
 })

@@ -535,7 +535,7 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
     const confirmed = await confirmDialog({
       title: isUpdate ? t.marketplaceUpdateTitle : t.marketplaceTrustTitle,
       message,
-      confirmText: isUpdate ? t.marketplaceUpdate : t.marketplaceTrustConfirm,
+      confirmText: isUpdate ? t.marketplaceUpdateAction : t.marketplaceTrustConfirm,
       cancelText: t.cancel,
     })
     if (!confirmed) return
@@ -895,7 +895,7 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
                     {isUnavailable
                       ? t.marketplaceUnavailable
                       : hasUpdate
-                        ? t.marketplaceUpdate
+                        ? t.marketplaceUpdateAction
                         : existing
                           ? t.marketplaceApplied
                           : t.marketplaceApply}

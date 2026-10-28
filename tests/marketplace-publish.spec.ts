@@ -84,7 +84,7 @@ interface ClientCalls {
   createFork: Array<{ owner: string; repo: string }>
   getRef: Array<{ owner: string; repo: string; branch: string }>
   createRef: Array<{ owner: string; repo: string; branch: string; sha: string }>
-  putFile: Array<{ owner: string; repo: string; path: string; branch: string }>
+  putFile: Array<{ owner: string; repo: string; path: string; branch: string; sha?: string }>
   deleteFile: Array<{ owner: string; repo: string; path: string; sha: string; branch: string }>
   listTree: Array<{ owner: string; repo: string; branch: string }>
   createPull: Array<{
@@ -152,7 +152,7 @@ function makeClient(options: ClientOptions = {}): {
       return { ref: `refs/heads/${branch}` }
     },
     async putFile(owner, repo, path, input): Promise<unknown> {
-      calls.putFile.push({ owner, repo, path, branch: input.branch })
+      calls.putFile.push({ owner, repo, path, branch: input.branch, sha: input.sha })
       return { content: { path } }
     },
     async deleteFile(owner, repo, path, input): Promise<unknown> {
@@ -718,6 +718,47 @@ describe('pushPublish', () => {
     expect(calls.createFork).toHaveLength(0)
     expect(calls.createRef[0]!.owner).toBe(MARKETPLACE_OWNER)
     expect(calls.createPull[0]!.head).toMatch(new RegExp(`^${MARKETPLACE_OWNER}:submit/`))
+  })
+
+  it('overwrites the files of an existing listing instead of colliding with them', async () => {
+    const prepared = await prepare()
+    const listingSha = '1'.repeat(40)
+    const droppedSha = '2'.repeat(40)
+    const { client, calls } = makeClient({
+      tree: [
+        { path: `workflows/${prepared.slug}/workflow.json`, type: 'blob', sha: listingSha },
+        { path: `workflows/${prepared.slug}/meta.json`, type: 'blob', sha: listingSha },
+        {
+          path: `workflows/${prepared.slug}/assets/cover-0.webp`,
+          type: 'blob',
+          sha: droppedSha,
+        },
+        { path: 'workflows/other-workflow/meta.json', type: 'blob', sha: droppedSha },
+      ],
+    })
+
+    await pushPublish(prepared, {
+      client,
+      auth: { token: 'ghp_test-token', login: MARKETPLACE_OWNER },
+      now: NOW,
+      sleep: async () => {},
+    })
+
+    // GitHub answers 422 to a write over a path whose blob sha is not echoed
+    // back, which is the conflict an "update" used to surface.
+    expect(calls.putFile.map((call) => [call.path, call.sha])).toEqual([
+      [`workflows/${prepared.slug}/workflow.json`, listingSha],
+      [`workflows/${prepared.slug}/meta.json`, listingSha],
+    ])
+    expect(calls.deleteFile).toEqual([
+      {
+        owner: MARKETPLACE_OWNER,
+        repo: MARKETPLACE_REPO,
+        path: `workflows/${prepared.slug}/assets/cover-0.webp`,
+        sha: droppedSha,
+        branch: `submit/${prepared.slug}-20261025090000`,
+      },
+    ])
   })
 
   it('retries once on a branch-name conflict', async () => {

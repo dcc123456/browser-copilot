@@ -215,7 +215,7 @@ export class GitHubClient {
     owner: string,
     repo: string,
     path: string,
-    input: { message: string; contentBase64: string; branch: string },
+    input: { message: string; contentBase64: string; branch: string; sha?: string },
   ): Promise<unknown> {
     return this.request(`/repos/${owner}/${repo}/contents/${encodePath(path)}`, {
       method: 'PUT',
@@ -223,6 +223,9 @@ export class GitHubClient {
         message: input.message,
         content: input.contentBase64,
         branch: input.branch,
+        // GitHub rejects a write to a path that already exists unless its blob
+        // sha is echoed back — which is what makes a republish an update.
+        ...(input.sha ? { sha: input.sha } : {}),
       },
     })
   }

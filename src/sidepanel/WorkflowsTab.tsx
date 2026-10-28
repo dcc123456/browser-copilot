@@ -640,7 +640,7 @@ export default function WorkflowsTab() {
         t.marketplaceUpdateMessage({ title: card.meta.title }),
         ...(bundled.length ? [t.marketplaceUpdateBundled({ names: bundled.join(', ') })] : []),
       ].join('\n\n'),
-      confirmText: t.marketplaceUpdate,
+      confirmText: t.marketplaceUpdateAction,
       cancelText: t.cancel,
     })
     if (!confirmed) return
@@ -1677,7 +1677,7 @@ export default function WorkflowsTab() {
                               onClick={() => void updateFromMarketplace(wf, updateCard)}
                               type="button"
                             >
-                              {t.marketplaceUpdate}
+                              {t.marketplaceUpdateAction}
                             </button>
                           )}
                           <button
