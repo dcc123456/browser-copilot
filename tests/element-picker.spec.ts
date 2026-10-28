@@ -494,11 +494,11 @@ describe('element picker: verify outlines the matches', () => {
   })
 })
 
-describe('element picker: copy mode copies the selected payload', () => {
+describe('element picker: copy mode copies on the click', () => {
   const mountCopy = (args: Partial<PickerArgs> = {}) =>
     startPicker({ pickerId: 'h1', mode: 'copy', ...args })
-  const countText = () => field('[data-role="count"]').textContent
-  const note = () => field('[data-role="note"]')
+  const pickCard = () => card()?.querySelector('.pick-card') as HTMLElement
+  const highlight = () => card()?.querySelector('.pick-highlight') as HTMLElement
   let copied = ''
   let execCommand: ReturnType<typeof vi.fn>
 
@@ -521,15 +521,30 @@ describe('element picker: copy mode copies the selected payload', () => {
     Reflect.deleteProperty(document, 'execCommand')
   })
 
-  it('copies the locked element outerHTML and reports it for the local agent', async () => {
+  it('shows no card, only the dim overlay and the highlight', async () => {
     await mountCopy()
+
+    expect(document.getElementById('bc-element-picker')).not.toBeNull()
+    expect(pickCard().style.display).toBe('none')
+    expect(card()?.querySelector('.pick-overlay')).not.toBeNull()
+
+    dispatchMouse(document.getElementById('buy')!, 'mousemove')
+    expect(highlight().style.display).toBe('block')
+  })
+
+  it('copies the clicked element, reports it and closes without letting the page see the press', async () => {
+    await mountCopy()
+    const pageSaw: string[] = []
+    onPage(document, 'click', () => pageSaw.push('click'))
     const shop = document.getElementById('shop')!
+    onPage(shop, 'click', () => pageSaw.push('shop'), false)
 
     clickGesture(shop)
-    dispatchMouse(confirmBtn(), 'click')
 
     expect(copied).toBe(shop.outerHTML)
     expect(copied).toContain('<button id="buy"')
+    expect(pageSaw).toEqual([])
+    expect(document.getElementById('bc-element-picker')).toBeNull()
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({
       type: 'picker:selection',
@@ -542,7 +557,6 @@ describe('element picker: copy mode copies the selected payload', () => {
         title: document.title,
       },
     })
-    expect(document.getElementById('bc-element-picker')).toBeNull()
     const toast = document.getElementById('bc-element-picker-toast')
     expect(toast?.shadowRoot?.textContent).toContain('Copied')
     expect(toast?.shadowRoot?.textContent).toContain('chars')
@@ -552,10 +566,6 @@ describe('element picker: copy mode copies the selected payload', () => {
     await mountCopy({ copyFormat: 'selector' })
 
     clickGesture(document.getElementById('shop')!)
-    expect(selectorText()).toBe('#shop')
-    expect(countText()).toContain('CSS selector')
-
-    dispatchMouse(confirmBtn(), 'click')
 
     expect(copied).toBe('#shop')
     expect(document.querySelectorAll(copied)).toHaveLength(1)
@@ -567,62 +577,36 @@ describe('element picker: copy mode copies the selected payload', () => {
     await mountCopy({ copyFormat: 'text' })
 
     clickGesture(document.getElementById('buy')!)
-    expect(selectorText()).toBe('<button#buy.cta>')
-    expect(countText()).toContain('Text ·')
-
-    dispatchMouse(confirmBtn(), 'click')
 
     expect(copied).toBe('Buy')
     const toast = document.getElementById('bc-element-picker-toast')
     expect(toast?.shadowRoot?.textContent).toContain('<button> text')
   })
 
-  it('retargets the copied subtree with the parent pill', async () => {
-    await mountCopy()
-
-    clickGesture(document.getElementById('buy')!)
-    dispatchMouse(field('[data-act="parent"]'), 'click')
-    expect(selectorText()).toBe('<div#shop>')
-    dispatchMouse(confirmBtn(), 'click')
-
-    expect(copied).toBe(document.getElementById('shop')!.outerHTML)
-  })
-
-  it('measures the HTML size only after the element is locked', async () => {
-    await mountCopy()
-
-    dispatchMouse(document.getElementById('shop')!, 'mousemove')
-    expect(countText()).toContain('Click an element')
-
-    clickGesture(document.getElementById('shop')!)
-    expect(countText()).toContain('chars')
-  })
-
-  it('warns about huge HTML but still copies it', async () => {
+  it('copies large HTML untouched — the card that warned about it is gone', async () => {
     document.body.innerHTML = '<div id="huge"></div>'
     document.getElementById('huge')!.textContent = 'x'.repeat(120_000)
     await mountCopy()
 
     clickGesture(document.getElementById('huge')!)
-    expect(countText()).toContain('Large HTML')
-    expect(field('[data-role="count"]').style.color).toBe('rgb(220, 38, 38)')
-
-    dispatchMouse(confirmBtn(), 'click')
 
     expect(copied.length).toBeGreaterThan(120_000)
+    expect(document.getElementById('bc-element-picker')).toBeNull()
   })
 
-  it('keeps the card open with an error when the browser refuses the copy', async () => {
+  it('closes with an error toast when the browser refuses the copy, still reporting the element', async () => {
     execCommand.mockReturnValueOnce(false)
     await mountCopy()
 
     clickGesture(document.getElementById('shop')!)
-    dispatchMouse(confirmBtn(), 'click')
 
-    expect(document.getElementById('bc-element-picker')).not.toBeNull()
-    expect(document.getElementById('bc-element-picker-toast')).toBeNull()
-    expect(note().style.display).toBe('block')
-    expect(note().textContent).toContain('Copy failed')
+    expect(document.getElementById('bc-element-picker')).toBeNull()
+    const toast = document.getElementById('bc-element-picker-toast')
+    expect(toast?.shadowRoot?.textContent).toContain('Copy failed')
+    expect(toast?.shadowRoot?.querySelector('.toast')?.classList.contains('is-error')).toBe(true)
+    // The pick is what the agent acts on; a refused clipboard must not erase it.
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ type: 'picker:selection' })
   })
 
   it('closes without messaging an editor', async () => {
@@ -650,23 +634,21 @@ describe('element picker: copy mode copies the selected payload', () => {
     launcher.remove()
   })
 
-  it('localizes the copy action', async () => {
+  it('localizes the copy toast', async () => {
     await mountCopy({ locale: 'zh' })
 
-    expect(confirmBtn().textContent).toBe('复制 HTML')
-
     clickGesture(document.getElementById('shop')!)
-    dispatchMouse(confirmBtn(), 'click')
 
     const toast = document.getElementById('bc-element-picker-toast')
     expect(toast?.shadowRoot?.textContent).toContain('已复制')
   })
 })
 
-describe('element picker: headless copy mode', () => {
-  const mountHeadless = (args: Partial<PickerArgs> = {}) =>
-    startPicker({ pickerId: 'h2', mode: 'copy', hideCard: true, ...args })
+describe('element picker: select-only copy mode', () => {
+  const mountSelectOnly = (args: Partial<PickerArgs> = {}) =>
+    startPicker({ pickerId: 'h2', mode: 'copy', selectOnly: true, ...args })
   const pickCard = () => card()?.querySelector('.pick-card') as HTMLElement
+  const highlight = () => card()?.querySelector('.pick-highlight') as HTMLElement
   let copied = ''
   let execCommand: ReturnType<typeof vi.fn>
 
@@ -688,21 +670,8 @@ describe('element picker: headless copy mode', () => {
     Reflect.deleteProperty(document, 'execCommand')
   })
 
-  it('hides the card but keeps the dim overlay and the highlight', async () => {
-    await mountHeadless()
-
-    expect(document.getElementById('bc-element-picker')).not.toBeNull()
-    expect(pickCard().style.display).toBe('none')
-    expect(card()?.querySelector('.pick-overlay')).not.toBeNull()
-
-    dispatchMouse(document.getElementById('buy')!, 'mousemove')
-
-    const highlight = card()?.querySelector('.pick-highlight') as HTMLElement
-    expect(highlight.style.display).toBe('block')
-  })
-
-  it('confirms on the click that aims, without letting the page see the press', async () => {
-    await mountHeadless()
+  it('selects on the first click without copying, keeping the highlight and the page intact', async () => {
+    await mountSelectOnly()
     const pageSaw: string[] = []
     onPage(document, 'click', () => pageSaw.push('click'))
     const buy = document.getElementById('buy')!
@@ -710,20 +679,60 @@ describe('element picker: headless copy mode', () => {
 
     clickGesture(buy)
 
-    expect(copied).toBe(buy.outerHTML)
+    expect(execCommand).not.toHaveBeenCalled()
+    expect(copied).toBe('')
     expect(pageSaw).toEqual([])
-    expect(document.getElementById('bc-element-picker')).toBeNull()
+    expect(document.getElementById('bc-element-picker')).not.toBeNull()
+    expect(pickCard().style.display).toBe('none')
+    expect(highlight().style.display).toBe('block')
+    expect(document.getElementById('bc-element-picker-toast')).toBeNull()
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({
       type: 'picker:selection',
       selection: { selector: '#buy', tag: 'button', id: 'buy', text: 'Buy' },
     })
-    const toast = document.getElementById('bc-element-picker-toast')
-    expect(toast?.shadowRoot?.textContent).toContain('Copied')
+  })
+
+  it('keeps the selection while the mouse moves, then dismisses on the next click', async () => {
+    await mountSelectOnly()
+    const pageSaw: string[] = []
+    onPage(document, 'click', () => pageSaw.push('click'))
+
+    clickGesture(document.getElementById('buy')!)
+    dispatchMouse(document.getElementById('shop')!, 'mousemove')
+
+    expect(highlight().style.display).toBe('block')
+    expect(sent).toHaveLength(1)
+
+    clickGesture(document.getElementById('shop')!)
+
+    expect(document.getElementById('bc-element-picker')).toBeNull()
+    expect(pageSaw).toEqual([])
+    expect(execCommand).not.toHaveBeenCalled()
+    expect(sent).toHaveLength(1)
+  })
+
+  it('selects with Enter, then dismisses with the next Enter, never pressing the page', async () => {
+    await mountSelectOnly()
+    const pageSaw: string[] = []
+    onPage(document, 'keydown', () => pageSaw.push('keydown'))
+
+    dispatchMouse(document.getElementById('buy')!, 'mousemove')
+    dispatchKey('Enter')
+
+    expect(document.getElementById('bc-element-picker')).not.toBeNull()
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ type: 'picker:selection' })
+    expect(execCommand).not.toHaveBeenCalled()
+
+    dispatchKey('Enter')
+
+    expect(document.getElementById('bc-element-picker')).toBeNull()
+    expect(pageSaw).toEqual([])
   })
 
   it('cancels on Escape without copying or reporting', async () => {
-    await mountHeadless()
+    await mountSelectOnly()
 
     dispatchKey('Escape')
 
@@ -732,17 +741,15 @@ describe('element picker: headless copy mode', () => {
     expect(document.getElementById('bc-element-picker')).toBeNull()
   })
 
-  it('closes with an error toast when the clipboard refuses, still reporting the element', async () => {
-    execCommand.mockReturnValueOnce(false)
-    await mountHeadless()
+  it('dismisses with Escape after selecting, keeping the single report', async () => {
+    await mountSelectOnly()
+    clickGesture(document.getElementById('buy')!)
+    expect(sent).toHaveLength(1)
 
-    clickGesture(document.getElementById('shop')!)
+    dispatchKey('Escape')
 
     expect(document.getElementById('bc-element-picker')).toBeNull()
-    const toast = document.getElementById('bc-element-picker-toast')
-    expect(toast?.shadowRoot?.textContent).toContain('Copy failed')
-    expect(toast?.shadowRoot?.querySelector('.toast')?.classList.contains('is-error')).toBe(true)
-    // The pick is what the agent acts on; a refused clipboard must not erase it.
+    expect(execCommand).not.toHaveBeenCalled()
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({ type: 'picker:selection' })
   })

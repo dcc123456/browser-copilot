@@ -23,11 +23,12 @@
  * view for a short beat before replying with the count — the reply raises the
  * editor window, so answering instantly would hide what was verified.
  *
- * Copy mode can run `hideCard`: no card is drawn, the dim overlay and the
- * highlight stay, and the first click confirms the element outright. Every copy
- * confirmation also reports the element to the worker
- * (`picker:selection` → `read_selected_element`), so a local agent can act on
- * exactly what the user picked; the clipboard output stays unchanged.
+ * Copy mode never draws the card: the dim overlay and the highlight are the
+ * whole UI. A click copies the payload, reports the element to the worker
+ * (`picker:selection` → `read_selected_element`) and closes. With `selectOnly`
+ * set, the same click instead SELECTS the element — nothing is copied and the
+ * highlight stays on the choice — and the next click or Escape dismisses, so a
+ * local agent reads exactly what the user marked.
  *
  * IMPORTANT: this function is serialized via `func.toString()` and run in the
  * page world by chrome.scripting.executeScript. EVERYTHING it uses — styles,
@@ -66,11 +67,11 @@ export interface PickerArgs {
    */
   locale?: 'en' | 'zh'
   /**
-   * Copy mode only: render no card. The dim overlay and the highlight stay; the
-   * first click on an element confirms it outright (the page never sees the
-   * press), and Escape cancels. Set from the `elementPickerHideCard` setting.
+   * Copy mode only: click to select without copying. The first click reports the
+   * element and keeps the overlay and the highlight on it; the next click or
+   * Escape dismisses. Set from the `elementPickerSelectOnly` setting.
    */
-  hideCard?: boolean
+  selectOnly?: boolean
 }
 
 /** Entry signature used by chrome.scripting.executeScript({ func }). */
@@ -85,7 +86,7 @@ export const startPicker: PickerStart = async (args) => {
     selector: initial = '',
     multiple = false,
     locale = 'en',
-    hideCard = false,
+    selectOnly = false,
   } = args
 
   // --- styles (inlined so the serialized function is self-contained) --------
@@ -187,29 +188,6 @@ export const startPicker: PickerStart = async (args) => {
     verifyEsc: locale === 'zh' ? '按 Esc 关闭' : 'Press Esc to close',
     textOption: locale === 'zh' ? '文本' : 'Text',
     noText: locale === 'zh' ? '（无可读文本）' : '(no visible text)',
-    copyHtml: locale === 'zh' ? '复制 HTML' : 'Copy HTML',
-    copySelector: locale === 'zh' ? '复制选择器' : 'Copy selector',
-    copyText: locale === 'zh' ? '复制文本' : 'Copy text',
-    targetPlaceholder: locale === 'zh' ? '（点击一个元素）' : '(click an element)',
-    copyHint: (action: string): string =>
-      locale === 'zh'
-        ? `点击元素锁定，按 Enter 或点“${action}”`
-        : `Click an element, then press Enter or ${action}`,
-    copyLockHint: locale === 'zh' ? '点击页面上的元素' : 'Click an element on the page',
-    htmlChars: (size: string): string =>
-      locale === 'zh' ? `HTML · ${size} 个字符` : `HTML · ${size} chars`,
-    selectorChars: (size: string): string =>
-      locale === 'zh' ? `CSS 选择器 · ${size} 个字符` : `CSS selector · ${size} chars`,
-    textChars: (size: string): string =>
-      locale === 'zh' ? `文本 · ${size} 个字符` : `Text · ${size} chars`,
-    htmlLarge: (size: string): string =>
-      locale === 'zh'
-        ? `HTML 较大（${size} 个字符），粘贴后可能超出模型上下文`
-        : `Large HTML (${size} chars) — pasting may exceed the model context`,
-    textLarge: (size: string): string =>
-      locale === 'zh'
-        ? `文本较大（${size} 个字符），粘贴后可能超出模型上下文`
-        : `Large text (${size} chars) — pasting may exceed the model context`,
     copiedHtml: (size: string, tag: string): string =>
       locale === 'zh' ? `已复制 <${tag}> 的 ${size} 个字符` : `Copied ${size} chars of <${tag}>`,
     copiedSelector: (size: string): string =>
@@ -548,33 +526,17 @@ export const startPicker: PickerStart = async (args) => {
   const hintEl = $('[data-role="hint"]')
   const noteEl = $('[data-role="note"]')
   const confirmBtn = $<HTMLButtonElement>('[data-act="confirm"]')
-  const verifyBtn = $<HTMLButtonElement>('[data-act="verify"]')
-  const settingsEl = card.querySelector('.pick-settings') as HTMLElement | null
   findBySel.value = findBy
 
-  // Copy mode drops the selector machinery: only the target, the payload size
-  // and the copy action remain. What gets copied is the copyFormat setting.
-  const copyAction =
-    copyFormat === 'selector'
-      ? STRINGS.copySelector
-      : copyFormat === 'text'
-        ? STRINGS.copyText
-        : STRINGS.copyHtml
-  if (mode === 'copy') {
-    findBySel.style.display = 'none'
-    verifyBtn.style.display = 'none'
-    if (settingsEl) settingsEl.style.display = 'none'
-    selectorEl.textContent = STRINGS.targetPlaceholder
-    confirmBtn.textContent = copyAction
-    hintEl.textContent = STRINGS.copyHint(copyAction)
-    countEl.textContent = STRINGS.copyLockHint
-    // Headless picking: the overlay and the highlight still show what is being
-    // aimed at; the card is only the confirm button, which a click replaces.
-    if (hideCard) card.style.display = 'none'
-  }
+  // Copy mode never draws the card: the overlay and the highlight carry the
+  // whole interaction — aimed at on hover, kept on the selected element.
+  if (mode === 'copy') card.style.display = 'none'
 
   let locked: Element | null = null
   let hovered: Element | null = null
+  /** Select-only mode: the element was reported already, so the next click only
+   *  dismisses instead of selecting again. */
+  let selectionReported = false
   let curSelector = initial
   /**
    * The broad selector and match set the current pin was chosen from. Present
@@ -611,17 +573,6 @@ export const startPicker: PickerStart = async (args) => {
     matchLabelEl.textContent = STRINGS.matchNav(matchGroup.index + 1, matchGroup.members.length)
   }
 
-  /** Serializing a large payload is expensive; warn above this size. */
-  const HTML_WARN_CHARS = 100_000
-
-  /** Compact `<tag#id.class>` label for the copy-mode card. */
-  const describeTarget = (el: Element): string => {
-    const tag = el.tagName.toLowerCase()
-    const id = el.id ? `#${el.id}` : ''
-    const cls = el.classList.length ? `.${Array.from(el.classList).slice(0, 2).join('.')}` : ''
-    return `<${tag}${id}${cls}>`
-  }
-
   /** One selector that resolves to exactly `el`, falling back to the short form. */
   const selectorFor = (el: Element): string => {
     const base = build(el)
@@ -642,9 +593,9 @@ export const startPicker: PickerStart = async (args) => {
   const MAX_REPORTED_HTML = 20_000
 
   /**
-   * Reports the confirmed element to the worker so a local agent can read and
-   * act on it (`read_selected_element`). Independent of the clipboard: a refused
-   * copy still leaves the agent something to work with.
+   * Reports the selected element to the worker so a local agent can read and act
+   * on it (`read_selected_element`). Copy mode reports on every pick, whether or
+   * not the clipboard accepted the payload.
    */
   function reportSelection(el: Element): void {
     const text = visibleTextOf(el)
@@ -672,46 +623,9 @@ export const startPicker: PickerStart = async (args) => {
     }
   }
 
-  /** Copy mode: the target and its payload size, no selector machinery. */
+  /** Copy mode has no card: aiming and holding are just the highlight. */
   function refreshCopy() {
-    const el = target()
-    if (!el) {
-      selectorEl.textContent = STRINGS.targetPlaceholder
-      countEl.textContent = ''
-      confirmBtn.disabled = true
-      matchNavEl.style.display = 'none'
-      highlightEl(null)
-      updateHint()
-      return
-    }
-    selectorEl.textContent =
-      copyFormat === 'selector' && locked ? selectorFor(locked) : describeTarget(el)
-    // Only the locked target is measured: serializing on every mousemove would
-    // rebuild huge payloads dozens of times per second.
-    if (locked) {
-      const size = copyValueFor(locked).length
-      const isLarge = size > HTML_WARN_CHARS
-      const sizeText = size.toLocaleString()
-      if (isLarge) {
-        countEl.textContent =
-          copyFormat === 'text' ? STRINGS.textLarge(sizeText) : STRINGS.htmlLarge(sizeText)
-      } else {
-        countEl.textContent =
-          copyFormat === 'selector'
-            ? STRINGS.selectorChars(sizeText)
-            : copyFormat === 'text'
-              ? STRINGS.textChars(sizeText)
-              : STRINGS.htmlChars(sizeText)
-      }
-      countEl.style.color = isLarge ? '#dc2626' : '#6b7280'
-    } else {
-      countEl.textContent = STRINGS.copyLockHint
-      countEl.style.color = '#6b7280'
-    }
-    confirmBtn.disabled = false
-    matchNavEl.style.display = 'none'
-    highlightEl(el)
-    updateHint()
+    highlightEl(target())
   }
 
   function refresh() {
@@ -883,6 +797,9 @@ export const startPicker: PickerStart = async (args) => {
     e.stopImmediatePropagation()
   }
   const lockTo = (e: MouseEvent) => {
+    // Once the select-only pick is reported, the next press dismisses; moving
+    // the lock would drag the visible highlight to wherever that click lands.
+    if (mode === 'copy' && selectOnly && selectionReported) return
     const el = eventTarget(e)
     if (!el || el === host || host.contains(el)) return
     locked = el
@@ -914,11 +831,49 @@ export const startPicker: PickerStart = async (args) => {
     swallowPress(e)
     // A click with no press at all (a synthetic `el.click()`) still picks.
     if (!pressed) lockTo(e)
-    // Headless copy mode has no confirm button, so the click that aimed is also
-    // the click that takes it. Committing here (not on pointerdown) keeps the
-    // whole gesture swallowed: cleanup() unbinds the listeners, and any later
-    // event of this same press would otherwise reach the page and activate it.
-    if (mode === 'copy' && hideCard) confirmPick()
+    // Copy mode has no confirm button, so the click is the whole gesture.
+    // Handling it at click (not pointerdown) keeps the press swallowed:
+    // cleanup() unbinds the listeners, and any later event of the same press
+    // would otherwise reach the page and activate it.
+    if (mode === 'copy') commitCopy()
+  }
+  /**
+   * Copy mode: one click takes the element. Normally that means copy the payload
+   * (per `copyFormat`), report it, and close. In select-only mode nothing is
+   * copied: the first click reports the element and leaves the dim overlay and
+   * the highlight on the choice, and the next click or Escape dismisses. The
+   * worker keeps the recording either way.
+   */
+  function commitCopy(): void {
+    const el = target()
+    if (!el) return
+    if (selectOnly) {
+      if (!selectionReported) {
+        selectionReported = true
+        reportSelection(el)
+        return
+      }
+      cleanup()
+      return
+    }
+    const value = copyValueFor(el)
+    const copied = copyPlainText(value)
+    // Recorded before the copy result is judged: a refused clipboard must not
+    // rob the local agent of the element the user picked.
+    reportSelection(el)
+    const tag = el.tagName.toLowerCase()
+    const size = value.length.toLocaleString()
+    cleanup()
+    showCopiedToast(
+      copied
+        ? copyFormat === 'selector'
+          ? STRINGS.copiedSelector(size)
+          : copyFormat === 'text'
+            ? STRINGS.copiedText(size, tag)
+            : STRINGS.copiedHtml(size, tag)
+        : STRINGS.copyFailed,
+      !copied,
+    )
   }
   /**
    * Mirrors src/lib/clipboard.ts. This function is serialized into the page, so
@@ -943,7 +898,7 @@ export const startPicker: PickerStart = async (args) => {
     }
   }
 
-  /** Brief confirmation (or failure) after the card (and overlay) are gone. */
+  /** Brief confirmation (or failure) after the picker has closed. */
   function showCopiedToast(text: string, isError = false): void {
     document.getElementById('bc-element-picker-toast')?.remove()
     const toastHost = document.createElement('div')
@@ -971,44 +926,11 @@ export const startPicker: PickerStart = async (args) => {
     setTimeout(() => toastHost.remove(), 1800)
   }
 
-  /** The one commit path: shared by the card button and the Enter key. */
+  /** Select mode: the card's commit, shared by the button and the Enter key. */
   function confirmPick() {
     // The button's disabled state is the single authority on what is pickable
     // (an empty selector, or one matching nothing, must not be committed).
     if (confirmBtn.disabled) return
-    if (mode === 'copy') {
-      const el = target()
-      if (!el) return
-      const value = copyValueFor(el)
-      const copied = copyPlainText(value)
-      // Recorded before the copy result is judged: a refused clipboard must not
-      // rob the local agent of the element the user picked.
-      reportSelection(el)
-      if (!copied) {
-        // The inline note lives on the card; with the card hidden there is no
-        // retry affordance, so close and say so.
-        if (hideCard) {
-          cleanup()
-          showCopiedToast(STRINGS.copyFailed, true)
-          return
-        }
-        noteEl.style.display = 'block'
-        noteEl.style.color = '#dc2626'
-        noteEl.textContent = STRINGS.copyFailed
-        return
-      }
-      const tag = el.tagName.toLowerCase()
-      const size = value.length.toLocaleString()
-      cleanup()
-      showCopiedToast(
-        copyFormat === 'selector'
-          ? STRINGS.copiedSelector(size)
-          : copyFormat === 'text'
-            ? STRINGS.copiedText(size, tag)
-            : STRINGS.copiedHtml(size, tag),
-      )
-      return
-    }
     void chrome.runtime.sendMessage({
       type: 'picker:result',
       pickerId,
@@ -1035,6 +957,10 @@ export const startPicker: PickerStart = async (args) => {
     // keeps its native activation, so committing here too would double-send.
     if (e.key !== 'Enter' || isOurUi(e)) return
     swallowPress(e)
+    if (mode === 'copy') {
+      commitCopy()
+      return
+    }
     confirmPick()
   }
 

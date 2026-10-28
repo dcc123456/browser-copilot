@@ -260,11 +260,13 @@ export interface Settings {
    */
   elementPickerFormat: ElementPickerFormat
   /**
-   * When on, picking shows only the dim overlay and the highlight — no card in
-   * the bottom-left corner. The first click on an element confirms it right
-   * away (copy + record for the local agent); Escape still cancels. Default off.
+   * When on, a click on the page selects the element without copying: the pick
+   * is recorded for the local agent, the overlay and the highlight stay on it,
+   * and the next click (or Escape) dismisses. When off, the click copies the
+   * payload and closes at once. The crosshair never shows a card either way.
+   * Default off.
    */
-  elementPickerHideCard: boolean
+  elementPickerSelectOnly: boolean
 }
 
 /** Payload the on-page element picker writes to the clipboard. */

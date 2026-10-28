@@ -837,30 +837,32 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             void mutate({ type: 'settings.set', patch: { elementPickerEnabled } })
           }
         />
-        <div className="field mt-2.5">
-          <label htmlFor="element-picker-format">{t.settingsElementPickerFormat}</label>
-          <select
-            id="element-picker-format"
-            value={settings.elementPickerFormat}
-            onChange={(event) => {
-              const elementPickerFormat = event.target.value as ElementPickerFormat
-              void mutate({ type: 'settings.set', patch: { elementPickerFormat } })
-            }}
-          >
-            <option value="selector">{t.settingsElementPickerFormatSelector}</option>
-            <option value="text">{t.settingsElementPickerFormatText}</option>
-            <option value="html">{t.settingsElementPickerFormatHtml}</option>
-          </select>
-        </div>
         <div className="mt-2.5">
           <Switch
-            checked={settings.elementPickerHideCard}
-            label={t.settingsElementPickerHideCard}
-            onChange={(elementPickerHideCard) =>
-              void mutate({ type: 'settings.set', patch: { elementPickerHideCard } })
+            checked={settings.elementPickerSelectOnly}
+            label={t.settingsElementPickerSelectOnly}
+            onChange={(elementPickerSelectOnly) =>
+              void mutate({ type: 'settings.set', patch: { elementPickerSelectOnly } })
             }
           />
         </div>
+        {!settings.elementPickerSelectOnly && (
+          <div className="field mt-2.5">
+            <label htmlFor="element-picker-format">{t.settingsElementPickerFormat}</label>
+            <select
+              id="element-picker-format"
+              value={settings.elementPickerFormat}
+              onChange={(event) => {
+                const elementPickerFormat = event.target.value as ElementPickerFormat
+                void mutate({ type: 'settings.set', patch: { elementPickerFormat } })
+              }}
+            >
+              <option value="selector">{t.settingsElementPickerFormatSelector}</option>
+              <option value="text">{t.settingsElementPickerFormatText}</option>
+              <option value="html">{t.settingsElementPickerFormatHtml}</option>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* --- Unattended window policy --- */}

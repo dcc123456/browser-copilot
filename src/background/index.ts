@@ -955,7 +955,7 @@ async function broadcastElementPicker(
   enabled: boolean,
   locale: 'en' | 'zh',
   format: ElementPickerFormat,
-  hideCard: boolean,
+  selectOnly: boolean,
 ): Promise<void> {
   const tabs = await chrome.tabs.query({}).catch(() => [])
   await Promise.all(
@@ -974,7 +974,7 @@ async function broadcastElementPicker(
             enabled,
             locale,
             format,
-            hideCard,
+            selectOnly,
           } satisfies ElementPickerControl,
           enabled ? contentScriptFile('element-picker-launcher') : undefined,
         )
@@ -1174,10 +1174,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           enabled: settings.elementPickerEnabled,
           locale: pickerLocale(settings.locale),
           format: settings.elementPickerFormat,
-          hideCard: settings.elementPickerHideCard,
+          selectOnly: settings.elementPickerSelectOnly,
         })
       })
-      .catch(() => sendResponse({ enabled: false, locale: 'en', format: 'html', hideCard: false }))
+      .catch(() =>
+        sendResponse({ enabled: false, locale: 'en', format: 'html', selectOnly: false }),
+      )
     return true
   }
 
@@ -1421,14 +1423,14 @@ async function handleCommand(
       if (
         previous.elementPickerEnabled !== settings.elementPickerEnabled ||
         previous.elementPickerFormat !== settings.elementPickerFormat ||
-        previous.elementPickerHideCard !== settings.elementPickerHideCard ||
+        previous.elementPickerSelectOnly !== settings.elementPickerSelectOnly ||
         previous.locale !== settings.locale
       ) {
         void broadcastElementPicker(
           settings.elementPickerEnabled,
           pickerLocale(settings.locale),
           settings.elementPickerFormat,
-          settings.elementPickerHideCard,
+          settings.elementPickerSelectOnly,
         )
       }
       return { type: 'settings', settings }

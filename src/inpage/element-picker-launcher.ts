@@ -47,7 +47,7 @@ type CopyFormat = ElementPickerControl['format']
 
 let locale: PickerLocale = 'en'
 let copyFormat: CopyFormat = 'html'
-let hideCard = false
+let selectOnly = false
 let enabled = false
 
 // --- instance ownership -------------------------------------------------------
@@ -67,6 +67,7 @@ function copyFormatOf(value: unknown): CopyFormat {
 }
 
 function label(): string {
+  if (selectOnly) return locale === 'zh' ? '选中页面元素（不复制）' : 'Select a page element'
   return locale === 'zh' ? '选择页面元素并复制' : 'Pick a page element and copy it'
 }
 
@@ -124,7 +125,7 @@ function createHost(): HTMLElement {
     // A second click while the picker is open would stack listeners on the
     // same document; the open card is the signal to wait.
     if (document.getElementById('bc-element-picker')) return
-    void startPicker({ pickerId: PICKER_ID, mode: 'copy', copyFormat, locale, hideCard })
+    void startPicker({ pickerId: PICKER_ID, mode: 'copy', copyFormat, locale, selectOnly })
   })
   return host
 }
@@ -196,7 +197,7 @@ void chrome.runtime
     const status = response as ElementPickerStatusResponse | undefined
     locale = status?.locale === 'zh' ? 'zh' : 'en'
     copyFormat = copyFormatOf(status?.format)
-    hideCard = status?.hideCard === true
+    selectOnly = status?.selectOnly === true
     enabled = status?.enabled === true
     if (enabled) mount()
   })
@@ -209,7 +210,7 @@ chrome.runtime.onMessage.addListener(
     if (msg?.type !== 'elementPicker.set') return
     locale = msg.locale === 'zh' ? 'zh' : 'en'
     copyFormat = copyFormatOf(msg.format)
-    hideCard = msg.hideCard === true
+    selectOnly = msg.selectOnly === true
     enabled = msg.enabled === true
     if (enabled) mount()
     else unmount()

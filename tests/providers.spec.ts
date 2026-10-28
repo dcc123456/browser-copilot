@@ -189,7 +189,7 @@ describe('normalizeStoredSettings', () => {
         autoRepairOnRun: false,
         elementPickerEnabled: false,
         elementPickerFormat: 'html',
-        elementPickerHideCard: false,
+        elementPickerSelectOnly: false,
       })
     }
   })
@@ -220,7 +220,7 @@ describe('normalizeStoredSettings', () => {
       autoRepairOnRun: false,
       elementPickerEnabled: false,
       elementPickerFormat: 'html',
-      elementPickerHideCard: false,
+      elementPickerSelectOnly: false,
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -273,7 +273,7 @@ describe('normalizeStoredSettings', () => {
       autoRepairOnRun: false,
       elementPickerEnabled: false,
       elementPickerFormat: 'html',
-      elementPickerHideCard: false,
+      elementPickerSelectOnly: false,
     })
   })
 

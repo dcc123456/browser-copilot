@@ -142,7 +142,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     autoRepairOnRun: false,
     elementPickerEnabled: false,
     elementPickerFormat: 'html',
-    elementPickerHideCard: false,
+    elementPickerSelectOnly: false,
     localAgentEnabled: true,
     localAgentToken: '',
     localAgentUrl: 'ws://127.0.0.1:8765',

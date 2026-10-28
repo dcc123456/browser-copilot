@@ -1191,8 +1191,9 @@ export type ElementPickerControl = {
   enabled: boolean
   locale: 'en' | 'zh'
   format: ElementPickerFormat
-  /** Pick without the card: the first click confirms the element. */
-  hideCard: boolean
+  /** Pick without copying: the click selects and reports the element, keeps the
+   *  highlight, and the next click or Escape dismisses. */
+  selectOnly: boolean
 }
 
 /** Reply to `elementPicker.status`. */
@@ -1200,7 +1201,7 @@ export interface ElementPickerStatusResponse {
   enabled: boolean
   locale: 'en' | 'zh'
   format: ElementPickerFormat
-  hideCard: boolean
+  selectOnly: boolean
 }
 
 /**

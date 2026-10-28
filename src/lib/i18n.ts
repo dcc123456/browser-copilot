@@ -1264,7 +1264,7 @@ export interface Messages {
   settingsElementPicker: string
   settingsElementPickerIntro: string
   settingsElementPickerEnable: string
-  settingsElementPickerHideCard: string
+  settingsElementPickerSelectOnly: string
   settingsElementPickerFormat: string
   settingsElementPickerFormatSelector: string
   settingsElementPickerFormatText: string
@@ -2863,10 +2863,11 @@ const en: Messages = {
   settingsPageBlocked: ({ reason }) => `The active tab cannot be read. ${reason}`,
   settingsElementPicker: 'Element picker',
   settingsElementPickerIntro:
-    "Show a crosshair button on web pages. Click it, pick an element, and that element's HTML (children included) is copied to the clipboard so you can paste it into the chat.",
+    'Show a crosshair button on web pages. Click it, then click an element: the element (children included) is copied to the clipboard and recorded for the local agent to read.',
   settingsElementPickerEnable: 'Show the picker button on pages',
-  settingsElementPickerHideCard: 'Hide the picker card — click an element to take it',
-  settingsElementPickerFormat: 'Copy on confirm',
+  settingsElementPickerSelectOnly:
+    'Select without copying — keep the highlight until you click again',
+  settingsElementPickerFormat: 'Copy on click',
   settingsElementPickerFormatSelector: 'CSS selector only',
   settingsElementPickerFormatText: 'Visible text only',
   settingsElementPickerFormatHtml: 'HTML (tags + text)',
@@ -4429,10 +4430,10 @@ const zhCN: Messages = {
   settingsPageBlocked: ({ reason }) => `当前标签页无法读取。${reason}`,
   settingsElementPicker: '元素选择器',
   settingsElementPickerIntro:
-    '在网页上显示一个十字准星按钮。点击后在页面中选择元素，该元素及其子元素的 HTML 会复制到剪贴板，粘贴到对话里即可。',
+    '在网页上显示一个十字准星按钮。点击它，再点击页面元素：该元素（含子元素）会复制到剪贴板，并记录给本地 Agent 读取。',
   settingsElementPickerEnable: '在网页上显示元素选择按钮',
-  settingsElementPickerHideCard: '隐藏拾取卡片（点击元素即选中）',
-  settingsElementPickerFormat: '确认后复制',
+  settingsElementPickerSelectOnly: '选中但不复制（高亮保留到再次点击）',
+  settingsElementPickerFormat: '点击后复制的内容',
   settingsElementPickerFormatSelector: '仅 CSS 选择器',
   settingsElementPickerFormatText: '仅文本',
   settingsElementPickerFormatHtml: 'HTML（标签 + 文本）',
