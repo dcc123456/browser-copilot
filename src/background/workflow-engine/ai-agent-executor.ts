@@ -162,7 +162,7 @@ export function buildAgentPrompt(parts: {
       lines.push('(element not found — selector did not match anything on the page)')
     } else if (!parts.elementText) {
       lines.push(
-        '(element EXISTS but has NO text content — it is likely a visual element like an image, canvas, or captcha. Use snapshot_page to see it visually.)',
+        '(element EXISTS but has NO text content — it is likely a visual element like an image, canvas, or captcha. snapshot_page is a TEXT snapshot and cannot see it. Call recognize_image with `selector` set to the element selector above to capture and read it; pass `prompt` to say exactly what to extract, e.g. "the captcha text" or "decode the QR code". If the element capture fails, fall back to `screenshot`.)',
       )
     } else {
       lines.push(parts.elementText)

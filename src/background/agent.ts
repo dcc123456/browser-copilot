@@ -441,7 +441,7 @@ export function buildSystemPrompt(options: {
   // action the gate will refuse.
   if (options.mode === 'readonly') {
     parts.push(
-      'OPERATING MODE: READ-ONLY. You may read pages and list tabs but MUST NOT click, type, navigate, switch tabs, fill forms, or use secrets — if asked, explain that read-only mode is on and how to switch to Semi or Full auto.',
+      'OPERATING MODE: READ-ONLY. You may read pages, list tabs, and read text inside images (`recognize_image` / `screenshot` — pass `selector` to capture one element), but MUST NOT click, type, navigate, switch tabs, fill forms, or use secrets — if asked, explain that read-only mode is on and how to switch to Semi or Full auto.',
     )
   } else if (options.mode === 'full') {
     parts.push(
@@ -2070,7 +2070,12 @@ export function advertiseTools({
     if (allowTools && !allowTools.has(name)) return false
     if (hidden?.has(name)) return false
     if (BRIDGE_ONLY_TOOLS.has(name)) return false
-    if (mode === 'readonly' && ACTION_TOOLS.has(name)) return false
+    // The two image reads survive read-only: they reach the vision model but
+    // change nothing, so `isObservationTool` already classifies them as reads —
+    // a readonly turn targeting an image/captcha (e.g. a workflow `ai-agent`
+    // block on a base64 `<img>`) must still be able to call them, otherwise it
+    // burns its whole round budget on text snapshots and fails blind.
+    if (mode === 'readonly' && ACTION_TOOLS.has(name) && !isObservationTool(name)) return false
     // Plan-skill turns get `use_skill` in the core surface (see the option
     // doc). Deliberately AFTER disabled/allowTools/hidden so a user-disabled
     // tool or a specialist's whitelist still wins.
@@ -6274,7 +6279,13 @@ async function runOneToolCall(
   // mid-run; actions from that point must stop. `isPageAction` covers the
   // workflow operators, which are the dangerous case — a workflow-generation
   // turn keeps them in its advertised set for the whole turn.
-  if ((mode === 'readonly' || mode === 'chat') && isPageAction(name)) {
+  // Read-only still allows the two image reads (they change nothing — see
+  // `isObservationTool`); `chat` refuses them because it offers no tools at all.
+  if (
+    (mode === 'readonly' || mode === 'chat') &&
+    isPageAction(name) &&
+    !(mode === 'readonly' && isObservationTool(name))
+  ) {
     const inChat = mode === 'chat'
     const message = inChat
       ? 'Chat mode is on. No page actions or tools are available. Ask the user to switch to Semi or Full auto in the panel to operate the page.'

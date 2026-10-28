@@ -113,6 +113,17 @@ describe('advertiseTools', () => {
     expect(names).toContain('load_tools') // pure bookkeeping, not an action
   })
 
+  it('keeps the image reads in read-only — they change nothing', () => {
+    // A readonly `ai-agent` block targeting an image/captcha (base64 `<img>`)
+    // must be able to call recognize_image / screenshot; hiding them made the
+    // turn flail on text snapshots and die at its round cap with no answer.
+    const names = advertiseTools({ mode: 'readonly' }).map((tool) => tool.function.name)
+    expect(names).toContain('recognize_image')
+    expect(names).toContain('screenshot')
+    // While real actions stay hidden.
+    expect(names).not.toContain('click')
+  })
+
   it('advertises nothing in chat mode', () => {
     expect(advertiseTools({ mode: 'chat' })).toEqual([])
   })
