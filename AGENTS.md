@@ -58,22 +58,27 @@
 
 > 注：仓库历史中可能存在单语种文案残留；新提交一律双语，旧文案按 i18n TODO 逐步补齐。
 
-## 4. 打 tag 必须同步更新 website/ 版本号 · Tagging MUST bump website version
+## 4. 打 tag 必须同步更新 website/ 版本号与 README · Tagging MUST bump website version and README
 
 - 每次 `git tag`（无论是正式版 `vX.Y.Z` 还是预发布 `vX.Y.Z-rc.N`）之前，**必须先**更新 `website/` 目录下展示版本号的位置，使其与即将打的 tag 完全一致。
 - 本仓库中需要同步的文件（截至当前）：
-  - `website/index.html`（line 160、423）
-  - `website/index-zh.html`（line 160、420）
+  - `website/index.html`（页头标签、下载按钮、JSON-LD `softwareVersion` 等所有版本号字符串）
+  - `website/index-zh.html`（同上）
   - 根 `package.json` 的 `version` 字段（始终是单一权威源）
 - Tag 格式：与历史保持一致 `vX.Y.Z`（SemVer 带 `v` 前缀）；tag 中的 `X.Y.Z` 与 `package.json` 的 `version`、与 `website/` 内展示的版本号三处必须**字面完全一致**（不带 `v` 前缀）。
+- **每次 release 必须更新 README**（`[纪律]` + `[验收]`）：
+  - `README.md` 与 `README.zh-CN.md` 必须**同时**更新，章节结构与内容保持一一对应。
+  - 本次 release **新增的功能**必须写进顶部特性列表与对应章节——新功能不能只存在于 `CHANGELOG.md`。
+  - 本次 release **改变的行为**必须改掉 README 里过时的描述：界面入口名称、操作步骤、限制、排障表都算。
+  - 若本次 release 没有用户可见变化（例如纯内部重构），必须在 release notes 或提交说明里写明「README 无需更新」及原因，不能静默跳过。
+  - README 中出现的版本号（如有）也必须与 tag 一致。
 - 顺序约束（必须按顺序执行，不可并行；CI 校验建议在 §收尾自检 之上加一条「`git tag --points-at HEAD` 与 `website/` 声明版本号一致」的检查）：
   1. bump 根 `package.json` 的 `version`
   2. 同步更新 `website/index.html` 与 `website/index-zh.html` 中所有版本号字符串
-  3. `pnpm typecheck && pnpm test && pnpm build` 通过
-  4. `git tag vX.Y.Z`
-- 仅修改 `package.json` 但漏改 `website/`（或反之）视为违反本规则；该类漂移在打 tag 前必须修齐。
-
-> 注：当前仓库已观察到一次漂移——根 `package.json` 已为 `0.6.3`，但 `website/` 两文件仍为 `v0.6.2`，下次打 tag 前需先修齐。
+  3. 按上面的清单更新 `README.md` 与 `README.zh-CN.md`
+  4. `pnpm typecheck && pnpm test && pnpm build` 通过
+  5. `git tag vX.Y.Z`
+- 仅修改 `package.json` 但漏改 `website/`、漏改 README（或只改一份 README）视为违反本规则；该类漂移在打 tag 前必须修齐。
 
 ## 5. 代码复用与简洁 · Reuse & simplicity
 
@@ -174,7 +179,8 @@
 - ⑦ 死代码与命名：没有未调用的导出、没有注释掉的代码块、命名合规（§6）。`[纪律]`
 - ⑧ UI 与文案满足 §2（Tailwind + token 双侧同步）与 §3（en + zh-CN；核心字典由封闭 `Messages` 类型机检）。`[验收]`
 - ⑨ 暂存区没有测试临时产物：截图、探针输出、一次性素材只能留在 `tmp/`，禁止 `git add -f` 绕过。`[纪律]`
-- ⑩ 提交符合 §1（英文 Conventional Commits）；要打 tag 时按 §4 先同步 `website/` 版本号。`[纪律]`
+- ⑩ 提交符合 §1（英文 Conventional Commits）；要打 tag 时按 §4 先同步 `website/` 版本号，并更新
+  `README.md` 与 `README.zh-CN.md`（新增功能补进特性列表与章节，变更行为改掉过时描述）。`[纪律]`
 - ⑪ 已按 §8 自动提交并推送到 `main`，回复里贴出 commit hash。`[纪律]`
 - ⑫ 已按 §8.6 给出「这次改了什么」与「人工怎么测」（步骤 + 预期现象）；无浏览器实证的条目写明
   BLOCKED 与原因。`[纪律]`
@@ -207,4 +213,5 @@
   `src/sidepanel/i18n.tsx` 不受 `Messages` 类型保护；`server/web/` 现有硬编码文案属已知存量违例
   （见前言的"新增与被修改"限定）。
 - 无分层 / boundaries 检查：`src/lib/**` chrome-free 与 §5.7 白名单靠 `CONTRIBUTING.md` + review。
-- §4 设想的「tag ↔ website 版本一致」校验脚本并不存在；打 tag 前必须人工核对。
+- §4 设想的「tag ↔ website 版本一致」校验脚本并不存在；打 tag 前必须人工核对。README 是否随
+  release 更新、两份 README 是否对应，同样没有工具检查——只能靠发布前人工逐项核对。

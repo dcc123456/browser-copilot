@@ -35,6 +35,10 @@ tolerated but should not grow.
 - **AI assistants commit and push to `main` themselves** once the gates above
   are green — one feature per commit — and report what changed plus how to
   test it by hand. See `AGENTS.md` §8.
+- **Releases update both READMEs.** Every `git tag` must be preceded by
+  syncing `website/` version strings and adding new features plus changed
+  behaviour to `README.md` and `README.zh-CN.md` (both, kept in parallel). See
+  `AGENTS.md` §4.
 - **Styling is Tailwind-only** with the semantic design tokens
   (`bg-panel`, `text-muted`, …). No hardcoded hex colours, no CSS-in-JS, no new
   CSS classes for one-off styles. See `AGENTS.md`.

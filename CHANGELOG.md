@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Docs — READMEs catch up with 0.6.6–0.6.15
+
+Both READMEs now cover the workflow marketplace (public and team sources,
+publishing, applying, updates), the Settings page element picker and
+`read_selected_element`, in-panel feedback issues, the fifth chat mode
+(workflow generate), workflow groups, the canvas assistant and data table, the
+AI-agent block's skills/tools switches, several trigger methods and cron on
+scheduled tasks, composer `/` commands, `@` attachments and the model picker,
+and the batch-based action-step limit. They also gain the Firefox `.xpi`
+install path, the `-firefox` build commands, and the server runner section in
+the English edition. The release rule now requires both READMEs to be updated
+for every tag.
+
 ### Added — Send feedback from Settings
 
 Settings ends with a feedback entry: write a report, keep the diagnostics box
