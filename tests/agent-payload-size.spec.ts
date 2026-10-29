@@ -21,14 +21,22 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * use_operators detour or the activate-and-retry penalty — so the mode now
  * advertises EVERY operator category from round one (the model may still narrow
  * the surface consciously via `use_operators`). The price is accepted
- * deliberately: round 1 measures ~61k chars (~18.6k tokens), roughly 3× full
+ * deliberately: round 1 measures ~62.8k chars (~19k tokens), several times full
  * auto, and only in this mode.
  *
  * Raised 18_000 → 20_000 when `present_plan` (the plan skill's approval
  * hand-off, ~1.2k schema) joined the always-advertised core: plan-first needs
  * the tool reachable in round one, not after a load_tools round trip.
+ *
+ * LOWERED 20_000 → 12_600 when the specialised page tools moved into on-demand
+ * groups (forms / flow / keys / vision / script — see TOOL_GROUPS): the core
+ * surface is now the universal browse loop plus the read and interaction tools,
+ * measured system=4_317 tools=8_091 total=12_408. This is the point of the
+ * change — round one used to spend nearly half its tool budget on schemas most
+ * conversations never touch. Raising this back toward 20k means the grouping
+ * silently regressed; prefer a new group over a bigger menu.
  */
-const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
+const MAX_ADVERTISED_PAYLOAD_CHARS = 12_600
 /**
  * The full catalog (core + every on-demand group) must also stay bounded.
  * Raised 19_500 → 21_500 when the on-demand "delegate" group
@@ -81,8 +89,11 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 20_000
  * Raised 31_600 → 32_100 for `read_selected_element` (~430: the read tool that
  * hands the model the element the user picked with the crosshair, plus a ready
  * `target`; measured 32_026).
+ * Raised 32_100 → 32_300 when `load_tools` had to name the new page groups and
+ * their members (~200 chars in the schema; group moves themselves cost nothing
+ * — the same schemas, filed differently). Measured 32_229.
  */
-const MAX_CATALOG_CHARS = 32_100
+const MAX_CATALOG_CHARS = 32_300
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the
@@ -137,9 +148,10 @@ const MAX_WORKFLOW_ROUND1_CHARS = 62_800
  * Kept at 37_900 for the `set-variable` schema (the largest category,
  * `interaction`, moved 37_808 → 37_875 because `upload-file` is in it).
  * Raised 37_900 → 38_400 with the round-1 budget (`read_selected_element` —
- * measured 38_304).
+ * measured 38_304). Raised 38_400 → 38_500 with the round-1 budget (rule 14 of
+ * the shared system prompt now names the new loadable groups — measured 38_421).
  */
-const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_400
+const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_500
 /**
  * The ceiling for the worst case the model can actually reach: every category
  * declared at once, which is the same set as `operators_author` (~42.9k of tool
@@ -173,21 +185,26 @@ const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_800
  * Raised 63_300 → 63_700 with the round-1 budget (`read_selected_element` —
  * measured 63_657).
  * Raised 63_700 → 63_800 with the round-1 budget (the `ai-agent` capability
- * keys — measured 63_723).
+ * keys — measured 63_723). Raised 63_800 → 63_900 with the round-1 budget
+ * (the new groups named in system-prompt rule 14 — measured 63_840).
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 63_800
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 63_900
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
- * now deliberately carries EVERY operator schema, so workflow runs ~3× full
- * auto's tool surface and ~3.2× its total payload — the accepted price of not
- * losing runs to undeclared categories (see the file header). These ceilings
- * (measured 3.053 / 3.184 after `file-path` was added) keep that price from
- * silently creeping further; the tools ratio was raised 3.05 → 3.06 with it,
- * then → 3.08 for the `set-variable` schema (measured 3.075), and the total
- * ratio → 3.21 (measured 3.201).
+ * now deliberately carries EVERY operator schema, so workflow runs several
+ * times full auto's tool surface — the accepted price of not losing runs to
+ * undeclared categories (see the file header).
+ *
+ * The ratios are RELATIVE, so they moved when the DENOMINATOR shrank: full auto
+ * dropped from ~15.7k to ~8.1k of tool schemas when the specialised page tools
+ * became on-demand groups, without a single byte being added to workflow mode.
+ * Measured 5.848 tools / 5.061 total after that change (they were 3.075 / 3.201
+ * before it). The ABSOLUTE caps above are the real guard now; these ratios only
+ * catch workflow-mode growth that the absolute caps would let through, and any
+ * future cut to the full-auto denominator has to re-base them deliberately.
  */
-const MAX_WORKFLOW_TOOLS_RATIO = 3.08
-const MAX_WORKFLOW_OVER_FULL_AUTO_RATIO = 3.21
+const MAX_WORKFLOW_TOOLS_RATIO = 5.95
+const MAX_WORKFLOW_OVER_FULL_AUTO_RATIO = 5.15
 
 /**
  * Workflow-generation turns mount the built-in `workflow-generator` skill into
@@ -318,10 +335,10 @@ describe('first-turn agent payload size (workflow generate)', () => {
 
   /**
    * The cost of the default is accepted, but it must stay BOUNDED and known:
-   * workflow round 1 carries every operator schema, so it runs ~2.8× full
-   * auto's tool surface and ~2.9× its total payload. The ceilings below pin
-   * that tradeoff (measured 2.79 / 2.95); a change that pushes past them needs
-   * a deliberate budget decision, same as the absolute budgets above.
+   * workflow round 1 carries every operator schema while full auto now carries
+   * only the core browse loop. The ceilings below pin that tradeoff; a change
+   * that pushes past them needs a deliberate budget decision, same as the
+   * absolute budgets above.
    */
   it('round-1 tool surface stays within the accepted multiple of full auto', () => {
     const fullTools = JSON.stringify(advertiseTools({ mode: 'full' })).length

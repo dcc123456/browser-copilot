@@ -92,6 +92,30 @@ describe('advertiseTools', () => {
     }
   })
 
+  it('keeps the universal browse loop core and hides every specialised page group', () => {
+    // read → snapshot → act → navigate is what MOST conversations do; those
+    // schemas stay in round one. The specialised capabilities (dropdowns,
+    // scrolling/waits, keys, vision, scripting) each cost a load round the
+    // first time they are used, which is cheaper than paying for them always.
+    const names = advertiseTools({ mode: 'full' }).map((tool) => tool.function.name)
+    for (const name of [
+      'read_current_page',
+      'snapshot_page',
+      'click',
+      'fill',
+      'open_url',
+      'read_selected_element',
+      'ask_user',
+      'run_plan',
+      'present_plan',
+    ]) {
+      expect(names).toContain(name)
+    }
+    for (const group of ['forms', 'flow', 'keys', 'vision', 'script']) {
+      for (const name of TOOL_GROUPS[group]!) expect(names).not.toContain(name)
+    }
+  })
+
   it('widens the set once a group is loaded', () => {
     const names = advertiseTools({ mode: 'full', loadedGroups: new Set(['tabs']) }).map(
       (tool) => tool.function.name,
@@ -171,6 +195,52 @@ describe('load_tools round trip', () => {
     expect(advertisedNames(1)).toContain('save_local')
   })
 
+  it('auto-loads a page group on a stray call and retries on the next round', async () => {
+    streamMock
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [toolCall('c1', 'select_option', { value: 'B' })],
+      } as never)
+      .mockResolvedValueOnce({ content: 'ok', toolCalls: [] } as never)
+
+    const history: { role: string; name?: string; content?: string }[] = [
+      { role: 'user', content: 'pick option B' },
+    ]
+    await runAgentTurn(history as never, deps() as never)
+
+    expect(advertisedNames(0)).not.toContain('select_option')
+    const result = toolResult(history, 'select_option')
+    expect(result.error).toContain('forms')
+    expect(result.error).toContain('again')
+    expect(advertisedNames(1)).toContain('select_option')
+    expect(advertisedNames(1)).toContain('set_checkbox')
+  })
+
+  it('lets run_plan drive a grouped tool without a load round', async () => {
+    // run_plan dispatches its steps through executeTool, not the advertisement
+    // gate: a plan assembled from the catalog must not stall on "not loaded".
+    streamMock
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [
+          toolCall('c1', 'run_plan', { steps: [{ tool: 'select_option', args: { value: 'B' } }] }),
+        ],
+      } as never)
+      .mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
+
+    const history: { role: string; name?: string; content?: string }[] = [
+      { role: 'user', content: 'pick option B' },
+    ]
+    await runAgentTurn(history as never, deps() as never)
+
+    // The step reached the tool itself (and failed for its own reason — no
+    // element target), not the group gate.
+    const planResult = JSON.stringify(toolResult(history, 'run_plan'))
+    expect(planResult).not.toContain('was not loaded')
+    expect(planResult).toContain('needs an element')
+    expect(advertisedNames(1)).not.toContain('select_option')
+  })
+
   it('reports unknown group names and keeps the conversation scoped', async () => {
     streamMock
       .mockResolvedValueOnce({
@@ -223,6 +293,31 @@ describe('workflow operator tools are gated to workflow mode', () => {
     const advertisedOperators = wf.filter((name) => name.startsWith('wf_op_'))
     expect(advertisedOperators.sort()).toEqual([...expected].sort())
     expect(wf).not.toContain('compose_workflow')
+  })
+
+  it('refuses a stray native action instead of auto-loading a page group', async () => {
+    // In a mode that can never advertise these (they record nothing), the
+    // auto-load hint would be a lie: the group loads, the retry is still
+    // withheld, and an unrecorded action could slip through on the way.
+    streamMock
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [toolCall('c1', 'press_key', { key: 'Enter' })],
+      } as never)
+      .mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
+
+    const history: { role: string; name?: string; content?: string }[] = [
+      { role: 'user', content: 'build a workflow' },
+    ]
+    await runAgentTurn(
+      history as never,
+      deps({ getMode: async () => 'workflow' as const }) as never,
+    )
+
+    const result = toolResult(history, 'press_key')
+    expect(result.error).toContain('records no workflow node')
+    expect(JSON.stringify(result)).not.toContain('auto-loaded')
+    expect(advertisedNames(1)).not.toContain('press_key')
   })
 
   it('keeps the read tools: `ref` targeting depends on snapshot_page', () => {

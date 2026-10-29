@@ -593,6 +593,16 @@ export const TOOL_GROUPS: Record<string, readonly string[]> = {
     'list_scheduled_tasks',
     'create_scheduled_task',
   ],
+  // Page work beyond the universal browse loop (read → snapshot → click/fill →
+  // navigate), split by capability so a conversation only pays for what it
+  // touches. Each group self-heals on a stray call (see the auto-load branch in
+  // runOneToolCall), and `run_plan` executes hidden tools directly, so moving a
+  // tool here costs at most one load round per conversation, never a failure.
+  forms: ['select_option', 'set_checkbox'],
+  flow: ['scroll', 'wait_for'],
+  keys: ['press_key'],
+  vision: ['screenshot', 'recognize_image'],
+  script: ['run_javascript'],
   // Multi-agent delegation. On demand like the others so it stays out of the
   // first-round payload; never loaded for a sub-agent (recursion guard).
   delegate: ['delegate_to_agent'],
@@ -619,6 +629,14 @@ export const TOOL_GROUPS: Record<string, readonly string[]> = {
   // carrying all 54 operator schemas.
   ...WORKFLOW_CATEGORY_TOOL_GROUPS,
 }
+
+/**
+ * The observation-only image reads. They ride the `vision` group like the other
+ * specialised tools, but two modes cannot widen to it (read-only, workflow) or
+ * must not make an image task wait a round — see the exemptions in
+ * `advertiseTools`.
+ */
+const VISION_GROUP_TOOLS: ReadonlySet<string> = new Set(TOOL_GROUPS.vision)
 
 /**
  * Tool → the on-demand group that owns it.
@@ -1250,7 +1268,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'load_tools',
       description:
-        'Load a group of tools that are hidden by default to keep requests small. Groups: "tabs" (list/open/switch/close/pin tabs), "data" (save files, saved profile, saved passwords), "skills" (use/create saved skills), "ops" (network requests, console messages, scheduled tasks — list and create them), "delegate" (delegate a sub-task to a specialist agent). Call this before using any tool that is not advertised in the current request; loaded groups stay available for the rest of the conversation.',
+        'Load a group of tools that are hidden by default to keep requests small. Groups: "tabs" (list/open/switch/close/pin tabs), "data" (save files, saved profile, saved passwords), "skills" (use/create saved skills), "ops" (network requests, console messages, scheduled tasks — list and create them), "forms" (select_option, set_checkbox), "flow" (scroll, wait_for), "keys" (press_key), "vision" (screenshot, recognize_image), "script" (run_javascript), "delegate" (delegate a sub-task to a specialist agent). Call this before using any tool that is not advertised in the current request; loaded groups stay available for the rest of the conversation.',
       parameters: {
         type: 'object',
         properties: {
@@ -2001,6 +2019,10 @@ export function advertiseTools({
       // doc): loading a matching saved skill per approved step is part of the
       // plan flow, and the on-demand detour kills it in practice.
       if (name === 'use_skill' && planSkillActive) return true
+      // Workflow mode's load_tools menu cannot widen to the page-edit groups,
+      // so the observation-only image reads must stay core here or become
+      // unreachable.
+      if (VISION_GROUP_TOOLS.has(name)) return true
       const group = TOOL_GROUP_BY_NAME.get(name)
       if (group && !loadedGroups.has(group)) return false
       return true
@@ -2085,6 +2107,11 @@ export function advertiseTools({
     // doc). Deliberately AFTER disabled/allowTools/hidden so a user-disabled
     // tool or a specialist's whitelist still wins.
     if (name === 'use_skill' && planSkillActive) return true
+    // Read-only keeps the image reads regardless of the `vision` group: an
+    // unattended readonly run targeting an image/CAPTCHA must reach them in
+    // round one, not after a load_tools detour (see the test in
+    // tests/agent-tool-groups.spec.ts).
+    if (mode === 'readonly' && VISION_GROUP_TOOLS.has(name)) return true
     const group = TOOL_GROUP_BY_NAME.get(name)
     if (group && !loadedGroups.has(group)) return false
     return true
@@ -5850,6 +5877,20 @@ async function runOneToolCall(
       'For a script step load `operators_escape` and call `wf_op_javascript-code` — it runs the page script AND records the node, and accepts a bare expression or a `return` body.'
     pushResult(JSON.stringify({ error: message }))
     deps.send({ type: 'tool.result', name, summary: 'Blocked (use wf_op_javascript-code)' })
+    return
+  }
+
+  // Every withheld native action, for the same reason: it would operate the
+  // page without recording a node. Refusing HERE (before the group auto-load
+  // below) also stops a stray `press_key`/`save_local` call from "loading" a
+  // page group this mode can never advertise — the retry hint would be a lie.
+  if (WORKFLOW_WITHHELD_TOOLS.has(name) && (await deps.getMode()) === 'workflow') {
+    pushResult(
+      JSON.stringify({
+        error: `"${name}" records no workflow node, so it is unavailable in workflow-generation mode. Use the wf_op_* operator for this step — every operator call operates the page AND records the node.`,
+      }),
+    )
+    deps.send({ type: 'tool.result', name, summary: `Blocked (${name} records nothing)` })
     return
   }
 

@@ -49,11 +49,19 @@ afterEach(() => {
   streamMock.mockReset()
 })
 
-function jsCall(id: string) {
+// A CORE page action: `run_javascript` now rides the on-demand `script` group,
+// so the first call in a turn would spend a round on the auto-load hint instead
+// of reaching the driver — this spec is about what happens once the driver runs.
+function clickCall(id: string) {
   return {
     id,
     type: 'function' as const,
-    function: { name: 'run_javascript', arguments: JSON.stringify({ code: 'return 1' }) },
+    function: {
+      name: 'click',
+      arguments: JSON.stringify({
+        target: { primary: { how: 'css', value: '#go' }, fallbacks: [] },
+      }),
+    },
   }
 }
 
@@ -85,10 +93,10 @@ describe('repeated unchangeable failures', () => {
       isTopFrame: true,
     })
     streamMock
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c1')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c2')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c3')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c4')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c1')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c2')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c3')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c4')] } as never)
       .mockResolvedValueOnce({ content: 'moving on', toolCalls: [] } as never)
 
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
@@ -111,10 +119,10 @@ describe('repeated unchangeable failures', () => {
       isTopFrame: true,
     })
     streamMock
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c1')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c2')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c3')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c4')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c1')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c2')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c3')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c4')] } as never)
       .mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
 
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
@@ -126,7 +134,7 @@ describe('repeated unchangeable failures', () => {
 })
 
 describe('round budget', () => {
-  function successfulJs() {
+  function successfulClick() {
     execOnActiveTabMock.mockResolvedValue({
       ok: true,
       data: 1,
@@ -137,11 +145,11 @@ describe('round budget', () => {
   }
 
   it('extends a panel turn past its budget instead of ending it', async () => {
-    successfulJs()
+    successfulClick()
     streamMock
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c1')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c2')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c3')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c1')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c2')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c3')] } as never)
       .mockResolvedValueOnce({ content: 'RESULT: task finished', toolCalls: [] } as never)
 
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
@@ -168,13 +176,13 @@ describe('round budget', () => {
   })
 
   it('still ends with a tools-off summary at the safety ceiling', async () => {
-    successfulJs()
+    successfulClick()
     // A model that never answers while tools are on; only the tools-off
     // wrap-up request gets prose.
     streamMock.mockImplementation(async (request: { tools?: unknown[] }) =>
       request.tools === undefined
         ? ({ content: 'SUMMARY: 10 rounds done, still blocked', toolCalls: [] } as never)
-        : ({ content: '', toolCalls: [jsCall(`c${Math.random()}`)] } as never),
+        : ({ content: '', toolCalls: [clickCall(`c${Math.random()}`)] } as never),
     )
 
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
@@ -195,10 +203,10 @@ describe('round budget', () => {
   })
 
   it('ends a silent panel ceiling with a count-free reason', async () => {
-    successfulJs()
+    successfulClick()
     // Even the tools-off wrap-up returns nothing: the status line is all the
     // user gets, and it must not leak the step numbers.
-    streamMock.mockResolvedValue({ content: '', toolCalls: [jsCall('c1')] } as never)
+    streamMock.mockResolvedValue({ content: '', toolCalls: [clickCall('c1')] } as never)
 
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
     await runAgentTurn(
@@ -213,10 +221,10 @@ describe('round budget', () => {
   })
 
   it('keeps the hard cap and status line for unattended turns', async () => {
-    successfulJs()
+    successfulClick()
     streamMock
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c1')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [jsCall('c2')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c1')] } as never)
+      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c2')] } as never)
 
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
     await runAgentTurn(history as never, deps({ getMaxToolRounds: async () => 2 }) as never)
