@@ -3,7 +3,7 @@ import { sendCommand, type WindowChoice } from '../lib/messages'
 import { LOCALE_LABELS, LOCALES, type LocaleSetting, type Messages } from '../lib/i18n'
 import type { AgentStatus, ElementPickerFormat, UnattendedWindowPolicy } from '../lib/types'
 import { RUN_WINDOW_LIMITS, normalizeRunWindowLimit } from '../lib/types'
-import { TOOL_META } from '../lib/tool-catalog'
+import { TOOL_META, TOOL_SECTIONS } from '../lib/tool-catalog'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 import {
@@ -1038,32 +1038,42 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             </div>
             <p className="hint">{t.settingsToolsHint}</p>
             <div className="tool-toggle-list">
-              {TOOL_META.map((meta) => {
-                const disabled = settings.disabledTools.includes(meta.name)
-                return (
-                  <div className="flex items-start gap-2" key={meta.name}>
-                    <Switch
-                      checked={!disabled}
-                      label={
-                        <span className="flex flex-col gap-0.5">
-                          <b>{t[meta.labelKey]}</b>
-                          <code className="tool-name">{meta.name}</code>
-                          <span className="tool-warn">{t[meta.warningKey]}</span>
-                        </span>
-                      }
-                      onChange={() => {
-                        const next = disabled
-                          ? settings.disabledTools.filter((n) => n !== meta.name)
-                          : [...settings.disabledTools, meta.name]
-                        void mutate({
-                          type: 'settings.set',
-                          patch: { disabledTools: next },
-                        })
-                      }}
-                    />
+              {TOOL_SECTIONS.map((section) => (
+                <section className="flex flex-col gap-2" key={section.id}>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="context-subhead">{t[section.labelKey]}</div>
+                    <span className="tool-warn">
+                      {t.settingsToolGroupCount({ count: section.tools.length })}
+                    </span>
                   </div>
-                )
-              })}
+                  {section.tools.map((meta) => {
+                    const disabled = settings.disabledTools.includes(meta.name)
+                    return (
+                      <div className="flex items-start gap-2" key={meta.name}>
+                        <Switch
+                          checked={!disabled}
+                          label={
+                            <span className="flex flex-col gap-0.5">
+                              <b>{t[meta.labelKey]}</b>
+                              <code className="tool-name">{meta.name}</code>
+                              <span className="tool-warn">{t[meta.warningKey]}</span>
+                            </span>
+                          }
+                          onChange={() => {
+                            const next = disabled
+                              ? settings.disabledTools.filter((n) => n !== meta.name)
+                              : [...settings.disabledTools, meta.name]
+                            void mutate({
+                              type: 'settings.set',
+                              patch: { disabledTools: next },
+                            })
+                          }}
+                        />
+                      </div>
+                    )
+                  })}
+                </section>
+              ))}
             </div>
           </div>
         )}

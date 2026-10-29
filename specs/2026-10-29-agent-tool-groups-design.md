@@ -115,3 +115,32 @@ the `script` group (the auto-load round precedes the failure-streak checks).
 `tests/agent-payload-size.spec.ts` pins the new numbers: full auto round 1
 ≤ 12.6k chars total, and the workflow/full ratios re-based because the full-auto
 baseline shrank (the absolute workflow caps are the real guard and stay put).
+
+## Settings list grouped by loading group (follow-up, 2026-10-29)
+
+The Settings → Tools list used to be one flat run of 40 switches. It now renders
+one section per on-demand loading group, in load order: **Always on** (the core
+loop + `load_tools`), Tabs, Files & saved data, Skills, Diagnostics & schedules,
+Forms & choices, Scrolling & waits, Keyboard, Images & OCR, Scripts, Delegation,
+then **Workflow & developer** (`compose_workflow` + bridge-only tools, i.e.
+everything the workflow mode advertises but `load_tools` never offers).
+
+- **Single source.** `TOOL_GROUPS` moved from `src/background/agent.ts` to the
+  chrome-free `src/lib/tool-groups.ts`; the background imports it and
+  `src/lib/tool-catalog.ts` derives `TOOL_SECTIONS` from the same constant. No
+  second hand-maintained group list exists, so a tool that changes group moves
+  in the UI automatically. `tests/tool-config.spec.ts` asserts every `TOOL_META`
+  entry appears in exactly one section and that core/workflow membership matches
+  the advertised sets.
+- **Only the grouping changed.** Every switch keeps its `disabledTools` write
+  path and its per-tool label/warning; the header total and the enable-all /
+  disable-all buttons still count `TOOL_META`.
+- **Copy.** Twelve new bilingual headings (`settingsToolGroup*`), a singular-aware
+  `settingsToolGroupCount` ("1 tool" / "3 tools" / "1 个工具"), and a rewritten
+  `settingsToolsHint` that explains load-on-first-use instead of plain enablement.
+
+Real-browser evidence: `tmp/settings-tool-sections-probe.mjs` loads the built
+`dist/` in Chromium, opens Settings → Tools, and `PASS`es 9/9 — 12 headings in
+order under both `en` and `zh-CN`, 40 switches across the sections (10 Always on
+… 5 Workflow & developer), per-section counts, and toggling the Keyboard switch
+persists `press_key` into `disabledTools` (restored afterwards).

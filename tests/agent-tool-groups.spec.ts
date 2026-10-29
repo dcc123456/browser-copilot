@@ -6,9 +6,9 @@ import {
   isPageAction,
   modeAutoApproves,
   runAgentTurn,
-  TOOL_GROUPS,
   USE_OPERATORS_TOOL,
 } from '../src/background/agent'
+import { TOOL_GROUPS } from '../src/lib/tool-groups'
 import {
   ADVERTISABLE_OPERATOR_CATEGORIES,
   CORE_OPERATOR_TOOL_NAMES,

@@ -1,4 +1,5 @@
 import type { Messages } from './i18n'
+import { TOOL_GROUPS } from './tool-groups'
 import { BLOCK_CATALOG } from './workflow/blocks/catalog'
 import { operatorExecClass } from './workflow/operator-class'
 
@@ -268,6 +269,96 @@ export const TOOL_META: ToolMeta[] = [
 ]
 
 export const TOOL_META_BY_NAME = new Map(TOOL_META.map((meta) => [meta.name, meta]))
+
+/**
+ * The Settings list groups tools the way the agent LOADS them: the always-on
+ * core first, then one bucket per on-demand group (`load_tools`), then the
+ * workflow/developer entries. Grouping by loading — not by what a tool does —
+ * keeps the list aligned with the decision the user makes here: a grouped tool
+ * costs one load round the first time it is used, a core tool is on every
+ * request.
+ *
+ * Order is the Settings display order (narrow capability buckets first, the
+ * catch-all groups last). Group ids are the `TOOL_GROUPS` keys.
+ */
+const SETTINGS_GROUP_ORDER = [
+  'tabs',
+  'data',
+  'skills',
+  'ops',
+  'forms',
+  'flow',
+  'keys',
+  'vision',
+  'script',
+  'delegate',
+] as const
+
+type SettingsGroupId = (typeof SETTINGS_GROUP_ORDER)[number]
+
+const SETTINGS_GROUP_LABEL_KEYS: Record<SettingsGroupId, MessageKey> = {
+  tabs: 'settingsToolGroupTabs',
+  data: 'settingsToolGroupData',
+  skills: 'settingsToolGroupSkills',
+  ops: 'settingsToolGroupOps',
+  forms: 'settingsToolGroupForms',
+  flow: 'settingsToolGroupFlow',
+  keys: 'settingsToolGroupKeys',
+  vision: 'settingsToolGroupVision',
+  script: 'settingsToolGroupScript',
+  delegate: 'settingsToolGroupDelegate',
+}
+
+/**
+ * Entries that are not ordinary page capabilities: `compose_workflow` (workflow
+ * generation only) plus the bridge-only tools. Kept in one bucket so the list
+ * does not imply a panel turn ever offers them.
+ */
+const WORKFLOW_SECTION_TOOLS: ReadonlySet<string> = new Set([
+  'compose_workflow',
+  ...BRIDGE_ONLY_TOOLS,
+])
+
+export interface ToolSection {
+  id: SettingsGroupId | 'core' | 'workflow'
+  labelKey: MessageKey
+  tools: ToolMeta[]
+}
+
+const SETTINGS_GROUP_OF_TOOL = new Map<string, SettingsGroupId>()
+for (const group of SETTINGS_GROUP_ORDER) {
+  for (const name of TOOL_GROUPS[group] ?? []) SETTINGS_GROUP_OF_TOOL.set(name, group)
+}
+
+/**
+ * Every {@link TOOL_META} entry belongs to exactly one section (a unit test
+ * pins that): losing one here would make it un-disableable in Settings.
+ */
+const GROUP_SECTIONS: ToolSection[] = SETTINGS_GROUP_ORDER.map((group): ToolSection => ({
+  id: group,
+  labelKey: SETTINGS_GROUP_LABEL_KEYS[group],
+  tools: TOOL_META.filter((meta) => SETTINGS_GROUP_OF_TOOL.get(meta.name) === group),
+}))
+
+const CORE_SECTION: ToolSection = {
+  id: 'core',
+  labelKey: 'settingsToolGroupCore',
+  tools: TOOL_META.filter(
+    (meta) => !SETTINGS_GROUP_OF_TOOL.has(meta.name) && !WORKFLOW_SECTION_TOOLS.has(meta.name),
+  ),
+}
+
+const WORKFLOW_SECTION: ToolSection = {
+  id: 'workflow',
+  labelKey: 'settingsToolGroupWorkflow',
+  tools: TOOL_META.filter((meta) => WORKFLOW_SECTION_TOOLS.has(meta.name)),
+}
+
+export const TOOL_SECTIONS: ToolSection[] = [
+  CORE_SECTION,
+  ...GROUP_SECTIONS,
+  WORKFLOW_SECTION,
+].filter((section) => section.tools.length > 0)
 
 /**
  * Operator tool metadata, derived from `BLOCK_CATALOG` so the settings panel

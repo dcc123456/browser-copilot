@@ -26,7 +26,7 @@ beforeEach(() => {
   vi.stubGlobal('chrome', makeChromeMock())
 })
 
-import { TOOL_GROUPS } from '../src/background/agent'
+import { TOOL_GROUPS } from '../src/lib/tool-groups'
 import {
   actionNodesOf,
   getDraftSnapshot,

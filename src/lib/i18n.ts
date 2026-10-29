@@ -1157,6 +1157,26 @@ export interface Messages {
   settingsToolsEnableAll: string
   settingsToolsDisableAll: string
   settingsToolsEnabled: string
+  /**
+   * Headings of the tool sections in settings, one per on-demand group plus
+   * the always-advertised core and the workflow/developer bucket. The grouping
+   * mirrors how the agent loads tools, so a user can see what costs a load
+   * round instead of facing one flat list.
+   */
+  settingsToolGroupCore: string
+  settingsToolGroupTabs: string
+  settingsToolGroupData: string
+  settingsToolGroupSkills: string
+  settingsToolGroupOps: string
+  settingsToolGroupForms: string
+  settingsToolGroupFlow: string
+  settingsToolGroupKeys: string
+  settingsToolGroupVision: string
+  settingsToolGroupScript: string
+  settingsToolGroupDelegate: string
+  settingsToolGroupWorkflow: string
+  /** Tool count shown next to a group heading; singular-aware. */
+  settingsToolGroupCount: (params: { count: number }) => string
   /** Heading of the read-only workflow-operator reference in settings. */
   settingsOperatorTools: string
   /** Explains that these are workflow-mode-only and dispatched by category. */
@@ -2775,10 +2795,23 @@ const en: Messages = {
   settingsStateCustom: 'custom',
   settingsTools: 'Tools',
   settingsToolsHint:
-    'Each enabled tool adds its parameter definition to every request. Disable tools you never use; the assistant simply will not see them.',
+    'Tools are grouped the way the assistant loads them. “Always on” tools are sent with every request; the other groups load the first time one of their tools is used and then stay for the conversation. Disable what you never use — the assistant simply will not see it.',
   settingsToolsEnableAll: 'Enable all',
   settingsToolsDisableAll: 'Disable all',
   settingsToolsEnabled: 'enabled',
+  settingsToolGroupCore: 'Always on',
+  settingsToolGroupTabs: 'Tabs',
+  settingsToolGroupData: 'Files & saved data',
+  settingsToolGroupSkills: 'Skills',
+  settingsToolGroupOps: 'Diagnostics & schedules',
+  settingsToolGroupForms: 'Forms & choices',
+  settingsToolGroupFlow: 'Scrolling & waits',
+  settingsToolGroupKeys: 'Keyboard',
+  settingsToolGroupVision: 'Images & OCR',
+  settingsToolGroupScript: 'Scripts',
+  settingsToolGroupDelegate: 'Delegation',
+  settingsToolGroupWorkflow: 'Workflow & developer',
+  settingsToolGroupCount: ({ count }) => `${count} ${count === 1 ? 'tool' : 'tools'}`,
   settingsOperatorTools: 'Workflow operator tools',
   settingsOperatorToolsHint:
     'Workflow-generation mode only. The assistant picks a category and only those tools are sent, which is what keeps each request small. A tool you call from a category that was not sent activates that category automatically.',
@@ -4389,10 +4422,23 @@ const zhCN: Messages = {
   settingsStateCustom: '已自定义',
   settingsTools: '工具',
   settingsToolsHint:
-    '每个启用的工具都会把其参数定义加入每次请求。关闭你用不到的工具，助手就看不到它。',
+    '工具按助手的加载方式分组：“始终加载”的工具会出现在每次请求里；其余分组在第一次用到其中某个工具时整组加载，并在此次会话中保持。关闭用不到的工具，助手就看不到它。',
   settingsToolsEnableAll: '全部启用',
   settingsToolsDisableAll: '全部关闭',
   settingsToolsEnabled: '个已启用',
+  settingsToolGroupCore: '始终加载',
+  settingsToolGroupTabs: '标签页',
+  settingsToolGroupData: '文件与已保存数据',
+  settingsToolGroupSkills: '技能',
+  settingsToolGroupOps: '诊断与定时任务',
+  settingsToolGroupForms: '表单与选项',
+  settingsToolGroupFlow: '滚动与等待',
+  settingsToolGroupKeys: '键盘',
+  settingsToolGroupVision: '图像与识别',
+  settingsToolGroupScript: '脚本',
+  settingsToolGroupDelegate: '子智能体委派',
+  settingsToolGroupWorkflow: '工作流与开发者',
+  settingsToolGroupCount: ({ count }) => `${count} 个工具`,
   settingsOperatorTools: '工作流算子工具',
   settingsOperatorToolsHint:
     '仅在工作流生成模式下可用。助手先声明需要哪一类，只发送该类的工具，这是每次请求体积可控的关键。若调用了未发送分类下的工具，该分类会被自动激活。',

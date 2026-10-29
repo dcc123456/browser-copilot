@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { advertiseTools, buildSystemPrompt, TOOLS } from '../src/background/agent'
 import { DEFAULT_SYSTEM_PROMPT } from '../src/lib/system-prompt'
-import { BRIDGE_ONLY_TOOLS, TOOL_META, TOOL_META_BY_NAME_MERGED } from '../src/lib/tool-catalog'
+import {
+  BRIDGE_ONLY_TOOLS,
+  TOOL_META,
+  TOOL_META_BY_NAME_MERGED,
+  TOOL_SECTIONS,
+} from '../src/lib/tool-catalog'
+import { TOOL_GROUPS } from '../src/lib/tool-groups'
 
 describe('system prompt', () => {
   it('uses the full default operating rules when no override is given', () => {
@@ -152,6 +158,46 @@ describe('tool catalog', () => {
     for (const options of surfaces) {
       const names = advertiseTools(options).map((tool) => tool.function.name)
       for (const bridgeOnly of BRIDGE_ONLY_TOOLS) expect(names).not.toContain(bridgeOnly)
+    }
+  })
+})
+
+describe('settings tool sections', () => {
+  it('shows every tool exactly once', () => {
+    const shown = TOOL_SECTIONS.flatMap((section) => section.tools.map((meta) => meta.name))
+    // Duplicates would render two switches for one tool; a missing tool would
+    // make it impossible to disable in Settings.
+    expect(new Set(shown).size).toBe(shown.length)
+    expect([...shown].sort()).toEqual(TOOL_META.map((meta) => meta.name).sort())
+  })
+
+  it('groups a tool by the group that loads it', () => {
+    const sectionOf = new Map<string, string>()
+    for (const section of TOOL_SECTIONS) {
+      for (const meta of section.tools) sectionOf.set(meta.name, section.id)
+    }
+    const scoped = ['tabs', 'data', 'skills', 'ops', 'forms', 'flow', 'keys', 'vision', 'script']
+    for (const group of scoped) {
+      for (const name of TOOL_GROUPS[group]!) expect(sectionOf.get(name)).toBe(group)
+    }
+    // The universal browse loop is never behind a load round, so it must sit in
+    // the always-on section rather than in some capability bucket.
+    for (const name of ['click', 'fill', 'read_current_page', 'snapshot_page', 'run_plan']) {
+      expect(sectionOf.get(name)).toBe('core')
+    }
+    // Workflow-only and bridge-only entries are not panel capabilities.
+    expect(sectionOf.get('compose_workflow')).toBe('workflow')
+    for (const name of BRIDGE_ONLY_TOOLS) expect(sectionOf.get(name)).toBe('workflow')
+  })
+
+  it('keeps the on-demand groups ahead of the catch-all buckets', () => {
+    const ids = TOOL_SECTIONS.map((section) => section.id)
+    expect(ids[0]).toBe('core')
+    expect(ids.at(-1)).toBe('workflow')
+    // Every section carries a heading and at least one switch.
+    for (const section of TOOL_SECTIONS) {
+      expect(section.labelKey).toBeTruthy()
+      expect(section.tools.length).toBeGreaterThan(0)
     }
   })
 })

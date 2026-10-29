@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { BUILT_IN_AGENTS, BUILT_IN_SUPERVISOR_ID } from '../src/lib/builtin-agents'
 import { normalizeAgent } from '../src/lib/agents'
-import { TOOLS, TOOL_GROUPS } from '../src/background/agent'
+import { TOOLS } from '../src/background/agent'
+import { TOOL_GROUPS } from '../src/lib/tool-groups'
 
 /**
  * Built-in agents must always load: unique ids/names, valid tool whitelists,
