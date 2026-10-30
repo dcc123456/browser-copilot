@@ -32,7 +32,7 @@ beforeAll(() => {
 
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import type { Command } from '../src/lib/messages'
+import type { Command, RunningTaskView } from '../src/lib/messages'
 import { describeSchedule } from '../src/lib/schedule'
 import { EMPTY_FEISHU_CONFIG, type Schedule, type ScheduledTask } from '../src/lib/scheduler-types'
 import type { Workflow } from '../src/lib/workflow/types'
@@ -44,6 +44,7 @@ import { notifyStoreChanged } from '../src/lib/store-events'
 const t = messagesFor('en')
 
 let tasks: ScheduledTask[] = []
+let running: RunningTaskView[] = []
 const seen: Command[] = []
 
 function task(id: string, name: string, prompt = `prompt of ${name}`): ScheduledTask {
@@ -77,6 +78,7 @@ const commands = (type: Command['type']): Command[] => seen.filter((entry) => en
 
 beforeEach(() => {
   tasks = [task('t-1', 'Morning digest')]
+  running = []
   seen.length = 0
   mocks.sendCommand.mockReset()
   mocks.sendCommand.mockImplementation(async (command: Command): Promise<unknown> => {
@@ -91,6 +93,10 @@ beforeEach(() => {
       case 'tasks.save':
         tasks = [command.task, ...tasks.filter((entry) => entry.id !== command.task.id)]
         return { type: 'tasks.save' }
+      case 'tasks.running':
+        return { type: 'tasks.running', runs: running, finished: [] }
+      case 'tasks.cancel':
+        return { type: 'tasks.cancel', ok: true }
       default:
         throw new Error(`unexpected command: ${command.type}`)
     }
@@ -439,5 +445,28 @@ describe('tasks tab · cron trigger methods', () => {
     expect(expression.value).toBe('61 * * * *')
     expect(panel.textContent).toContain(t.taskCronInvalid)
     expect(saveButton(panel)?.hasAttribute('disabled')).toBe(true)
+  })
+})
+
+describe('tasks tab · a running task can be terminated in place', () => {
+  it('swaps Run for Terminate and sends tasks.cancel', async () => {
+    running = [
+      {
+        runId: 'run-1',
+        taskId: 't-1',
+        label: 'Morning digest',
+        source: 'schedule',
+        startedAt: 1,
+        steps: [],
+      },
+    ]
+    const { container } = await render()
+
+    expect(container.textContent).toContain(t.tasksRunning)
+    expect(container.textContent).not.toContain(t.taskRunNow)
+
+    await click(container, t.taskTerminate)
+
+    expect(commands('tasks.cancel')).toEqual([{ type: 'tasks.cancel', runId: 'run-1' }])
   })
 })

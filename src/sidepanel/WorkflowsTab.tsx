@@ -5,7 +5,8 @@
  * editor lives in its own page (`src/workflow-editor/index.html`) opened in a
  * new tab; this panel is the management surface — create, run, delete, and see
  * each workflow's last-run status. Live run progress and the full run history
- * now live in the History tab's activity board (see `RunningBoard.tsx`).
+ * live in the History tab's activity board (see `RunningBoard.tsx`); a card
+ * whose workflow is running shows that state and terminates the run in place.
  *
  * @module sidepanel/WorkflowsTab
  */
@@ -45,6 +46,7 @@ import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { useT } from './i18n'
 import Banner from './components/Banner'
 import { useRowHighlight } from './hooks/useRowHighlight'
+import { useRunningTasks } from './hooks/useRunningTasks'
 import { confirmDialog } from '../ui/confirm'
 import { FailureCenterDialog } from './FailureCenter'
 import { WorkflowHealthView } from './WorkflowHealthView'
@@ -267,6 +269,27 @@ export default function WorkflowsTab() {
     runId?: string
   } | null>(null)
   const [busy, setBusy] = useState(false)
+  // Live runs, so a card can show "running" and terminate its own run instead
+  // of making the user hunt for it in the History board.
+  const { running, cancellingIds, cancel } = useRunningTasks()
+  const runningByWorkflow = useMemo(() => {
+    const byWorkflow = new Map<string, string[]>()
+    for (const run of running) {
+      if (!run.workflowId) continue
+      const ids = byWorkflow.get(run.workflowId)
+      if (ids) ids.push(run.runId)
+      else byWorkflow.set(run.workflowId, [run.runId])
+    }
+    return byWorkflow
+  }, [running])
+  const terminateWorkflowRuns = useCallback(
+    async (workflowId: string): Promise<void> => {
+      for (const runId of runningByWorkflow.get(workflowId) ?? []) {
+        await cancel(runId)
+      }
+    },
+    [runningByWorkflow, cancel],
+  )
   /** The workflow groups the user created (see lib/workflow/groups). */
   const [groups, setGroups] = useState<WorkflowGroup[]>([])
   /** Collapsed group sections. Purely visual, so it stays in component state. */
@@ -1551,6 +1574,9 @@ export default function WorkflowsTab() {
                     const last = lastRunFor(wf)
                     const health = summarizeWorkflowHealth(runs, wf.id)
                     const updateCard = marketplaceUpdates[wf.id]
+                    const activeRunIds = runningByWorkflow.get(wf.id) ?? []
+                    const isRunning = activeRunIds.length > 0
+                    const isCancelling = activeRunIds.some((runId) => cancellingIds.has(runId))
                     return (
                       <li
                         className={`task-item${highlightedId === wf.id ? ' task-item-saved' : ''}`}
@@ -1581,6 +1607,9 @@ export default function WorkflowsTab() {
                           <span className="task-chip">
                             {triggerLabel(effectiveTriggerType(wf))}
                           </span>
+                          {isRunning && (
+                            <span className="task-chip text-accent!">{t.tasksRunning}</span>
+                          )}
                           {updateCard && (
                             <span className="task-chip text-accent!">{t.marketplaceUpdate}</span>
                           )}
@@ -1597,14 +1626,26 @@ export default function WorkflowsTab() {
                         )}
                         <WorkflowHealthView health={health} firstRun={firstRuns[wf.id]} />
                         <div className="actions task-actions">
-                          <button
-                            className="task-action-run"
-                            disabled={busy}
-                            onClick={() => void runNow(wf.id)}
-                            type="button"
-                          >
-                            {t.workflowsRunNow}
-                          </button>
+                          {isRunning ? (
+                            <button
+                              className="danger"
+                              disabled={busy || isCancelling}
+                              onClick={() => void terminateWorkflowRuns(wf.id)}
+                              title={t.taskTerminate}
+                              type="button"
+                            >
+                              {isCancelling ? t.taskCancelling : t.taskTerminate}
+                            </button>
+                          ) : (
+                            <button
+                              className="task-action-run"
+                              disabled={busy}
+                              onClick={() => void runNow(wf.id)}
+                              type="button"
+                            >
+                              {t.workflowsRunNow}
+                            </button>
+                          )}
                           {/* Only offered when the last run left a clean step to pick
                       up from — a Resume that silently re-runs everything would
                       be worse than no button at all. The `!` is required: the

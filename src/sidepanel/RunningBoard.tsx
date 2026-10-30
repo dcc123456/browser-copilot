@@ -4,10 +4,12 @@
  *
  * Previously this board was duplicated at the top of the Workflows tab and the
  * Tasks tab, each with its own polling loop. It now lives here so the History
- * tab is the single place a user watches or cancels a run. The component
- * manages its own polling, cancellation state, and finished-step expansion;
- * the parent only supplies an `onSettled` callback if it wants to reload
- * persistent data after a run leaves the running set.
+ * tab is the single place a user watches a run end-to-end; the Workflows and
+ * Tasks cards use the same {@link useRunningTasks} snapshot to offer a terminate
+ * button on the item that is running. The component keeps the board's collapse
+ * state and finished-step expansion; the parent only supplies an `onSettled`
+ * callback if it wants to reload persistent data after a run leaves the running
+ * set.
  *
  * The worker returns the same view for both `tasks.running` and
  * `workflows.running`; we always use `tasks.*` commands because cancel /
@@ -18,6 +20,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import { sendCommand, type FinishedTaskView, type RunningTaskView } from '../lib/messages'
 import { useT } from './i18n'
+import { useRunningTasks } from './hooks/useRunningTasks'
 import { confirmDialog } from '../ui/confirm'
 import { toast } from '../ui/toast'
 
@@ -34,9 +37,7 @@ interface RunningBoardProps {
 
 export default function RunningBoard({ onSettled, busy }: RunningBoardProps): ReactElement {
   const t = useT()
-  const [running, setRunning] = useState<RunningTaskView[]>([])
-  const [finished, setFinished] = useState<FinishedTaskView[]>([])
-  const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set())
+  const { running, finished, cancellingIds, cancel, refresh } = useRunningTasks()
   const [localBusy, setLocalBusy] = useState(false)
   // The board can be collapsed to reclaim vertical space. A newly started run
   // re-opens it automatically (see effect below); afterwards the user can
@@ -62,74 +63,41 @@ export default function RunningBoard({ onSettled, busy }: RunningBoardProps): Re
     onSettledRef.current = onSettled
   }, [onSettled])
 
-  const refresh = useCallback(async (): Promise<void> => {
-    try {
-      const result = await sendCommand({ type: 'tasks.running' })
-      if (result.type !== 'tasks.running') return
-      setRunning(result.runs)
-      setFinished(result.finished)
-
-      const runningIds = new Set(result.runs.map((r) => r.runId))
-      const finishedIds = new Set(result.finished.map((r) => r.runId))
-
-      // Once a cancelled run leaves the running list, drop its "Cancelling…"
-      // state so a future run never inherits it.
-      setCancellingIds((prev) => {
-        if (prev.size === 0) return prev
-        let changed = false
-        const next = new Set<string>()
-        for (const id of prev) {
-          if (runningIds.has(id)) next.add(id)
-          else changed = true
-        }
-        return changed ? next : prev
-      })
-
-      let settled = false
-      for (const id of prevRunningIds.current) {
-        if (!runningIds.has(id)) {
+  // Tell the parent when a run leaves the running set (or a new one lands in
+  // the finished strip) so it can reload whatever persisted log it shows.
+  useEffect(() => {
+    const runningIds = new Set(running.map((run) => run.runId))
+    const finishedIds = new Set(finished.map((run) => run.runId))
+    let settled = false
+    for (const id of prevRunningIds.current) {
+      if (!runningIds.has(id)) {
+        settled = true
+        break
+      }
+    }
+    if (!settled) {
+      for (const id of finishedIds) {
+        if (!prevFinishedIds.current.has(id)) {
           settled = true
           break
         }
       }
-      if (!settled) {
-        for (const id of finishedIds) {
-          if (!prevFinishedIds.current.has(id)) {
-            settled = true
-            break
-          }
-        }
-      }
-      if (settled) onSettledRef.current?.()
-      prevRunningIds.current = runningIds
-      prevFinishedIds.current = finishedIds
-    } catch {
-      /* non-fatal; keep polling */
     }
-  }, [])
-
-  useEffect(() => {
-    void refresh()
-    const timer = setInterval(() => void refresh(), 1500)
-    return () => clearInterval(timer)
-  }, [refresh])
+    if (settled) onSettledRef.current?.()
+    prevRunningIds.current = runningIds
+    prevFinishedIds.current = finishedIds
+  }, [running, finished])
 
   const cancelRunning = useCallback(
     async (runId: string): Promise<void> => {
-      setCancellingIds((prev) => {
-        const next = new Set(prev)
-        next.add(runId)
-        return next
-      })
       setLocalBusy(true)
       try {
-        await sendCommand({ type: 'tasks.cancel', runId })
-        await refresh()
+        await cancel(runId)
       } finally {
         setLocalBusy(false)
       }
     },
-    [refresh],
+    [cancel],
   )
 
   const deleteFinished = useCallback(

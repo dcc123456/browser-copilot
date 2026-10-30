@@ -5,13 +5,13 @@
  * All persistence goes through `sendCommand`; the worker owns alarms and the
  * Feishu connection, so saving here both stores and re-arms everything.
  *
- * Live run progress and the run-history log now live in the History tab's
- * activity board (see `RunningBoard.tsx`); this tab only manages task
- * definitions.
+ * Live progress and the run-history log live in the History tab's activity
+ * board (see `RunningBoard.tsx`); this tab manages task definitions and, while
+ * a task runs, swaps its Run button for a terminate control.
  *
  * @module sidepanel/TasksTab
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { sendCommand } from '../lib/messages'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { onStoreChanged } from '../lib/store-events'
@@ -21,6 +21,7 @@ import type { FeishuConfig, ScheduledTask } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
 import TaskEditDialog from './TaskEditDialog'
 import { useRowHighlight } from './hooks/useRowHighlight'
+import { useRunningTasks } from './hooks/useRunningTasks'
 import { useT } from './i18n'
 import Banner from './components/Banner'
 import { confirmDialog } from '../ui/confirm'
@@ -52,6 +53,27 @@ export default function TasksTab() {
   const [busy, setBusy] = useState(false)
   /** Flash the row just saved, or the one the tokens board deep-linked to. */
   const { highlightedId, flash } = useRowHighlight('bc:open-task', 'data-task-id')
+  // Runs started from a schedule, Feishu, or this tab register the configured
+  // task id, so each card can terminate its own run without opening History.
+  const { running, cancellingIds, cancel } = useRunningTasks()
+  const runningByTask = useMemo(() => {
+    const byTask = new Map<string, string[]>()
+    for (const run of running) {
+      if (!run.taskId) continue
+      const ids = byTask.get(run.taskId)
+      if (ids) ids.push(run.runId)
+      else byTask.set(run.taskId, [run.runId])
+    }
+    return byTask
+  }, [running])
+  const terminateTaskRuns = useCallback(
+    async (taskId: string): Promise<void> => {
+      for (const runId of runningByTask.get(taskId) ?? []) {
+        await cancel(runId)
+      }
+    },
+    [runningByTask, cancel],
+  )
 
   const load = useCallback(async () => {
     try {
@@ -236,6 +258,9 @@ export default function TasksTab() {
           {tasks.map((task) => {
             const schedules = schedulesOf(task)
             const manual = schedules.length === 0
+            const activeRunIds = runningByTask.get(task.id) ?? []
+            const isRunning = activeRunIds.length > 0
+            const isCancelling = activeRunIds.some((runId) => cancellingIds.has(runId))
             return (
               <li
                 className={`task-item${highlightedId === task.id ? ' task-item-saved' : ''}${
@@ -306,6 +331,7 @@ export default function TasksTab() {
                     </span>
                   )}
                   {task.notifyFeishu && <span className="task-chip task-chip-feishu">Feishu</span>}
+                  {isRunning && <span className="task-chip text-accent!">{t.tasksRunning}</span>}
                 </div>
                 {task.lastRunAt && (
                   <div className="task-lastrun">
@@ -314,14 +340,26 @@ export default function TasksTab() {
                   </div>
                 )}
                 <div className="actions task-actions">
-                  <button
-                    className="task-action-run"
-                    disabled={busy || !!draft}
-                    onClick={() => void runNow(task.id)}
-                    type="button"
-                  >
-                    {t.taskRunNow}
-                  </button>
+                  {isRunning ? (
+                    <button
+                      className="danger"
+                      disabled={busy || isCancelling}
+                      onClick={() => void terminateTaskRuns(task.id)}
+                      title={t.taskTerminate}
+                      type="button"
+                    >
+                      {isCancelling ? t.taskCancelling : t.taskTerminate}
+                    </button>
+                  ) : (
+                    <button
+                      className="task-action-run"
+                      disabled={busy || !!draft}
+                      onClick={() => void runNow(task.id)}
+                      type="button"
+                    >
+                      {t.taskRunNow}
+                    </button>
+                  )}
                   <button
                     disabled={busy || !!draft}
                     onClick={() => setDraft({ ...task })}

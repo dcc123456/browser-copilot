@@ -28,7 +28,7 @@ beforeAll(() => {
 
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import type { Command, CommandResult } from '../src/lib/messages'
+import type { Command, CommandResult, RunningTaskView } from '../src/lib/messages'
 import type { TaskRunLog } from '../src/lib/scheduler-types'
 import type { Workflow } from '../src/lib/workflow/types'
 import { messagesFor } from '../src/lib/i18n'
@@ -73,6 +73,7 @@ function run(label: string, ok: boolean, at: number, workflowId?: string): TaskR
 
 let workflows: Workflow[] = []
 let runs: TaskRunLog[] = []
+let running: RunningTaskView[] = []
 /** What `workflows.resumePoint` answers for a given workflow. */
 let resumePointFor: (id: string) => ProbeReply = () => ({
   type: 'workflows.resumePoint',
@@ -87,6 +88,7 @@ const seen: Command[] = []
 beforeEach(() => {
   workflows = []
   runs = []
+  running = []
   resumePointFor = () => ({ type: 'workflows.resumePoint', resumable: false })
   resumeReply = {
     type: 'workflows.resume',
@@ -101,6 +103,10 @@ beforeEach(() => {
         return { type: 'workflows.list', workflows }
       case 'tasks.runs':
         return { type: 'tasks.runs', runs }
+      case 'tasks.running':
+        return { type: 'tasks.running', runs: running, finished: [] }
+      case 'tasks.cancel':
+        return { type: 'tasks.cancel', ok: true }
       case 'workflows.takeoverPending':
         return { type: 'workflows.takeoverPending', items: [] }
       case 'record.status':
@@ -357,6 +363,38 @@ describe('workflow card Resume action (M4)', () => {
     expect(probes().map((command) => command.id)).toEqual(['wf-a'])
     expect(buttonByText(container, RESUME)).toBeDefined()
 
+    await act(async () => root.unmount())
+  })
+})
+
+describe('workflows tab · a running workflow can be terminated in place', () => {
+  it('swaps Run for Terminate and cancels the live run', async () => {
+    const t = messagesFor('en')
+    workflows = [workflow('wf-run', 'Running flow')]
+    running = [
+      {
+        runId: 'run-live',
+        workflowId: 'wf-run',
+        label: 'Running flow',
+        source: 'manual',
+        startedAt: 1,
+        steps: [],
+      },
+    ]
+
+    const { container, root } = await render()
+
+    expect(container.textContent).toContain(t.tasksRunning)
+    expect(buttonByText(container, t.workflowsRunNow)).toBeUndefined()
+
+    await act(async () => {
+      buttonByText(container, t.taskTerminate)!.click()
+    })
+    await flush()
+
+    expect(seen.filter((command) => command.type === 'tasks.cancel')).toEqual([
+      { type: 'tasks.cancel', runId: 'run-live' },
+    ])
     await act(async () => root.unmount())
   })
 })
