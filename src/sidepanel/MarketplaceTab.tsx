@@ -51,6 +51,7 @@ import {
 } from '../lib/marketplace/types'
 import { confirmDialog } from '../ui/confirm'
 import { useI18n, useT } from './i18n'
+import Banner from './components/Banner'
 import { installFromCard } from './marketplace-install'
 import { marketplaceErrorMessage } from './marketplace-errors'
 
@@ -188,6 +189,9 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  // Derived warnings have no state to clear, so dismissal is keyed by the text:
+  // the same warning stays hidden, a new one shows again.
+  const [dismissedNotices, setDismissedNotices] = useState<Set<string>>(new Set())
 
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<CategoryFilter>('all')
@@ -587,6 +591,11 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
           })
         : t.marketplaceStaleReason({ reason: marketplaceErrorMessage(t, staleError) })
 
+  const failedTeamsText =
+    failedTeams.length > 0
+      ? t.marketplaceTeamPartialFailed({ repos: failedTeams.join(', ') })
+      : null
+
   /** Downloads an attachment served by the private contents API. */
   const downloadAttachment = async (
     repo: RepoRef,
@@ -708,9 +717,9 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
   return (
     <div className="pane">
       {banner && (
-        <div className="banner" data-kind={banner.kind} role="status">
+        <Banner kind={banner.kind} onDismiss={() => setBanner(null)}>
           {banner.text}
-        </div>
+        </Banner>
       )}
 
       <div className="section-head">
@@ -822,15 +831,21 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
         </select>
       </div>
 
-      {staleText && (
-        <div className="banner" data-kind="error" role="status">
+      {staleText && !dismissedNotices.has(staleText) && (
+        <Banner
+          kind="error"
+          onDismiss={() => setDismissedNotices((prev) => new Set(prev).add(staleText))}
+        >
           {staleText}
-        </div>
+        </Banner>
       )}
-      {failedTeams.length > 0 && (
-        <div className="banner" data-kind="error" role="status">
-          {t.marketplaceTeamPartialFailed({ repos: failedTeams.join(', ') })}
-        </div>
+      {failedTeamsText && !dismissedNotices.has(failedTeamsText) && (
+        <Banner
+          kind="error"
+          onDismiss={() => setDismissedNotices((prev) => new Set(prev).add(failedTeamsText))}
+        >
+          {failedTeamsText}
+        </Banner>
       )}
       {snapshot?.truncated && (
         <p className="mt-0 mb-2 text-[11.5px] text-muted">{t.marketplaceTruncated}</p>

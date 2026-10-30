@@ -80,96 +80,95 @@ export default function EditConditions({ data, onChange }: EditFormProps) {
         />
       </Field>
 
-      <div className="mt-3 rounded-lg border border-border bg-panel-2 p-2.5">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-xs font-medium text-ink">{t('conditionPathsTitle')}</p>
-          <button
-            type="button"
-            className="wf-btn-accent"
-            disabled={paths.length >= 20}
-            onClick={addPath}
-          >
-            <Plus size={14} /> {t('conditionPathAdd')}
-          </button>
-        </div>
-        <p className="mb-2 text-[11px] leading-snug text-muted">{t('conditionPathsHint')}</p>
-
-        {paths.length === 0 && (
-          <p className="rounded-md border border-dashed border-border px-2 py-3 text-center text-[11px] text-muted">
-            {t('conditionPathEmpty')}
-          </p>
-        )}
-
-        <ul className="flex flex-col gap-1.5">
-          {paths.map((path, index) => {
-            const groups = groupCount(path)
-            return (
-              <li
-                key={path.id}
-                className="flex items-center gap-1.5 rounded-md border border-border bg-panel px-2 py-1.5"
-              >
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[10px] font-medium text-accent">
-                  {index + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <TextInput
-                    value={path.name}
-                    placeholder={`Path ${index + 1}`}
-                    onChange={(v) => renamePath(index, v)}
-                  />
-                  <p className="mt-0.5 truncate px-0.5 text-[10px] leading-tight text-muted">
-                    {groups > 0
-                      ? t('conditionPathGroups').replace('{count}', String(groups))
-                      : t('conditionPathNotConfigured')}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="wf-icon-btn"
-                  title={t('conditionPathMoveUp')}
-                  disabled={index === 0}
-                  onClick={() => movePath(index, -1)}
-                >
-                  <ArrowUp size={13} />
-                </button>
-                <button
-                  type="button"
-                  className="wf-icon-btn"
-                  title={t('conditionPathMoveDown')}
-                  disabled={index === paths.length - 1}
-                  onClick={() => movePath(index, 1)}
-                >
-                  <ArrowDown size={13} />
-                </button>
-                <button
-                  type="button"
-                  className="wf-icon-btn"
-                  title={t('conditionPathEdit')}
-                  onClick={() => setEditing(index)}
-                >
-                  <Pencil size={13} />
-                </button>
-                <button
-                  type="button"
-                  className="wf-icon-btn text-err"
-                  title={t('conditionPathDelete')}
-                  onClick={() => void removePath(index)}
-                >
-                  <Trash2 size={13} />
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-
-        {/* The port every "no path matched" run lands on. Shown so the list
-            above reads as the full set of outputs, not a partial one. */}
-        <p className="mt-2 flex items-center gap-1.5 rounded-md bg-panel px-2 py-1.5 text-[11px] text-muted">
-          <Waypoints size={12} className="text-muted" />
-          <span className="font-medium text-ink">{t('conditionPathFallbackLabel')}</span>
-          {t('conditionPathFallbackHint')}
-        </p>
+      <div className="mt-3 flex items-center gap-2">
+        <p className="text-xs font-medium text-ink">{t('conditionPathsTitle')}</p>
+        <div className="flex-1" />
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-on-accent transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={paths.length >= 20}
+          onClick={addPath}
+        >
+          <Plus size={14} /> {t('conditionPathAdd')}
+        </button>
       </div>
+      <p className="mt-1 mb-2 text-[11px] leading-snug text-muted">{t('conditionPathsHint')}</p>
+
+      {paths.length === 0 && (
+        <p className="rounded-md border border-dashed border-border px-2 py-3 text-center text-[11px] text-muted">
+          {t('conditionPathEmpty')}
+        </p>
+      )}
+
+      <ul className="flex flex-col gap-1.5">
+        {paths.map((path, index) => {
+          const groups = groupCount(path)
+          return (
+            <li
+              key={path.id}
+              className="flex items-center gap-1.5 rounded-md border border-border bg-panel px-2 py-1.5"
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[10px] font-medium text-accent">
+                {index + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <TextInput
+                  value={path.name}
+                  placeholder={`Path ${index + 1}`}
+                  onChange={(v) => renamePath(index, v)}
+                />
+                <p className="mt-0.5 truncate px-0.5 text-[10px] leading-tight text-muted">
+                  {groups > 0
+                    ? t('conditionPathGroups').replace('{count}', String(groups))
+                    : t('conditionPathNotConfigured')}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="wf-icon-btn"
+                title={t('conditionPathMoveUp')}
+                disabled={index === 0}
+                onClick={() => movePath(index, -1)}
+              >
+                <ArrowUp size={13} />
+              </button>
+              <button
+                type="button"
+                className="wf-icon-btn"
+                title={t('conditionPathMoveDown')}
+                disabled={index === paths.length - 1}
+                onClick={() => movePath(index, 1)}
+              >
+                <ArrowDown size={13} />
+              </button>
+              <button
+                type="button"
+                className="wf-icon-btn"
+                title={t('conditionPathEdit')}
+                onClick={() => setEditing(index)}
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                type="button"
+                className="wf-icon-btn text-err"
+                title={t('conditionPathDelete')}
+                onClick={() => void removePath(index)}
+              >
+                <Trash2 size={13} />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+
+      {/* The port every "no path matched" run lands on. Shown so the list
+            above reads as the full set of outputs, not a partial one. */}
+      <p className="mt-2 flex items-center gap-1.5 rounded-md bg-panel px-2 py-1.5 text-[11px] text-muted">
+        <Waypoints size={12} className="text-muted" />
+        <span className="font-medium text-ink">{t('conditionPathFallbackLabel')}</span>
+        {t('conditionPathFallbackHint')}
+      </p>
 
       <Modal
         open={editingPath !== null}

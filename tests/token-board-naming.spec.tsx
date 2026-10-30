@@ -111,16 +111,16 @@ describe('GroupTable entity rows', () => {
       }),
     )
 
-  it('renders a live entity as a button carrying the jump hint', () => {
+  it('renders a live entity as a button whose tooltip carries the full name', () => {
     const html = table([row('task:t-1', 'Old name')])
     expect(html).toContain('<button')
     expect(html).toContain('Nightly PR digest')
-    expect(html).toContain('title="Jump to this task"')
+    expect(html).toContain('title="Nightly PR digest"')
   })
 
-  it('renders an unresolvable entity as plain text with the key as tooltip', () => {
+  it('renders an unresolvable entity as plain text with its display name as tooltip', () => {
     const html = table([row('session:s-1')])
     expect(html).not.toContain('<button')
-    expect(html).toContain('title="session:s-1"')
+    expect(html).toContain('title="session s-1"')
   })
 })

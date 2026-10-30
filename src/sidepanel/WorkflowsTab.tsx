@@ -43,6 +43,7 @@ import { downloadJSONFile } from '../lib/download-json'
 import { onStoreChanged } from '../lib/store-events'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { useT } from './i18n'
+import Banner from './components/Banner'
 import { useRowHighlight } from './hooks/useRowHighlight'
 import { confirmDialog } from '../ui/confirm'
 import { FailureCenterDialog } from './FailureCenter'
@@ -114,11 +115,11 @@ const UNGROUPED_SECTION_KEY = '__ungrouped__'
 const BATCH_MOVE_MENU_KEY = '__batch__'
 
 /**
- * The primary "new" action with its sibling Import entry folded into a hover
- * bubble. Hover/focus opens it for mouse/keyboard users; tapping the button
- * toggles it so touch screens can reach both entries. The transparent padding
- * bridge between button and card keeps the pointer inside the wrapper while
- * moving down, so the bubble never closes mid-way.
+ * The primary "new" action with its sibling Import entry folded into a click
+ * bubble. Only the button toggles it — hover used to pop the menu open, which
+ * made it impossible to read the toolbar without the bubble covering it. The
+ * transparent padding bridge between button and card keeps the pointer inside
+ * the wrapper while moving down, so the bubble never closes mid-way.
  *
  * `!` utilities are REQUIRED on the menu items: sidepanel/styles.css styles
  * bare `button` elements with UNLAYERED rules that beat Tailwind's layered
@@ -162,16 +163,7 @@ function NewWorkflowMenu({
   }, [open])
 
   return (
-    <div
-      ref={wrapRef}
-      className="relative flex"
-      onBlur={(event) => {
-        if (!wrapRef.current?.contains(event.relatedTarget as Node | null)) setOpen(false)
-      }}
-      onFocus={() => setOpen(true)}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
+    <div ref={wrapRef} className="relative flex">
       <button
         aria-expanded={open}
         aria-haspopup="menu"
@@ -1260,20 +1252,15 @@ export default function WorkflowsTab() {
   return (
     <div className="pane workflows-tab">
       {banner && (
-        <div
-          className={`banner banner-${banner.kind}${banner.runId ? ' banner-link' : ''}`}
-          data-kind={banner.kind}
-          role="status"
-          onClick={onBannerClick}
+        <Banner
+          kind={banner.kind}
+          link={Boolean(banner.runId)}
           title={banner.runId ? t.workflowsRunFailedHint : undefined}
+          onClick={onBannerClick}
+          onDismiss={() => setBanner(null)}
         >
-          <span className="banner-text">{banner.text}</span>
-          {banner.runId && (
-            <span className="banner-chevron" aria-hidden="true">
-              ›
-            </span>
-          )}
-        </div>
+          {banner.text}
+        </Banner>
       )}
 
       <div className="section-head">

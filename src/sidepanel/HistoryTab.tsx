@@ -33,6 +33,7 @@ import type { Workflow } from '../lib/workflow/types'
 import type { ConversationMeta, HistoryEntry } from '../lib/types'
 import type { TaskRunLog } from '../lib/scheduler-types'
 import { useT } from './i18n'
+import Banner from './components/Banner'
 import { confirmDialog } from '../ui/confirm'
 import RunningBoard from './RunningBoard'
 import { WorkflowReviewDialog } from './WorkflowReviewList'
@@ -161,9 +162,9 @@ export default function HistoryTab() {
   return (
     <div className="pane history-tab">
       {banner && (
-        <div className="banner" data-kind={banner.kind} onClick={() => setBanner(null)}>
+        <Banner kind={banner.kind} onDismiss={() => setBanner(null)}>
           {banner.text}
-        </div>
+        </Banner>
       )}
 
       <RunningBoard onSettled={() => void reloadRuns()} />
@@ -459,7 +460,9 @@ function ConversationsSection({ t, flash }: SectionProps) {
                 aria-label={conv.title}
               />
               <span className={`record-caret${isOpen ? ' open' : ''}`} aria-hidden="true" />
-              <span className="record-title">{conv.title}</span>
+              <span className="record-title" title={conv.title}>
+                {conv.title}
+              </span>
               <span className="record-meta">
                 <span className="record-time">{formatWhen(conv.createdAt)}</span>
               </span>
@@ -476,7 +479,11 @@ function ConversationsSection({ t, flash }: SectionProps) {
                 ×
               </button>
             </div>
-            {conv.preview && <div className="record-summary">{conv.preview}</div>}
+            {conv.preview && (
+              <div className="record-summary" title={conv.preview}>
+                {conv.preview}
+              </div>
+            )}
             {detail && isOpen && (
               <div className="record-detail conv-msgs">
                 {detail.loading ? (
@@ -683,7 +690,9 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
                 aria-label={label}
               />
               <span className={`record-caret${isOpen ? ' open' : ''}`} aria-hidden="true" />
-              <span className="record-title">{label}</span>
+              <span className="record-title" title={label}>
+                {label}
+              </span>
               <span className="record-meta">
                 {src && <span className="record-source">{src}</span>}
                 {run.startedAt && <span className="record-time">{formatWhen(run.startedAt)}</span>}
@@ -702,7 +711,11 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
                 ×
               </button>
             </div>
-            {run.summary && <div className="record-summary">{run.summary}</div>}
+            {run.summary && (
+              <div className="record-summary" title={run.summary}>
+                {run.summary}
+              </div>
+            )}
             {/* Show failure detail even on a collapsed card so a broken run is
                 visible without having to expand every failed row. */}
             {!isOpen && run.error && run.error !== run.summary && (
@@ -1062,7 +1075,9 @@ function OperationsSection({ t, flash }: SectionProps) {
                 aria-label={group.title}
               />
               <span className={`record-caret${isOpen ? ' open' : ''}`} aria-hidden="true" />
-              <span className="record-title history-group-title">{group.title}</span>
+              <span className="record-title history-group-title" title={group.title}>
+                {group.title}
+              </span>
               <span className="record-meta">
                 <span className="history-count">{group.entries.length}</span>
                 {failCount > 0 ? (

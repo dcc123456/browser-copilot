@@ -36,6 +36,7 @@ import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../
 import { Switch } from '../ui/Switch'
 import { useSettings } from './hooks/useSettings'
 import { useT } from './i18n'
+import Banner from './components/Banner'
 
 /** Editable form state; numbers stay strings so partial input is allowed. */
 interface Draft extends Omit<
@@ -457,14 +458,14 @@ export default function ModelsTab() {
   return (
     <div className="pane">
       {error && (
-        <div className="banner" data-kind="error" onClick={clearError}>
+        <Banner kind="error" onDismiss={clearError}>
           {error}
-        </div>
+        </Banner>
       )}
       {notice && (
-        <div className="banner" data-kind={notice.kind} onClick={() => setNotice(null)}>
+        <Banner kind={notice.kind} onDismiss={() => setNotice(null)}>
           {notice.text}
-        </div>
+        </Banner>
       )}
 
       {/* --- Providers: status cards only; editing opens the dialog below --- */}

@@ -36,6 +36,7 @@ import TeamSharingCard from './TeamSharingCard'
 import FeedbackCard from './FeedbackCard'
 import { useSettings } from './hooks/useSettings'
 import { useI18n, useT } from './i18n'
+import Banner from './components/Banner'
 
 /**
  * Per-connection → window assignment surface, rendered independently in EVERY
@@ -661,14 +662,14 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   return (
     <div className="pane">
       {error && (
-        <div className="banner" data-kind="error" onClick={clearError}>
+        <Banner kind="error" onDismiss={clearError}>
           {error}
-        </div>
+        </Banner>
       )}
       {banner && (
-        <div className="banner" data-kind={banner.kind} onClick={() => setBanner(null)}>
+        <Banner kind={banner.kind} onDismiss={() => setBanner(null)}>
           {banner.text}
-        </div>
+        </Banner>
       )}
 
       {/* --- Download directory --- */}

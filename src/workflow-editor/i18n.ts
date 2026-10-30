@@ -1160,6 +1160,7 @@ const BLOCK_FORM_STRINGS = {
       '还没有已保存的工作流 — 请先在「工作流」页新建一个。',
     'Execute Id (optional)': '执行 ID（可选）',
     'Workflow (workflow id)': '工作流（工作流 id）',
+    Workflow: '工作流',
     'Workflow IDs (comma separated)': '工作流 ID（逗号分隔）',
     'Except for the current workflow': '除当前工作流外',
     'Trigger workflow': '触发工作流',
@@ -1308,8 +1309,6 @@ const BLOCK_FORM_STRINGS = {
     destinations: '个目标',
     parameters: '个参数',
     chars: '个字符',
-    'OR groups': '个 OR 组',
-    conditions: '个条件',
     'While loop condition': 'While 循环条件',
     'Data mapping': '数据映射',
     'Edit data map': '编辑数据映射',
@@ -1356,7 +1355,6 @@ const BLOCK_FORM_STRINGS = {
       '这会覆盖所选工作流的全局数据。',
     'Use commas to separate the variable names.': '多个变量名用英文逗号分隔。',
     'Log data': '记录数据',
-    'Select workflow — paste the workflow id': '选择工作流 — 或直接粘贴工作流 id',
     // — while loop / conditions —
     'Blocks connected to the fallback handle run when the condition is false.':
       '条件不满足时，连接到 fallback 出口的算子会被执行。',
@@ -1365,7 +1363,6 @@ const BLOCK_FORM_STRINGS = {
     'Standalone condition — no comparison needed.': '独立条件 — 无需比较。',
     'Add condition': '添加条件',
     'Add path': '添加分支',
-    'all rows below must match': '以下所有行都必须满足',
     'Edit condition': '编辑条件',
     'Delete condition': '删除条件',
     'Delete path': '删除分支',

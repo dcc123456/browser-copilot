@@ -22,6 +22,7 @@ import {
 import { downloadBlob } from '../lib/export-answer'
 import { getBuiltinI18nKeys } from '../lib/builtin-agents'
 import { useT } from './i18n'
+import Banner from './components/Banner'
 import { confirmDialog } from '../ui/confirm'
 import AgentEditDialog, { type AgentFormValues } from './AgentEditDialog'
 
@@ -286,9 +287,9 @@ export default function AgentsTab({ agents, skills, onChanged }: Props) {
       }}
     >
       {banner && (
-        <div className="banner" data-kind={banner.kind}>
+        <Banner kind={banner.kind} onDismiss={() => setBanner(null)}>
           {banner.text}
-        </div>
+        </Banner>
       )}
 
       <div className="card">

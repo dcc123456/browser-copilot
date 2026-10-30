@@ -22,6 +22,7 @@ import {
 import type { PasswordEntry, UserProfile } from '../lib/types'
 import { entryFields } from '../lib/types'
 import { useT } from './i18n'
+import Banner from './components/Banner'
 import ProfileEditDialog from './ProfileEditDialog'
 import PasswordEditDialog from './PasswordEditDialog'
 
@@ -258,9 +259,9 @@ export default function DataTab() {
   return (
     <div className="pane">
       {banner && (
-        <div className="banner" data-kind={banner.kind} onClick={() => setBanner(null)}>
+        <Banner kind={banner.kind} onDismiss={() => setBanner(null)}>
           {banner.text}
-        </div>
+        </Banner>
       )}
 
       <div className="card">

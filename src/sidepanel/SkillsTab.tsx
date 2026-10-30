@@ -18,6 +18,7 @@ import {
 } from '../lib/skills-import'
 import { downloadBlob } from '../lib/export-answer'
 import { useT } from './i18n'
+import Banner from './components/Banner'
 import { confirmDialog } from '../ui/confirm'
 import SkillEditDialog, { type SkillFormValues } from './SkillEditDialog'
 
@@ -254,9 +255,9 @@ export default function SkillsTab({ skills, activeSkillId, onChanged, onStopUsin
       }}
     >
       {banner && (
-        <div className="banner" data-kind={banner.kind}>
+        <Banner kind={banner.kind} onDismiss={() => setBanner(null)}>
           {banner.text}
-        </div>
+        </Banner>
       )}
 
       <div className="card">

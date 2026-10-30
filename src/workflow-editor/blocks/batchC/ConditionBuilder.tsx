@@ -26,6 +26,13 @@ import { Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
 import { useEditorLocale } from '../../locale-context'
 import { id } from './shared'
 
+/** Primary action (the empty-state "add condition"). */
+const ADD_BUTTON_CLASS =
+  'inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-on-accent transition-colors hover:bg-accent-strong'
+/** Secondary actions (add AND row / add OR group). */
+const ACTION_BUTTON_CLASS =
+  'inline-flex items-center gap-1.5 rounded-lg border border-border bg-panel px-2.5 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-hover'
+
 // ---------------------------------------------------------------------------
 // conditionBuilder's local value-type catalog (self-maintained, internal)
 // ---------------------------------------------------------------------------
@@ -228,13 +235,29 @@ function ValueItemEditor({
   const dataKeys = Object.keys(item.data).filter((k) => k !== 'context')
 
   return (
-    <div className="wf-field">
-      <Select
-        value={item.type}
-        onChange={setType}
-        options={VALUE_GROUPS.flatMap((g) => g.items.map((v) => ({ value: v.id, label: v.name })))}
-      />
-      {item.type === 'code' ? (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="w-40 shrink-0">
+          <Select
+            value={item.type}
+            onChange={setType}
+            options={VALUE_GROUPS.flatMap((g) =>
+              g.items.map((v) => ({ value: v.id, label: v.name })),
+            )}
+          />
+        </div>
+        {item.type !== 'code' &&
+          dataKeys.map((key) => (
+            <div key={key} className="min-w-0 flex-1">
+              <TextInput
+                value={item.data[key] ?? ''}
+                placeholder={INPUT_LABELS[key]?.placeholder ?? key}
+                onChange={(v) => setData(key, v)}
+              />
+            </div>
+          ))}
+      </div>
+      {item.type === 'code' && (
         <TextArea
           mono
           rows={4}
@@ -242,18 +265,9 @@ function ValueItemEditor({
           placeholder="// return true / false"
           onChange={(v) => setData('code', v)}
         />
-      ) : (
-        dataKeys.map((key) => (
-          <TextInput
-            key={key}
-            value={item.data[key] ?? ''}
-            placeholder={INPUT_LABELS[key]?.placeholder ?? key}
-            onChange={(v) => setData(key, v)}
-          />
-        ))
       )}
       {valueDef && !valueDef.compareable && (
-        <p className="wf-form-note">{bt('Standalone condition — no comparison needed.')}</p>
+        <p className="wf-form-note m-0">{bt('Standalone condition — no comparison needed.')}</p>
       )}
     </div>
   )
@@ -306,14 +320,11 @@ function AndRow({
   const [leftValue, rightValue] = valueItems
 
   return (
-    <div className="wf-expand">
-      <div
-        className="wf-field"
-        style={{ border: '1px solid var(--bc-border, #ccc)', borderRadius: 8, padding: 8 }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <IconButton icon={Trash2} title="Delete condition" onClick={onDelete} />
-        </div>
+    <div className="rounded-lg border border-border bg-panel-2/40">
+      <div className="flex items-center justify-end px-1.5 pt-1">
+        <IconButton icon={Trash2} title="Delete condition" onClick={onDelete} />
+      </div>
+      <div className="flex flex-col gap-2 px-2.5 pb-2.5">
         {leftValue && (
           <>
             <ValueItemEditor
@@ -399,68 +410,61 @@ export default function ConditionBuilder({
   return (
     <div className="wf-form">
       {groups.length === 0 && (
-        <button type="button" className="wf-btn-accent" onClick={() => onChange([newOrGroup()])}>
+        <button type="button" className={ADD_BUTTON_CLASS} onClick={() => onChange([newOrGroup()])}>
           <Plus size={14} /> {bt('Add condition')}
         </button>
       )}
 
       {groups.map((group, gIndex) => (
-        <div key={group.id} style={{ marginBottom: 12 }}>
-          {group.conditions.length > 1 && (
-            <p className="wf-form-note" style={{ fontWeight: 600 }}>
-              <span
-                style={{
-                  display: 'inline-block',
-                  minWidth: 40,
-                  textAlign: 'center',
-                  background: '#3b82f6',
-                  color: '#fff',
-                  borderRadius: 6,
-                  padding: '2px 0',
-                  marginRight: 8,
-                }}
-              >
-                AND
-              </span>
-              {bt('all rows below must match')}
-            </p>
-          )}
-          {group.conditions.map((row, rIndex) => (
-            <div key={row.id}>
-              <AndRow
-                row={row}
-                onItemsChange={(items) => updateRowItems(gIndex, rIndex, items)}
-                onDelete={() => deleteRow(gIndex, rIndex)}
-              />
-            </div>
-          ))}
-          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-            <button type="button" className="wf-btn-accent" onClick={() => addAndRow(gIndex)}>
-              <Plus size={14} /> AND
-            </button>
-            {gIndex === groups.length - 1 && (
-              <button
-                type="button"
-                className="wf-btn-accent"
-                onClick={() => onChange([...groups, newOrGroup()])}
-              >
-                <Plus size={14} /> OR
-              </button>
+        <div key={group.id} className="mb-3">
+          <div className="flex gap-2.5">
+            {/* Automa draws the AND group as a left rail with a badge, then
+                the rows it joins. */}
+            {group.conditions.length > 1 && (
+              <div className="flex w-12 shrink-0 flex-col items-center pt-2">
+                <span className="rounded-md bg-accent px-2 py-0.5 text-[11px] font-semibold text-on-accent">
+                  AND
+                </span>
+                <span aria-hidden="true" className="mt-1 w-px flex-1 bg-accent/50" />
+              </div>
             )}
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              {group.conditions.map((row, rIndex) => (
+                <AndRow
+                  key={row.id}
+                  row={row}
+                  onItemsChange={(items) => updateRowItems(gIndex, rIndex, items)}
+                  onDelete={() => deleteRow(gIndex, rIndex)}
+                />
+              ))}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className={ACTION_BUTTON_CLASS}
+                  onClick={() => addAndRow(gIndex)}
+                >
+                  <Plus size={13} /> AND
+                </button>
+                {gIndex === groups.length - 1 && (
+                  <button
+                    type="button"
+                    className={ACTION_BUTTON_CLASS}
+                    onClick={() => onChange([...groups, newOrGroup()])}
+                  >
+                    <Plus size={13} /> OR
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
           {gIndex !== groups.length - 1 && (
-            <p style={{ textAlign: 'center', fontWeight: 700, margin: '8px 0' }}>
-              <span
-                style={{
-                  background: '#6366f1',
-                  color: '#fff',
-                  borderRadius: 6,
-                  padding: '2px 12px',
-                }}
-              >
+            <div className="my-2 flex items-center gap-2" aria-hidden="true">
+              <span className="h-px flex-1 bg-accent/40" />
+              <span className="rounded-md bg-accent-soft px-2 py-0.5 text-[11px] font-semibold text-accent">
                 OR
               </span>
-            </p>
+              <span className="h-px flex-1 bg-accent/40" />
+            </div>
           )}
         </div>
       ))}

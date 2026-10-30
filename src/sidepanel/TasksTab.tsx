@@ -22,6 +22,7 @@ import type { Workflow } from '../lib/workflow/types'
 import TaskEditDialog from './TaskEditDialog'
 import { useRowHighlight } from './hooks/useRowHighlight'
 import { useT } from './i18n'
+import Banner from './components/Banner'
 import { confirmDialog } from '../ui/confirm'
 import { Switch } from '../ui/Switch'
 
@@ -196,9 +197,9 @@ export default function TasksTab() {
       <h2>{t.tasksTitle}</h2>
 
       {banner && (
-        <div className={`banner banner-${banner.kind}`} data-kind={banner.kind} role="status">
+        <Banner kind={banner.kind} onDismiss={() => setBanner(null)}>
           {banner.text}
-        </div>
+        </Banner>
       )}
 
       <div className="section-head">

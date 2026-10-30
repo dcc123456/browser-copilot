@@ -26,14 +26,11 @@
  * @module workflow-editor/blocks/batchC/EditExecuteWorkflow
  */
 
-import { RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
-import { sendCommand } from '../../../lib/messages'
-import type { Workflow } from '../../../lib/workflow/types'
 import { useEditorLocale } from '../../locale-context'
 import { useWorkflowMeta } from '../batchD/WorkflowInfoFields'
-import { Checkbox, Field, IconButton, Select, TextArea, TextInput } from '../shared/Field'
+import { Checkbox, Field, TextArea, TextInput } from '../shared/Field'
 import PopupField from '../shared/PopupField'
+import WorkflowPicker from '../shared/WorkflowPicker'
 import { bool, str } from '../shared/InteractionBase'
 import type { EditFormProps } from '../EditForms'
 
@@ -41,33 +38,7 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
   const { bt } = useEditorLocale()
   const insertAllVars = bool(data, 'insertAllVars')
   const selfId = useWorkflowMeta()?.meta.id ?? null
-
-  const [workflows, setWorkflows] = useState<Workflow[]>([])
-  const [loaded, setLoaded] = useState(false)
-
-  const reload = useCallback((): void => {
-    void sendCommand({ type: 'workflows.list' })
-      .then((result) => {
-        if (result.type === 'workflows.list') setWorkflows(result.workflows)
-      })
-      .catch(() => {
-        // The worker is briefly unreachable right after a browser restart;
-        // the retry button covers it, so keep the form usable.
-      })
-      .finally(() => setLoaded(true))
-  }, [])
-
-  useEffect(() => {
-    reload()
-  }, [reload])
-
   const workflowId = str(data, 'workflowId')
-  const options = workflows
-    .filter((workflow) => workflow.id !== selfId)
-    .map((workflow) => ({ value: workflow.id, label: workflow.name }))
-  if (workflowId && !options.some((option) => option.value === workflowId)) {
-    options.unshift({ value: workflowId, label: `${workflowId}` })
-  }
 
   return (
     <div className="wf-form">
@@ -79,21 +50,12 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
         />
       </Field>
 
-      <Field label="Workflow to execute">
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <Select
-            value={workflowId}
-            onChange={(v) => onChange({ workflowId: v })}
-            options={[{ value: '', label: workflowId ? '—' : 'Select a workflow…' }, ...options]}
-          />
-          <IconButton icon={RefreshCw} title="Reload workflows" onClick={reload} />
-        </div>
-      </Field>
-      {loaded && workflows.length === 0 && (
-        <p className="wf-form-note">
-          {bt('No saved workflows yet — create one in the Workflows tab first.')}
-        </p>
-      )}
+      <WorkflowPicker
+        label="Workflow to execute"
+        value={workflowId}
+        onChange={(v) => onChange({ workflowId: v })}
+        excludeId={selfId}
+      />
 
       <Field label="Execute Id (optional)" title="Execute Id (optional)">
         <TextInput
@@ -103,9 +65,7 @@ export default function EditExecuteWorkflow({ data, onChange }: EditFormProps) {
         />
       </Field>
 
-      <p className="wf-form-note" style={{ marginTop: 12 }}>
-        {bt('Global data')}
-      </p>
+      <p className="wf-form-note mt-3">{bt('Global data')}</p>
       <Checkbox
         checked={bool(data, 'insertAllGlobalData')}
         onChange={(v) => onChange({ insertAllGlobalData: v })}

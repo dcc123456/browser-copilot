@@ -594,6 +594,8 @@ export interface Messages {
   cancel: string
   edit: string
   delete: string
+  /** Close button label on a top-of-panel notice. */
+  bannerDismiss: string
   loading: string
   tryAgain: string
   reloadPanel: string
@@ -2359,6 +2361,7 @@ const en: Messages = {
   cancel: 'Cancel',
   edit: 'Edit',
   delete: 'Delete',
+  bannerDismiss: 'Dismiss notification',
   loading: 'Loading…',
   tryAgain: 'Try again',
   reloadPanel: 'Reload panel',
@@ -4026,6 +4029,7 @@ const zhCN: Messages = {
   cancel: '取消',
   edit: '编辑',
   delete: '删除',
+  bannerDismiss: '关闭通知',
   loading: '加载中…',
   tryAgain: '重试',
   reloadPanel: '重新加载面板',

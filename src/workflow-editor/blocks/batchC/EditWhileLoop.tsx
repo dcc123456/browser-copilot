@@ -29,7 +29,6 @@ export default function EditWhileLoop({ data, onChange }: EditFormProps) {
     data.conditions === null || data.conditions === undefined
       ? defaultWhileConditions()
       : readGroups(data.conditions)
-  const conditionCount = groups.reduce((total, group) => total + group.conditions.length, 0)
 
   return (
     <div className="wf-form">
@@ -43,15 +42,15 @@ export default function EditWhileLoop({ data, onChange }: EditFormProps) {
 
       <PopupField
         title="While loop condition"
-        summary={`${groups.length} ${bt('OR groups')} · ${conditionCount} ${bt('conditions')}`}
         editLabel="Edit condition"
         icon="lucide:GitBranch"
         size="lg"
+        variant="button"
       >
         <ConditionBuilder value={groups} onChange={(g) => onChange({ conditions: g })} />
       </PopupField>
 
-      <p className="wf-form-note" style={{ marginTop: 8 }}>
+      <p className="wf-form-note mt-2">
         {bt('Blocks connected to the fallback handle run when the condition is false.')}
       </p>
     </div>

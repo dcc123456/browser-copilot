@@ -567,13 +567,13 @@ export function GroupTable({
                     <button
                       className="block w-full truncate text-left text-ink transition-colors duration-150 hover:text-accent focus-visible:text-accent"
                       onClick={() => openEntity(target)}
-                      title={view?.hint}
+                      title={name}
                       type="button"
                     >
                       {name}
                     </button>
                   ) : (
-                    <div className="truncate text-ink" title={view?.hint ?? row.key}>
+                    <div className="truncate text-ink" title={name}>
                       {name}
                     </div>
                   )}
