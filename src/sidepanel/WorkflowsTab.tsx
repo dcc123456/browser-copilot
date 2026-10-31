@@ -1629,7 +1629,10 @@ export default function WorkflowsTab() {
                           {isRunning ? (
                             <button
                               className="danger"
-                              disabled={busy || isCancelling}
+                              // `busy` stays true for as long as the Run click's
+                              // command is pending, which is the whole run — the
+                              // stop control must stay usable exactly then.
+                              disabled={isCancelling}
                               onClick={() => void terminateWorkflowRuns(wf.id)}
                               title={t.taskTerminate}
                               type="button"

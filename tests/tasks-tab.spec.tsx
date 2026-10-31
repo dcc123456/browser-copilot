@@ -97,6 +97,10 @@ beforeEach(() => {
         return { type: 'tasks.running', runs: running, finished: [] }
       case 'tasks.cancel':
         return { type: 'tasks.cancel', ok: true }
+      case 'tasks.run':
+        // Never settles: while it is pending the tab is `busy`, exactly like a
+        // real run started from the card.
+        return new Promise(() => {})
       default:
         throw new Error(`unexpected command: ${command.type}`)
     }
@@ -468,5 +472,33 @@ describe('tasks tab · a running task can be terminated in place', () => {
     await click(container, t.taskTerminate)
 
     expect(commands('tasks.cancel')).toEqual([{ type: 'tasks.cancel', runId: 'run-1' }])
+  })
+})
+
+describe('tasks tab · terminate while the Run click is still pending', () => {
+  it('does not inherit the tab-wide busy lock', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const { container } = await render()
+
+    await click(container, t.taskRunNow)
+    running = [
+      {
+        runId: 'run-busy',
+        taskId: 't-1',
+        label: 'Morning digest',
+        source: 'manual',
+        startedAt: 1,
+        steps: [],
+      },
+    ]
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1600)
+    })
+
+    const terminate = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === t.taskTerminate,
+    )
+    expect(terminate).toBeTruthy()
+    expect(terminate!.hasAttribute('disabled')).toBe(false)
   })
 })

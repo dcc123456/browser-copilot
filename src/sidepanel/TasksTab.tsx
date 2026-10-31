@@ -343,7 +343,10 @@ export default function TasksTab() {
                   {isRunning ? (
                     <button
                       className="danger"
-                      disabled={busy || isCancelling}
+                      // Run-now keeps `busy` set until the run settles, so the
+                      // terminate control must ignore it and only block its own
+                      // in-flight cancel.
+                      disabled={isCancelling}
                       onClick={() => void terminateTaskRuns(task.id)}
                       title={t.taskTerminate}
                       type="button"
