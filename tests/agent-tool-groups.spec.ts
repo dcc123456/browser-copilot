@@ -132,9 +132,38 @@ describe('advertiseTools', () => {
     expect(names).toContain('list_tabs') // read-only nav tool
     expect(names).not.toContain('tab_new') // ACTION_TOOLS
     expect(names).not.toContain('save_local') // ACTION_TOOLS
-    // Non-action group tools keep the pre-existing read-only semantics.
-    expect(names).toContain('get_secret')
+    // `get_secret` fills a credential into the page, so read-only withholds it
+    // like every other page-changing tool. Reading the secret list still works.
+    expect(names).not.toContain('get_secret')
+    expect(names).toContain('list_secrets')
     expect(names).toContain('load_tools') // pure bookkeeping, not an action
+  })
+
+  it('offers read-only only the load groups that can still contribute a tool', () => {
+    // `forms` / `flow` / `keys` / `script` are all actions (withheld), and
+    // `vision` is already advertised in every read-only turn — offering them in
+    // the loader would promise a round that adds nothing.
+    const loader = advertiseTools({ mode: 'readonly' }).find(
+      (tool) => tool.function.name === 'load_tools',
+    )
+    const groups = (
+      loader?.function.parameters as {
+        properties?: { groups?: { items?: { enum?: string[] } } }
+      }
+    )?.properties?.groups?.items?.enum
+    expect(groups).toEqual(['tabs', 'data', 'skills', 'ops', 'delegate'])
+    // Full auto still lists everything the loader can widen to.
+    const fullLoader = advertiseTools({ mode: 'full' }).find(
+      (tool) => tool.function.name === 'load_tools',
+    )
+    const fullGroups = (
+      fullLoader?.function.parameters as {
+        properties?: { groups?: { items?: { enum?: string[] } } }
+      }
+    )?.properties?.groups?.items?.enum
+    for (const group of ['forms', 'flow', 'keys', 'vision', 'script']) {
+      expect(fullGroups).toContain(group)
+    }
   })
 
   it('keeps the image reads in read-only — they change nothing', () => {
@@ -651,9 +680,24 @@ describe('one-click approval gate (modeAutoApproves)', () => {
     expect(modeAutoApproves('full', 'read_current_page')).toBe(true)
   })
 
-  it('semi mode still asks on page actions', () => {
+  it('semi mode still defers page actions to the risk classifier', () => {
+    // `false` here only means "not pre-approved by mode"; runOneToolCall then
+    // asks only when lib/action-risk flags the call (see confirm.spec.ts).
     expect(modeAutoApproves('semi', 'open_url')).toBe(false)
     expect(modeAutoApproves('semi', 'click')).toBe(false)
+  })
+
+  it('semi mode never asks for reads or observations', () => {
+    for (const name of [
+      'read_current_page',
+      'snapshot_page',
+      'read_selected_element',
+      'list_tabs',
+      'screenshot',
+      'recognize_image',
+    ]) {
+      expect(modeAutoApproves('semi', name), name).toBe(true)
+    }
   })
 
   it('treats workflow operators as page actions in every other mode', () => {
@@ -673,13 +717,17 @@ describe('one-click approval gate (modeAutoApproves)', () => {
     expect(isPageAction('wf_op_forms')).toBe(true)
     expect(isPageAction('read_current_page')).toBe(false)
     expect(isPageAction('load_tools')).toBe(false)
-    expect(isPageAction('get_secret')).toBe(false)
+    expect(isPageAction('get_secret')).toBe(true)
   })
 
   it('always auto-approves pure bookkeeping tools, whatever the mode', () => {
     for (const mode of ['semi', 'full', 'workflow'] as const) {
       expect(modeAutoApproves(mode, 'load_tools')).toBe(true)
-      expect(modeAutoApproves(mode, 'get_secret')).toBe(true)
     }
+    // get_secret types a credential into the page: only full/workflow skip the
+    // card; semi asks via the risk classifier.
+    expect(modeAutoApproves('full', 'get_secret')).toBe(true)
+    expect(modeAutoApproves('workflow', 'get_secret')).toBe(true)
+    expect(modeAutoApproves('semi', 'get_secret')).toBe(false)
   })
 })

@@ -107,7 +107,7 @@ import {
 import { inspectImage, preprocessImage, recognizeImage, resolveVisionTarget } from '../lib/vision'
 import { evaluateArithmetic } from '../lib/ocr-candidates'
 import { fetchImageAsDataUrl } from '../lib/fetch-image'
-import { isSamePage } from '../lib/pages'
+import { assessActionRisk, type RiskTargetInfo } from '../lib/action-risk'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import {
   buildToolErrorContext,
@@ -205,16 +205,17 @@ import { evaluateJsPermission } from '../lib/workflow/capability-gap'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 
 /**
- * Tools that change something and therefore always need approval.
- *
- * Mostly page actions, but the set is really "has a persistent side effect":
- * `create_skill` writes to the skill store and `create_scheduled_task` arms a
- * recurring unattended job, so both ask in semi mode like any click does. They
- * never touch the page, which is why neither appears in WORKFLOW_WITHHELD_TOOLS.
+ * Tools that change something, i.e. the set read-only mode withholds and the
+ * set semi-auto's risk classifier inspects. Approval is NOT "every member":
+ * semi only asks for the risk classes in `lib/action-risk` (payments,
+ * credentials, destructive and sending actions, scripts, persistent writes).
+ * `create_skill` / `create_scheduled_task` stay here because they write state
+ * that outlives the page; neither appears in WORKFLOW_WITHHELD_TOOLS because
+ * they never touch the page.
  *
  * `ask_user` is deliberately absent from both this set and `READ_TOOLS`: asking
  * IS the interaction, so it must never be held behind the approval card, and
- * `modeAutoApproves` / `needsConfirmation` then auto-approve it in every mode.
+ * `modeAutoApproves` then auto-approves it in every mode.
  * It is dispatched by a dedicated branch in `runOneToolCall`, never by
  * `executeTool`.
  */
@@ -233,6 +234,10 @@ const ACTION_TOOLS = new Set([
   'pin_tab',
   'unpin_tab',
   'run_javascript',
+  // Types a saved credential into the focused field: page-changing even though
+  // it never takes a target argument, so read-only withholds it and semi-auto
+  // asks before it (see lib/action-risk).
+  'get_secret',
   'save_local',
   'recognize_image',
   'screenshot',
@@ -516,7 +521,7 @@ export function buildSystemPrompt(options: {
     }
   } else {
     parts.push(
-      'OPERATING MODE: SEMI-AUTO (default). Every page-changing action is shown to the user for one-shot approval; be precise so the summary is clear.',
+      'OPERATING MODE: SEMI-AUTO (default). Only risky actions wait for a one-click approval from the user — paying or committing an order, typing passwords/verification codes, deleting or resetting, sending/publishing, run_javascript, and creating skills or scheduled tasks. Reading pages, scrolling, waiting, navigation and tab bookkeeping run immediately; if the user declines an action, do not retry it. Name the button/field and value precisely so the approval summary is clear.',
     )
   }
 
@@ -626,7 +631,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'read_current_page',
       description:
-        'Read the active tab: title, URL, selection, visible text. For content questions that need no element action. Requires approval.',
+        'Read the active tab: title, URL, selection, visible text. For content questions that need no element action.',
       parameters: {
         type: 'object',
         properties: { maxChars: { type: 'number' } },
@@ -638,7 +643,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'snapshot_page',
       description:
-        'Read the active page and list its interactive elements (buttons, links, inputs) with refs. Call before clicking/filling. Requires approval.',
+        'Read the active page and list its interactive elements (buttons, links, inputs) with refs. Call before clicking/filling.',
       parameters: {
         type: 'object',
         properties: {
@@ -653,7 +658,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'read_selected_element',
       description:
-        'Read the element the user picked with the Browser Copilot crosshair button on the page: CSS selector, tag, text and capped HTML. The result carries a ready `target` for click/fill, so act on exactly what the user chose. `stale` means the tab has navigated since the pick. Read-only; requires approval.',
+        'Read the element the user picked with the Browser Copilot crosshair button on the page: CSS selector, tag, text and capped HTML. The result carries a ready `target` for click/fill, so act on exactly what the user chose. `stale` means the tab has navigated since the pick. Read-only.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -679,7 +684,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'recognize_image',
       description:
-        'Read TEXT inside an image (e.g. a CAPTCHA) with an image model. Pass `image` (data URL / http(s) URL), a CSS `selector`, or nothing for the visible page. Reuse an earlier result for the same unchanged image. Requires approval.',
+        'Read TEXT inside an image (e.g. a CAPTCHA) with an image model. Pass `image` (data URL / http(s) URL), a CSS `selector`, or nothing for the visible page. Reuse an earlier result for the same unchanged image.',
       parameters: {
         type: 'object',
         properties: {
@@ -704,7 +709,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'screenshot',
       description:
-        'Visually inspect an element or the page with an image model (layout, colors, rendered state). For text inside images use recognize_image. Pass `target` or nothing for the whole page. Requires approval.',
+        'Visually inspect an element or the page with an image model (layout, colors, rendered state). For text inside images use recognize_image. Pass `target` or nothing for the whole page.',
       parameters: {
         type: 'object',
         properties: {
@@ -1167,7 +1172,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'save_local',
       description:
-        'Save text content as a local file (download folder / save dialog). Use for download/export/save requests; never script downloads with run_javascript. Requires approval.',
+        'Save text content as a local file (download folder / save dialog). Use for download/export/save requests; never script downloads with run_javascript.',
       parameters: {
         type: 'object',
         properties: {
@@ -1186,7 +1191,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'run_plan',
       description:
-        'Execute up to 16 already-decided steps ({tool, args, optional?}) in order in ONE round; stops at the first failure unless the step is optional. Only when the steps are unambiguous from the current snapshot — one-at-a-time when a later step depends on an earlier result. Requires approval.',
+        'Execute up to 16 already-decided steps ({tool, args, optional?}) in order in ONE round; stops at the first failure unless the step is optional. Only when the steps are unambiguous from the current snapshot — one-at-a-time when a later step depends on an earlier result. Steps of a risky kind ask for approval first.',
       parameters: {
         type: 'object',
         properties: {
@@ -2027,7 +2032,11 @@ export function advertiseTools({
                 ...(groups ?? {}),
                 items: {
                   type: 'string',
-                  enum: Object.keys(TOOL_GROUPS).filter((g) => !isWorkflowOnlyGroup(g)),
+                  enum: Object.keys(TOOL_GROUPS).filter(
+                    (g) =>
+                      !isWorkflowOnlyGroup(g) &&
+                      (mode !== 'readonly' || READONLY_LOADABLE_GROUPS.has(g)),
+                  ),
                 },
               },
             },
@@ -2084,6 +2093,23 @@ function isWorkflowOnlyGroup(group: string): boolean {
     categoryOfOperatorGroup(group) !== undefined
   )
 }
+
+/**
+ * Groups whose `load_tools` entry is worth offering in read-only mode: at
+ * least one member survives that mode's action filter. `vision` is excluded
+ * because its tools are force-advertised there anyway, so loading it would be
+ * a no-op round; `forms`/`flow`/`keys`/`script` have no surviving member at
+ * all. Pruning them keeps the loader from promising tools the mode can never
+ * hand back.
+ */
+const READONLY_LOADABLE_GROUPS = new Set(
+  Object.keys(TOOL_GROUPS).filter((group) =>
+    (TOOL_GROUPS[group] ?? []).some(
+      (name) =>
+        !VISION_GROUP_TOOLS.has(name) && !(ACTION_TOOLS.has(name) && !isObservationTool(name)),
+    ),
+  ),
+)
 
 /** Name of the workflow-mode category selector. Named once; dispatch and the auto-activate path share it. */
 export const USE_OPERATORS_TOOL = 'use_operators'
@@ -2343,7 +2369,6 @@ export interface AgentDeps {
   takeInterjections?: () => { id: string; text: string }[]
   signal?: AbortSignal
   skillId?: string | undefined
-  grantedPageUrl?: string | undefined
   /** Bounding id for history records. */
   conversationId: string
   /**
@@ -2611,6 +2636,27 @@ function resolveTargetFrom(
   return {
     error:
       'This tool needs an element: pass `ref` from the latest snapshot (preferred) or a full `target` object.',
+  }
+}
+
+/**
+ * Snapshot knowledge for the semi-auto risk classifier: a `ref` resolves
+ * through the latest snapshot (accessible name + input type), while an inline
+ * `target` carries its own label/specs. Nothing usable means the classifier
+ * treats an element action as unknown and asks.
+ */
+function riskTargetOf(
+  args: Record<string, unknown>,
+  snapshotTargets: ToolContext['snapshotTargets'],
+): RiskTargetInfo | undefined {
+  const ref = typeof args.ref === 'string' ? args.ref.trim() : ''
+  const hit = ref ? snapshotTargets?.get(ref) : undefined
+  const target = hit?.target ?? asTarget(args.target)
+  if (!hit && !target) return undefined
+  return {
+    ...(hit?.name ? { name: hit.name } : {}),
+    ...(hit?.type ? { type: hit.type } : {}),
+    ...(target ? { target } : {}),
   }
 }
 
@@ -5630,19 +5676,6 @@ export async function runAgentTurn(
   return totalUsage.totalTokens > 0 ? totalUsage : null
 }
 
-export function needsConfirmation(
-  name: string,
-  grantedPageUrl: string | undefined,
-  currentTabUrl: string | undefined,
-): boolean {
-  if (ACTION_TOOLS.has(name)) return true
-  if (!READ_TOOLS.has(name)) return false
-  // Read tools are gated by the attach grant, like before.
-  if (name !== 'read_current_page' && name !== 'snapshot_page') return true
-  if (!grantedPageUrl) return true
-  return !isSamePage(grantedPageUrl, currentTabUrl)
-}
-
 /**
  * Attaches structured recovery context to a failed tool result: the failure
  * class, concrete recovery steps, the recent failed attempts at the SAME tool,
@@ -5693,26 +5726,25 @@ function enrichToolOutputError(
 }
 
 /**
- * PURE one-click-approval predicate for a tool call: does `mode` auto-approve
- * `name` without popping the confirm card?
+ * PURE mode-level predicate: can the mode skip the confirm card for `name`
+ * without looking at the call's arguments?
  *
  * Full auto and workflow generation are the two never-ask modes — every tool
- * the model calls runs immediately, whether it mutates the page or only reads
- * it. In workflow generation the model must not stall behind one-click
- * approval (the whole point is autonomous drafting); if it did, `open_url` /
- * `click` would hang on a card and the turn would stop.
+ * the model calls runs immediately. Semi-auto skips the card for the whole
+ * observe surface (reads, screenshots, listings); its action tools still come
+ * back `false` here and are then judged by `assessActionRisk`, which is where
+ * "only risky actions ask" lives. Read-only and chat block actions at
+ * dispatch before this predicate matters.
  *
- * In every other mode only non-action/non-read tools (get_secret, load_tools,
- * pure queries) are auto-approved; anything that opens / clicks / types /
- * attaches a page still reaches the approval card. Semi mode's granted-page
- * read-drift is resolved separately in {@link runOneToolCall} against the
- * live tab URL.
- *
- * Exported and side-effect free so the confirmation contract can be
- * unit-tested without a browser driver.
+ * Exported and side-effect free so the mode contract can be unit-tested
+ * without a browser driver.
  */
 export function modeAutoApproves(mode: AgentMode, name: string): boolean {
   if (mode === 'full' || mode === 'workflow') return true
+  // Semi-auto: reading pages, taking screenshots and listing things never
+  // interrupts the user (dcc, 2026-11-01). `isObservationTool` is the same
+  // read/observe surface read-only mode permits.
+  if (mode === 'semi' && isObservationTool(name)) return true
   return !(isPageAction(name) || READ_TOOLS.has(name))
 }
 
@@ -6381,21 +6413,14 @@ async function runOneToolCall(
 
   let approved = true
   if (!modeAutoApproves(mode, name)) {
-    // Semi (and below): an action tool, or a read that drifted off the user's
-    // granted page, still reaches the one-click card.
-    let mustConfirm = true
-    if (READ_TOOLS.has(name) && deps.grantedPageUrl) {
-      // A page attached by the user is already consented to, but a read that
-      // drifted to another page still asks.
-      try {
-        const tab = await activeTab()
-        mustConfirm = needsConfirmation(name, deps.grantedPageUrl, tab?.url)
-      } catch {
-        mustConfirm = true
-      }
-    }
-
-    if (mustConfirm) {
+    // Semi-auto is the only mode that reaches this branch. A plain click or
+    // fill on a named, harmless element runs straight through; a payment,
+    // credential, destructive or sending action — or one whose target cannot
+    // be identified — takes one click from the user.
+    const risk = assessActionRisk(name, args, (stepArgs) =>
+      riskTargetOf(stepArgs, ctx.snapshotTargets),
+    )
+    if (risk.risky) {
       approved = await deps.confirm(name, describeAction(name, args))
       if (!approved) {
         pushResult(JSON.stringify({ error: 'The user declined this action. Do not retry it.' }))

@@ -3714,7 +3714,6 @@ chrome.runtime.onConnect.addListener((port) => {
         const scope = await normalScopeFromWindowId(panelWindowId)
 
         let text = message.text
-        let grantedPageUrl: string | undefined
         /** Skill pinned for this turn, recorded so the panel can show its tag. */
         let pinnedSkillName: string | undefined
         if (message.includeSelection) {
@@ -3724,7 +3723,6 @@ chrome.runtime.onConnect.addListener((port) => {
             // window may be another one the user is browsing by hand.
             const page = await readActiveSelection(scope)
             if (page.selection.trim().length > 0) {
-              grantedPageUrl = page.url
               text =
                 `Content selected on the page I am viewing:\n` +
                 `Title: ${page.title}\nURL: ${page.url}\n` +
@@ -3836,7 +3834,6 @@ chrome.runtime.onConnect.addListener((port) => {
           // unattended entry points leave this off.
           enableDelegation: true,
           ...(message.skillId ? { skillId: message.skillId } : {}),
-          ...(grantedPageUrl ? { grantedPageUrl } : {}),
           ...(scope ? { scopeWindowId: scope.windowId } : {}),
           conversationId,
           getMode,

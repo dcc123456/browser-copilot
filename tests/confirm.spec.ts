@@ -1,97 +1,170 @@
 /**
- * Tests for the page-read confirmation gate.
+ * Confidence-boundary tests for the semi-auto approval card.
  *
- * Ticking "Attach current page" is explicit consent for that page, so the model
- * calling `read_current_page` in the same turn must not pop a redundant prompt.
- * But the waiver has to be narrow: it covers the page the user attached, not
- * "any page for the rest of the turn". These tests pin both halves, because the
- * failure modes point in opposite directions — a gate that is too strict is
- * merely annoying, while one that is too loose reads a page the user never
- * agreed to and ships it to a third-party model endpoint.
+ * Semi-auto used to ask before EVERY page action and every read, which made the
+ * user click through harmless steps. dcc's ruling (2026-11-01): reading pages
+ * and scrolling never ask; only consequences that are hard to take back do —
+ * payments, credentials, deletions, sending/publishing, scripts, and persistent
+ * side effects — plus any element action whose target cannot be identified.
+ *
+ * These tests pin both directions, because the failure modes are opposite: too
+ * strict and the mode is noise, too loose and a one-click purchase goes out
+ * without the user seeing it.
  */
 import { describe, expect, it } from 'vitest'
-import { needsConfirmation } from '../src/background/agent'
+import { modeAutoApproves } from '../src/background/agent'
+import { assessActionRisk, type RiskTargetInfo } from '../src/lib/action-risk'
 
-const PAGE = 'https://example.com/article'
+const NEXT_BUTTON: RiskTargetInfo = {
+  name: 'Next',
+  target: { primary: { how: 'role', value: 'button', role: 'button' }, fallbacks: [] },
+}
 
-describe('needsConfirmation · which tools are gated', () => {
-  it('never gates use_skill, which only re-reads the user’s own text', () => {
-    expect(needsConfirmation('use_skill', undefined, undefined)).toBe(false)
-    expect(needsConfirmation('use_skill', PAGE, PAGE)).toBe(false)
+const PAY_BUTTON: RiskTargetInfo = {
+  name: 'Pay now',
+  target: { primary: { how: 'text', value: 'Pay now' }, fallbacks: [] },
+}
+
+const EMAIL_FIELD: RiskTargetInfo = {
+  name: 'Email',
+  type: 'email',
+  target: { primary: { how: 'id', value: 'email' }, fallbacks: [] },
+}
+
+const resolveTo = (info: RiskTargetInfo | undefined) => (_args: Record<string, unknown>) => info
+
+describe('semi-auto never interrupts for reads or observations', () => {
+  it.each([
+    'read_current_page',
+    'snapshot_page',
+    'read_selected_element',
+    'list_tabs',
+    'screenshot',
+    'recognize_image',
+  ])('%s runs without a card', (name) => {
+    expect(modeAutoApproves('semi', name)).toBe(true)
+    expect(assessActionRisk(name, {}).risky).toBe(false)
   })
 
-  it('does not gate an unknown tool name', () => {
-    // Nothing else exists today; if a tool is added it must opt in explicitly
-    // rather than inherit a prompt by accident.
-    expect(needsConfirmation('something_new', undefined, undefined)).toBe(false)
-  })
-
-  it('gates a page read that the user did not attach', () => {
-    // The original behaviour, unchanged: a model deciding on its own must ask.
-    expect(needsConfirmation('read_current_page', undefined, PAGE)).toBe(true)
-  })
-
-  it('gates run_javascript because it can change the page', () => {
-    expect(needsConfirmation('run_javascript', undefined, PAGE)).toBe(true)
-    expect(needsConfirmation('run_javascript', PAGE, PAGE)).toBe(true)
-  })
-})
-
-describe('needsConfirmation · waiver after an attach', () => {
-  it('waives the prompt when the attached page is still the active tab', () => {
-    // The reported bug: the user ticked the box, then was asked anyway.
-    expect(needsConfirmation('read_current_page', PAGE, PAGE)).toBe(false)
-  })
-
-  it('waives it despite fragment and trailing-slash differences', () => {
-    // Chrome's tab URL and the page's own location.href routinely differ here.
-    expect(needsConfirmation('read_current_page', PAGE, `${PAGE}#section`)).toBe(false)
-    expect(
-      needsConfirmation('read_current_page', 'https://example.com/', 'https://example.com'),
-    ).toBe(false)
-  })
-
-  it('waives it when an SPA rewrote the query string', () => {
-    expect(
-      needsConfirmation(
-        'read_current_page',
-        'https://example.com/app?tab=1',
-        'https://example.com/app?tab=9',
-      ),
-    ).toBe(false)
+  it('harmless page actions are classified as low risk', () => {
+    // Scroll/wait/navigation/tab bookkeeping have no argument-dependent risk.
+    for (const name of ['scroll', 'wait_for', 'open_url', 'tab_switch', 'pin_tab']) {
+      expect(assessActionRisk(name, {}).risky).toBe(false)
+    }
   })
 })
 
-describe('needsConfirmation · the waiver stays narrow', () => {
-  it('re-gates when the user switched to a different page', () => {
-    // Consent covered one page, not every page from then on.
-    expect(needsConfirmation('read_current_page', PAGE, 'https://example.com/other')).toBe(true)
+describe('risk classes that do ask', () => {
+  it('a payment button is a payment risk', () => {
+    expect(assessActionRisk('click', {}, resolveTo(PAY_BUTTON))).toEqual({
+      risky: true,
+      reason: 'payment',
+    })
   })
 
-  it('re-gates when the user switched to a different site', () => {
-    expect(needsConfirmation('read_current_page', PAGE, 'https://evil.com/article')).toBe(true)
+  it('a Chinese payment button is a payment risk', () => {
+    const info: RiskTargetInfo = { name: '立即支付' }
+    expect(assessActionRisk('click', {}, resolveTo(info)).reason).toBe('payment')
   })
 
-  it('re-gates on a subdomain, which is a different origin', () => {
-    expect(needsConfirmation('read_current_page', PAGE, 'https://sub.example.com/article')).toBe(
-      true,
+  it('a password field is a credentials risk, even without a password label', () => {
+    const info: RiskTargetInfo = { name: 'Enter your secret', type: 'password' }
+    expect(assessActionRisk('fill', {}, resolveTo(info))).toEqual({
+      risky: true,
+      reason: 'credentials',
+    })
+  })
+
+  it('a verification-code field is a credentials risk', () => {
+    const info: RiskTargetInfo = { name: 'Verification code' }
+    expect(assessActionRisk('fill', {}, resolveTo(info)).reason).toBe('credentials')
+  })
+
+  it('filling a saved credential asks, because get_secret types it into the page', () => {
+    expect(assessActionRisk('get_secret', { id: 'b1' })).toEqual({
+      risky: true,
+      reason: 'credentials',
+    })
+  })
+
+  it('destructive and sending actions ask', () => {
+    expect(assessActionRisk('click', {}, resolveTo({ name: 'Delete account' })).reason).toBe(
+      'destructive',
+    )
+    expect(assessActionRisk('click', {}, resolveTo({ name: '发送' })).reason).toBe('sending')
+    expect(assessActionRisk('click', {}, resolveTo({ name: 'Publish post' })).reason).toBe(
+      'sending',
     )
   })
 
-  it('re-gates when the active tab cannot be determined', () => {
-    // A missing tab URL proves nothing, so it must not satisfy the grant.
-    expect(needsConfirmation('read_current_page', PAGE, undefined)).toBe(true)
-    expect(needsConfirmation('read_current_page', PAGE, '')).toBe(true)
+  it('scripts and persistent side effects always ask', () => {
+    expect(assessActionRisk('run_javascript', { code: '1' }).reason).toBe('script')
+    expect(assessActionRisk('create_skill', {}).reason).toBe('persistent')
+    expect(assessActionRisk('create_scheduled_task', {}).reason).toBe('persistent')
   })
 
-  it('re-gates when either URL is unparseable', () => {
-    expect(needsConfirmation('read_current_page', 'not a url', 'not a url')).toBe(true)
-    expect(needsConfirmation('read_current_page', PAGE, 'not a url')).toBe(true)
+  it('Enter asks, because it submits whatever form has focus', () => {
+    expect(assessActionRisk('press_key', { key: 'Enter' }).reason).toBe('sending')
+    expect(assessActionRisk('press_key', { key: 'NumpadEnter' }).risky).toBe(true)
+    expect(assessActionRisk('press_key', { key: 'Tab' }).risky).toBe(false)
+  })
+})
+
+describe('safe element actions run through', () => {
+  it('a named, harmless button does not ask', () => {
+    expect(assessActionRisk('click', {}, resolveTo(NEXT_BUTTON))).toEqual({ risky: false })
   })
 
-  it('ignores an empty grant string, so a failed attach grants nothing', () => {
-    // The worker leaves the grant unset when the read failed: nothing was
-    // disclosed, so there is nothing to have consented to.
-    expect(needsConfirmation('read_current_page', '', PAGE)).toBe(true)
+  it('a named email field does not ask', () => {
+    expect(assessActionRisk('fill', {}, resolveTo(EMAIL_FIELD))).toEqual({ risky: false })
+  })
+
+  it('a CSS-only locator that names a risk still asks', () => {
+    const info: RiskTargetInfo = {
+      target: { primary: { how: 'css', value: '#pay-now' }, fallbacks: [] },
+    }
+    expect(assessActionRisk('click', {}, resolveTo(info)).reason).toBe('payment')
+  })
+})
+
+describe('unknown targets ask (dcc, 2026-11-01)', () => {
+  it('an icon button with no name or semantic locator asks', () => {
+    expect(assessActionRisk('click', {}, resolveTo({ name: '' }))).toEqual({
+      risky: true,
+      reason: 'unknown-target',
+    })
+  })
+
+  it('a bare CSS class is not proof of identity', () => {
+    const info: RiskTargetInfo = {
+      target: { primary: { how: 'css', value: '.icon-btn' }, fallbacks: [] },
+    }
+    expect(assessActionRisk('click', {}, resolveTo(info)).reason).toBe('unknown-target')
+  })
+
+  it('no resolver at all means every element action asks', () => {
+    expect(assessActionRisk('click', {}).reason).toBe('unknown-target')
+    expect(assessActionRisk('select_option', {}).reason).toBe('unknown-target')
+  })
+})
+
+describe('run_plan inherits the risk of its steps', () => {
+  const benignPlan = { steps: [{ tool: 'scroll', args: { mode: 'by', y: 300 } }] }
+  const riskyPlan = {
+    steps: [
+      { tool: 'scroll', args: { mode: 'by', y: 300 } },
+      { tool: 'click', args: {} },
+    ],
+  }
+
+  it('a benign plan runs without a card', () => {
+    expect(assessActionRisk('run_plan', benignPlan, resolveTo(NEXT_BUTTON)).risky).toBe(false)
+  })
+
+  it('one risky step makes the whole plan ask once', () => {
+    expect(assessActionRisk('run_plan', riskyPlan, resolveTo(PAY_BUTTON))).toEqual({
+      risky: true,
+      reason: 'payment',
+    })
   })
 })

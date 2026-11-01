@@ -2635,7 +2635,8 @@ const en: Messages = {
   modeChatHint:
     'Plain conversation. No operating rules or tools are sent, so it cannot read or act on the page, and uses the fewest tokens.',
   modeReadonlyHint: 'Can read pages and answer, but cannot click, type, or navigate.',
-  modeSemiHint: 'Each action is shown to you for approval before it runs.',
+  modeSemiHint:
+    'Only risky actions ask first: payments, passwords, deletions, sending. Reads and scrolling run immediately.',
   modeFullHint: 'The agent acts without asking each time. Watch the log.',
   modeFullWarning:
     'Full auto lets the agent click, type, and navigate without each approval. Use only on sites you trust, and review the action history afterwards.',
@@ -4294,7 +4295,7 @@ const zhCN: Messages = {
   modeWorkflow: '工作流生成',
   modeChatHint: '纯对话。不发送操作规则和工具，因此不能读取或操作页面，token 消耗最低。',
   modeReadonlyHint: '只能读取页面和回答问题，不能点击、输入或跳转。',
-  modeSemiHint: '每个改变页面的操作都会先请你确认。',
+  modeSemiHint: '只有有风险的操作才先问你：付款、密码、删除、发送。读页面和滚动直接执行。',
   modeFullHint: '智能体直接操作，不再每次询问。请留意操作记录。',
   modeFullWarning:
     '全自动模式下智能体可自行点击、输入和跳转，无需逐项确认。建议仅在你信任的网站使用，并事后查看操作记录。',

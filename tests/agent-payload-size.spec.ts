@@ -21,7 +21,7 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * use_operators detour or the activate-and-retry penalty — so the mode now
  * advertises EVERY operator category from round one (the model may still narrow
  * the surface consciously via `use_operators`). The price is accepted
- * deliberately: round 1 measures ~62.8k chars (~19k tokens), several times full
+ * deliberately: round 1 measures ~63k chars (~19k tokens), several times full
  * auto, and only in this mode.
  *
  * Raised 18_000 → 20_000 when `present_plan` (the plan skill's approval
@@ -35,8 +35,13 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * change — round one used to spend nearly half its tool budget on schemas most
  * conversations never touch. Raising this back toward 20k means the grouping
  * silently regressed; prefer a new group over a bigger menu.
+ *
+ * 12_600 → 12_700 when the semi-auto mode line started spelling out WHICH
+ * actions ask first (pay / password / delete / send) instead of "every action
+ * asks": measured total=12_661, +253 chars, and it buys the whole risk-based
+ * gate its own prompt.
  */
-const MAX_ADVERTISED_PAYLOAD_CHARS = 12_600
+const MAX_ADVERTISED_PAYLOAD_CHARS = 12_700
 /**
  * The full catalog (core + every on-demand group) must also stay bounded.
  * Raised 19_500 → 21_500 when the on-demand "delegate" group
@@ -132,9 +137,10 @@ const MAX_CATALOG_CHARS = 32_300
  * measured 62_676 after the allowlist key replaced the interim deny key).
  * Keeping them in the catalog default data is what lets a generated workflow
  * prune its own node's capabilities, and `migrateNodeData` fills them for old
- * nodes.
+ * nodes. Raised 62_800 → 63_200 for the semi-auto approval rule in the shared
+ * prompt (measured 63_046).
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 62_800
+const MAX_WORKFLOW_ROUND1_CHARS = 63_200
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~37.6k; the smallest (`general`)
@@ -150,8 +156,10 @@ const MAX_WORKFLOW_ROUND1_CHARS = 62_800
  * Raised 37_900 → 38_400 with the round-1 budget (`read_selected_element` —
  * measured 38_304). Raised 38_400 → 38_500 with the round-1 budget (rule 14 of
  * the shared system prompt now names the new loadable groups — measured 38_421).
+ * Raised 38_500 → 38_750 with the round-1 budget (the semi-auto approval rule —
+ * measured 38_674).
  */
-const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_500
+const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_750
 /**
  * The ceiling for the worst case the model can actually reach: every category
  * declared at once, which is the same set as `operators_author` (~42.9k of tool
@@ -168,9 +176,10 @@ const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_500
  * Raised 62_300 → 62_700 with the round-1 budget (`read_selected_element` —
  * measured 62_610).
  * Raised 62_700 → 62_800 with the round-1 budget (the `ai-agent` capability
- * keys — measured 62_676).
+ * keys — measured 62_676). Raised 62_800 → 63_200 with the round-1 budget (the
+ * semi-auto approval rule — measured 63_046).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_800
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 63_200
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
@@ -186,9 +195,11 @@ const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 62_800
  * measured 63_657).
  * Raised 63_700 → 63_800 with the round-1 budget (the `ai-agent` capability
  * keys — measured 63_723). Raised 63_800 → 63_900 with the round-1 budget
- * (the new groups named in system-prompt rule 14 — measured 63_840).
+ * (the new groups named in system-prompt rule 14 — measured 63_840). Raised
+ * 63_900 → 64_200 with the round-1 budget (the semi-auto approval rule —
+ * measured 64_093).
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 63_900
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 64_200
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
  * now deliberately carries EVERY operator schema, so workflow runs several

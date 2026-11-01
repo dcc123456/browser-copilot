@@ -66,12 +66,14 @@ afterEach(() => {
 })
 
 describe('read_selected_element', () => {
-  it('is advertised in every mode that can act, and needs approval in semi-auto', () => {
+  it('is advertised in every mode that can act, and runs without approval in semi-auto', () => {
     for (const mode of ['semi', 'full', 'readonly'] as const) {
       const names = advertiseTools({ mode }).map((tool) => tool.function.name)
       expect(names).toContain('read_selected_element')
     }
-    expect(modeAutoApproves('semi', 'read_selected_element')).toBe(false)
+    // Reading the element the user picked is an observation, so semi-auto
+    // runs it instead of asking — only risky actions are gated.
+    expect(modeAutoApproves('semi', 'read_selected_element')).toBe(true)
     expect(modeAutoApproves('full', 'read_selected_element')).toBe(true)
   })
 
