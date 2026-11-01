@@ -488,6 +488,9 @@ export class FeishuBot {
     if (!this.tokenProvider) return
     const token = await this.tokenProvider.get().catch(() => null)
     if (!token) return
+    // stop() may land while this event was awaiting its token (the bot was
+    // disabled, or a test moved on); a stopped bot must not start new work.
+    if (this.stopped) return
 
     // 0. Workflow command? A `/workflow <name>` (or Chinese equivalent) runs a
     //    saved workflow directly. Checked before named tasks so a workflow whose

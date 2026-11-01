@@ -340,4 +340,41 @@ describe('FeishuBot connection state machine', () => {
     expect(runSpy).not.toHaveBeenCalled()
     bot.stop()
   })
+
+  it('does not start a run when stopped while the token is still pending', async () => {
+    // The token fetch is the first await in handleEvent. A stop() that lands
+    // while it is in flight (the bot was disabled, or the worker is shutting
+    // down) must still drop the event, not start an unattended run afterwards.
+    vi.useRealTimers()
+    let releaseToken: () => void = () => {}
+    const tokenGate = new Promise<void>((resolve) => {
+      releaseToken = resolve
+    })
+    const alarms = fakeAlarms()
+    ;(globalThis as { chrome: unknown }).chrome = {
+      runtime: { getPlatformInfo: vi.fn(async () => ({})) },
+      alarms: alarms.api,
+    }
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/tenant_access_token')) {
+        await tokenGate
+        return fakeResponse(TOKEN_JSON)
+      }
+      if (String(url).includes('/callback/ws/endpoint')) return fakeResponse(ENDPOINT_JSON)
+      return new Response('{}', { status: 200 })
+    })
+    const bot = new FeishuBot(fetchMock as unknown as typeof fetch, FakeSocket as never)
+    void bot.reconcile()
+    await vi.waitFor(() => expect(FakeSocket.last).not.toBeNull(), { timeout: 2000 })
+    const socket = FakeSocket.last!
+    socket.open()
+    const unattended = await import('../src/background/agent-unattended')
+    const runSpy = vi.mocked(unattended.runUnattendedPrompt)
+
+    socket.message(eventFrame(30n, textMessageEvent('帮我统计 PR')))
+    bot.stop()
+    releaseToken()
+    await new Promise((r) => setTimeout(r, 100))
+    expect(runSpy).not.toHaveBeenCalled()
+  })
 })
