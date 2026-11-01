@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ensureSchema, getSettings, normalizeStoredSettings } from '../src/lib/storage'
 import { FsDirectory, resetStorageCache } from '../src/lib/fs-store'
+import { DEFAULT_FREE_PROVIDER_ID } from '../src/lib/free-provider-default'
 import type { ProviderProfile } from '../src/lib/providers'
 
 /**
@@ -204,8 +205,9 @@ describe('legacy settings adoption', () => {
 
     const settings = await getSettings()
 
-    expect(settings.providers).toEqual([])
-    // Nothing was written over the gap.
+    // The read path still offers the default free provider, but nothing was
+    // written over the gap.
+    expect(settings.providers.map((profile) => profile.id)).toEqual([DEFAULT_FREE_PROVIDER_ID])
     expect(chrome.store.has('settings')).toBe(false)
   })
 })

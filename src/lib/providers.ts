@@ -14,6 +14,12 @@
  * @module lib/providers
  */
 
+import {
+  DEFAULT_FREE_PROVIDER_BASE_URL,
+  DEFAULT_FREE_PROVIDER_LABEL,
+  DEFAULT_FREE_PROVIDER_MODEL,
+  DEFAULT_FREE_PROVIDER_PRESET_ID,
+} from './free-provider-default'
 import { LOCALES, type LocaleSetting, type Messages } from './i18n'
 import { normalizeLocalAgentBindings } from './storage'
 import { normalizeThinkingProfile, type ThinkingLevel } from './thinking'
@@ -117,10 +123,10 @@ export interface ProviderPreset {
  */
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
-    id: 'pollinations',
-    label: 'Pollinations',
-    baseUrl: 'https://text.pollinations.ai/openai',
-    suggestedModel: 'openai-fast',
+    id: DEFAULT_FREE_PROVIDER_PRESET_ID,
+    label: DEFAULT_FREE_PROVIDER_LABEL,
+    baseUrl: DEFAULT_FREE_PROVIDER_BASE_URL,
+    suggestedModel: DEFAULT_FREE_PROVIDER_MODEL,
     keyless: true,
     free: true,
     tools: true,

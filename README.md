@@ -15,10 +15,11 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
 - 🧠 **Works with the model you already use.** Any OpenAI-compatible endpoint:
   DeepSeek, 火山方舟 Ark, OpenAI, OpenRouter, Moonshot, DashScope, SiliconFlow,
   or a local Ollama/LM Studio. Bring your own key.
-- 🆓 **Free ways to start.** Pollinations needs no key at all; Gemini, Groq,
-  Cerebras, SambaNova, Chutes, OpenRouter, GitHub Models and Zhipu GLM-4-Flash
-  have free tiers; or let the extension drive your logged-in DeepSeek/ChatGPT
-  web chat in a background window (chat/text only — web chat cannot call tools).
+- 🆓 **Free by default.** A fresh install starts on the keyless Pollinations
+  provider — no key, no setup. Gemini, Groq, Cerebras, SambaNova, Chutes,
+  OpenRouter, GitHub Models and Zhipu GLM-4-Flash have free tiers; or let the
+  extension drive your logged-in DeepSeek/ChatGPT web chat in a background
+  window (chat/text only — web chat cannot call tools).
 - 🎚️ **You choose how autonomous it is.** Five modes from plain chat to full
   auto, plus a workflow-generate mode that turns a run into a reusable
   workflow; semi-auto asks only before risky actions — payments, passwords,
@@ -65,9 +66,11 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
 - 🤝 **Your coding agent can drive it too.** Claude Code, Codex, Trae — any
   MCP client — gets a browser toolbox through a local adapter and operates
   your real Chrome (see [Agent integration](#agent-integration-mcp)).
-- 🔒 **Private by construction.** No accounts, no telemetry, no cloud server.
-  Your keys and data stay on your machine; passwords are filled locally and
-  never shown to the model.
+- 🔒 **Private by construction.** No accounts, no telemetry, no cloud server of
+  ours. Keys and data stay on your machine; passwords are filled locally and
+  never shown to the model. The default free Pollinations provider does send
+  prompts to Pollinations — choose a local model or your own provider if text
+  must stay local.
 - 💾 **Own your data as files.** Pick a folder in Settings and everything —
   conversations, skills, workflows — is written to real files on your disk and
   nowhere else; the browser's own storage is left empty.
@@ -348,9 +351,10 @@ configuration, not a code path — unlisted endpoints work too.
 | Ollama (local)       | `http://localhost:11434/v1`                         | `qwen3:8b`                           |
 | LM Studio (local)    | `http://localhost:1234/v1`                          | `local-model`                        |
 
-**Free options.** Settings → Models groups free providers under **Free to try**
-and offers a one-click **Enable a free model (no key)** button. Pollinations is
-keyless; the others need a free account key. The two web-chat presets drive the
+**Free options.** A fresh install already has Pollinations active; the one-click
+**Enable a free model (no key)** button adds it back or switches to it. Settings
+→ Models groups free providers under **Free to try**. Pollinations is keyless;
+the others need a free account key. The two web-chat presets drive the
 free site in a background window and are deliberately limited to chat and
 text-only steps — a web page cannot receive tool schemas, so page automation
 must use an API provider.

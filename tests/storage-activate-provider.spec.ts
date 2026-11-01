@@ -94,6 +94,8 @@ describe('activateProvider', () => {
     await saveProvider(profile('beta', 'Beta', 'b1'))
 
     const settings = await activateProvider('deleted-profile')
-    expect(settings.activeProviderId).toBe('alpha')
+    // An unknown id is repaired to the first profile; the seeded free provider
+    // is first on a fresh install.
+    expect(settings.activeProviderId).toBe(settings.providers[0]!.id)
   })
 })

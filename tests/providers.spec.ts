@@ -16,7 +16,12 @@ import {
   webSiteOf,
   type ProviderProfile,
 } from '../src/lib/providers'
-import { normalizeLocalAgentBindings, normalizeStoredSettings } from '../src/lib/storage'
+import {
+  DEFAULT_SETTINGS,
+  normalizeLocalAgentBindings,
+  normalizeStoredSettings,
+} from '../src/lib/storage'
+import { DEFAULT_FREE_PROVIDER_ID } from '../src/lib/free-provider-default'
 import { RUN_WINDOW_LIMITS, normalizeProviderTransport } from '../src/lib/types'
 
 const en = messagesFor('en')
@@ -286,36 +291,32 @@ describe('free providers', () => {
  * hand-edit, or a half-written record must not be able to break the panel.
  */
 describe('normalizeStoredSettings', () => {
-  it('returns empty settings for absent or non-object input', () => {
+  it('returns the default settings, including the free provider, for absent or non-object input', () => {
     for (const input of [undefined, null, 'text', 42, {}]) {
-      expect(normalizeStoredSettings(input)).toEqual({
-        providers: [],
-        activeProviderId: '',
-        locale: 'auto',
-        mode: 'semi',
-        maxToolRounds: 20,
-        disabledTools: [],
-        systemPromptOverride: '',
-        downloadAutoSave: true,
-        localAgentEnabled: false,
-        localAgentToken: '',
-        localAgentUrl: 'ws://127.0.0.1:8765',
-        localAgentActiveAgent: '',
-        localAgentAdapterPath: '',
-        localAgentAllowReload: false,
-        localAgentBindings: {},
-        unattendedWindowPolicy: 'latest',
-        maxConcurrentRunWindows: 3,
-        imageModel: { providerId: '', model: '' },
-        ocrLanguage: 'eng',
-        takeoverModel: { providerId: '', model: '' },
-        takeoverOnRun: false,
-        autoRepairOnRun: false,
-        elementPickerEnabled: false,
-        elementPickerFormat: 'html',
-        elementPickerSelectOnly: false,
-      })
+      expect(normalizeStoredSettings(input)).toEqual(DEFAULT_SETTINGS)
     }
+  })
+
+  it('starts a fresh install on the keyless free provider', () => {
+    const settings = normalizeStoredSettings(undefined)
+    const provider = settings.providers[0]!
+    expect(settings.activeProviderId).toBe(DEFAULT_FREE_PROVIDER_ID)
+    expect(provider).toMatchObject({
+      id: DEFAULT_FREE_PROVIDER_ID,
+      presetId: 'pollinations',
+      baseUrl: 'https://text.pollinations.ai/openai',
+      apiKey: '',
+      model: 'openai-fast',
+      models: ['openai-fast'],
+    })
+    expect(providerNeedsKey(provider)).toBe(false)
+    expect(providerHasCredentials(provider)).toBe(true)
+  })
+
+  it('keeps an explicitly empty provider list empty', () => {
+    const settings = normalizeStoredSettings({ providers: [], activeProviderId: '' })
+    expect(settings.providers).toEqual([])
+    expect(settings.activeProviderId).toBe('')
   })
 
   it('passes a valid record through unchanged', () => {

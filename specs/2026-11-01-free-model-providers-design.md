@@ -72,6 +72,10 @@
 `validateProfile` 对免密钥 / 网页版跳过 API key 校验；网页版 baseUrl 必须命中已知站点。
 `profileFromPreset` 对 keyless / web 预填唯一合理模型，其余 preset 保持“不预填”的契约。
 
+**默认启用**：`DEFAULT_SETTINGS` 与 `ensureSchema` 的 v8 迁移会在没有任何 provider 时种入并
+激活 Pollinations；显式 `providers: []` 不会被每次读取重新加回，用户第一次添加自己的 provider
+时会接管 active。这样全新安装打开即可聊天，同时保留“删除即删除”的语义。
+
 ### 3.2 传输分层
 
 - `src/lib/llm.ts` 保持**纯 HTTP**，Runner 继续复用它。
@@ -179,6 +183,9 @@ pnpm bench:debug
 - `tests/web-chat-adapters.spec.ts`：候选顺序与 Target fallback。
 - `tests/web-chat-transport.spec.ts`：登录、流式回复、超时、abort。
 - UI：免费/网页版预设分组、keyless 可选 key、网页版隐藏 key 与模型抓取、卡片动作。
+- `storage-activate-provider` / `settings-legacy-adopt` / `workflow-review-ai` 已适配默认 provider：
+  “未配置”现在是显式空列表；未知 active id 回退到 `providers[0]`（默认 provider）；目录不可读时
+  读路径返回默认 provider 但绝不写回。
 
 ### 人工浏览器验收（拿不到就标 BLOCKED）
 

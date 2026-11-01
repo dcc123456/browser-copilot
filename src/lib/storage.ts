@@ -28,6 +28,7 @@ import { jsonBytes } from './persist-budget'
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
 import { normalizeThinkingProfile } from './thinking'
+import { DEFAULT_FREE_PROVIDER_ID, defaultFreeProvider } from './free-provider-default'
 import { BUILT_IN_SKILLS } from './builtin-skills'
 import { BUILT_IN_AGENTS } from './builtin-agents'
 import { LOCALES, type LocaleSetting } from './i18n'
@@ -95,12 +96,14 @@ const KEY_CONVERSATIONS_META = 'conversations'
  * - v7: the built-in `plan` skill is seeded on install/upgrade (the plan-first
  *   gate's trigger; existing installs must re-run `seedBuiltInSkills` to see it
  *   in the slash menu).
+ * - v8: an install with no providers starts on the keyless Pollinations
+ *   provider, so the plugin is usable before any model setup.
  */
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 8
 
 export const DEFAULT_SETTINGS: Settings = {
-  providers: [],
-  activeProviderId: '',
+  providers: [defaultFreeProvider()],
+  activeProviderId: DEFAULT_FREE_PROVIDER_ID,
   locale: 'auto',
   mode: 'semi',
   maxToolRounds: 20,
@@ -188,7 +191,9 @@ export function normalizeLocalAgentBindings(raw: unknown): Record<string, number
  * as a pure function so the rules are unit-testable without `chrome`.
  */
 export function normalizeStoredSettings(raw: unknown): Settings {
-  if (!raw || typeof raw !== 'object') return { ...DEFAULT_SETTINGS }
+  if (!raw || typeof raw !== 'object') {
+    return { ...DEFAULT_SETTINGS, providers: [defaultFreeProvider()] }
+  }
 
   const value = raw as Partial<Settings>
 
@@ -201,7 +206,11 @@ export function normalizeStoredSettings(raw: unknown): Settings {
         .map(normalizeThinkingProfile)
         .map(normalizeProviderModels)
         .map(normalizeProviderTransport)
-    : []
+    : // A missing field is a fresh/legacy install: start on the free provider.
+      // An explicit empty array is a user choice and stays empty.
+      value.providers === undefined
+      ? [defaultFreeProvider()]
+      : []
 
   // Never leave the pointer dangling: an unknown id would open the editor blank
   // with no way to tell why.
@@ -330,7 +339,14 @@ export async function ensureSchema(): Promise<void> {
 
   const patch: Record<string, unknown> = { [KEY_SCHEMA]: SCHEMA_VERSION }
   if (!unreadableGap(KEY_SETTINGS)) {
-    patch[KEY_SETTINGS] = normalizeStoredSettings(stored[KEY_SETTINGS])
+    const settings = normalizeStoredSettings(stored[KEY_SETTINGS])
+    // v8: an install with no provider starts on the keyless free one. This runs
+    // once per schema upgrade, so deleting it afterwards is respected.
+    if (settings.providers.length === 0) {
+      settings.providers = [defaultFreeProvider()]
+      settings.activeProviderId = DEFAULT_FREE_PROVIDER_ID
+    }
+    patch[KEY_SETTINGS] = settings
   }
   // Seed new collections as empty arrays so reads never need to special-case
   // "key absent" — but never over an unreadable gap, where the seeded empty
@@ -404,12 +420,24 @@ export async function seedBuiltInAgents(): Promise<void> {
  * Whether a settings value is absent or normalizes to the pristine defaults —
  * i.e. it carries no user data and a legacy file may hold the real settings.
  */
+const LEGACY_EMPTY_SETTINGS: Settings = {
+  ...DEFAULT_SETTINGS,
+  providers: [],
+  activeProviderId: '',
+}
+
 function isPristineSettings(raw: unknown): boolean {
   if (raw === undefined) return true
+  // Pre-provider records are pristine by definition; the v8 default provider
+  // must not stop a legacy settings file from being adopted.
+  if (raw && typeof raw === 'object' && !('providers' in (raw as Record<string, unknown>))) {
+    return true
+  }
   try {
+    const normalized = JSON.stringify(normalizeStoredSettings(raw))
     return (
-      JSON.stringify(normalizeStoredSettings(raw)) ===
-      JSON.stringify(normalizeStoredSettings(undefined))
+      normalized === JSON.stringify(normalizeStoredSettings(undefined)) ||
+      normalized === JSON.stringify(LEGACY_EMPTY_SETTINGS)
     )
   } catch {
     return false
@@ -511,8 +539,17 @@ export async function saveProvider(profile: ProviderProfile): Promise<Settings> 
     const index = providers.findIndex((existing) => existing.id === profile.id)
     if (index === -1) providers.push(profile)
     else providers[index] = profile
-    // A first profile becomes active automatically; otherwise the choice stands.
-    const activeProviderId = settings.activeProviderId || profile.id
+    // A first user profile becomes active automatically. The seeded free
+    // provider is the only profile on a fresh install, so adding a real
+    // provider must still take over — otherwise the new profile would sit
+    // beside the default while the default kept answering.
+    const onlySeededDefault =
+      settings.providers.length === 1 &&
+      settings.providers[0]?.id === DEFAULT_FREE_PROVIDER_ID &&
+      profile.id !== DEFAULT_FREE_PROVIDER_ID
+    const activeProviderId = onlySeededDefault
+      ? profile.id
+      : settings.activeProviderId || profile.id
     return setSettingsLocked({ providers, activeProviderId })
   })
 }

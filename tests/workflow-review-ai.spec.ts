@@ -173,7 +173,9 @@ describe('parseReview', () => {
 
 describe('reviewWorkflow', () => {
   it('returns null (keep-everything) when no provider is configured', async () => {
-    storedSettings = {}
+    // An explicit empty list, not an absent one: a fresh install now starts
+    // with the free provider.
+    storedSettings = { providers: [] }
     const result = await reviewWorkflow(fixture())
     expect(result).toBeNull()
   })
