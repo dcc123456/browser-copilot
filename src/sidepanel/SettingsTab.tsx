@@ -27,6 +27,7 @@ import {
 import { outboxCount } from '../lib/fs-outbox'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { clearDownloadDir, getDownloadDir, setDownloadDir } from '../lib/download-dir'
+import { getInstallType, type InstallType } from '../lib/update/state'
 import { ADAPTER_ASSET_PATH, ADAPTER_EXPORT_FILENAME, buildMcpSnippet } from '../lib/mcp-adapter'
 import NumberInput from '../ui/NumberInput'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
@@ -445,6 +446,9 @@ export default function SettingsTab({ onLocaleChange }: Props) {
 
   // --- Download directory ----------------------------------------------------
   const [downloadDirName, setDownloadDirName] = useState<string | null>(null)
+  // Kept in state so the locate button can hand it to `showDirectoryPicker`
+  // synchronously — an await before the picker would lose the user gesture.
+  const [downloadHandle, setDownloadHandle] = useState<FileSystemDirectoryHandle | null>(null)
   const [downloadBusy, setDownloadBusy] = useState(false)
   const [downloadNotice, setDownloadNotice] = useState<{
     kind: 'ok' | 'error'
@@ -452,7 +456,10 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   } | null>(null)
 
   useEffect(() => {
-    void getDownloadDir().then((handle) => setDownloadDirName(handle ? handle.name : null))
+    void getDownloadDir().then((handle) => {
+      setDownloadHandle(handle)
+      setDownloadDirName(handle ? handle.name : null)
+    })
   }, [])
 
   const chooseDownloadDir = async (): Promise<void> => {
@@ -467,6 +474,7 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     try {
       const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
       await setDownloadDir(handle)
+      setDownloadHandle(handle)
       setDownloadDirName(handle.name)
       setDownloadNotice({ kind: 'ok', text: t.settingsDownloadDirDone({ name: handle.name }) })
     } catch (error) {
@@ -481,12 +489,75 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     setDownloadBusy(true)
     try {
       await clearDownloadDir()
+      setDownloadHandle(null)
       setDownloadDirName(null)
       await mutate({ type: 'settings.set', patch: { downloadAutoSave: false } })
       setDownloadNotice(null)
     } finally {
       setDownloadBusy(false)
     }
+  }
+
+  /**
+   * "Locate folder": a page cannot ask the OS to reveal a directory, so this
+   * opens the native folder dialog already anchored at the configured folder —
+   * one click instead of navigating the tree. The picked value is ignored: this
+   * is a finder action, not a reconfiguration.
+   */
+  const locateDownloadDir = (): void => {
+    if (!downloadHandle || typeof window.showDirectoryPicker !== 'function') {
+      setDownloadNotice({ kind: 'error', text: t.settingsDownloadDirUnsupported })
+      return
+    }
+    setDownloadNotice(null)
+    void window
+      .showDirectoryPicker({
+        mode: 'read',
+        id: 'browser-copilot-download',
+        startIn: downloadHandle,
+      })
+      .catch((error: DOMException) => {
+        if (error?.name === 'AbortError') return
+        setDownloadNotice({ kind: 'error', text: t.settingsDownloadOpenFailed })
+      })
+  }
+
+  /** Opens the browser's default Downloads folder in Finder/Explorer. */
+  const openSystemDownloads = (): void => {
+    try {
+      chrome.downloads.showDefaultFolder()
+    } catch {
+      setDownloadNotice({ kind: 'error', text: t.settingsDownloadOpenFailed })
+    }
+  }
+
+  // --- Installation info -----------------------------------------------------
+  const [installType, setInstallType] = useState<InstallType | null>(null)
+  useEffect(() => {
+    void getInstallType().then(setInstallType)
+  }, [])
+
+  const extensionId = chrome?.runtime?.id ?? ''
+  const extensionUrl = chrome?.runtime?.getURL?.('') ?? ''
+  const extensionVersion = chrome?.runtime?.getManifest?.()?.version ?? ''
+  // Only Chromium exposes its extensions manager; Firefox builds hide the
+  // button rather than opening a dead chrome:// URL.
+  const extensionsPageUrl =
+    extensionId && extensionUrl.startsWith('chrome-extension://')
+      ? `chrome://extensions/?id=${extensionId}`
+      : null
+  const installTypeLabel =
+    installType === 'development'
+      ? t.settingsInstallTypeDevelopment
+      : installType === 'normal'
+        ? t.settingsInstallTypeStore
+        : t.settingsInstallTypeOther
+
+  const openExtensionsPage = (): void => {
+    if (!extensionsPageUrl) return
+    void chrome.tabs.create({ url: extensionsPageUrl }).catch(() => {
+      setBanner({ kind: 'error', text: t.settingsInstallOpenFailed })
+    })
   }
 
   // Keep the editor in sync when settings arrive (or change elsewhere), without
@@ -703,13 +774,25 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               >
                 {t.settingsDownloadDirDisconnect}
               </button>
+              <button
+                disabled={downloadBusy || !downloadHandle}
+                onClick={locateDownloadDir}
+                title={t.settingsDownloadDirLocateHint}
+                type="button"
+              >
+                {t.settingsDownloadDirLocate}
+              </button>
             </>
           ) : (
             <button disabled={downloadBusy} onClick={() => void chooseDownloadDir()} type="button">
               {t.settingsChooseFolder}
             </button>
           )}
+          <button onClick={openSystemDownloads} type="button">
+            {t.settingsDownloadOpenSystem}
+          </button>
         </div>
+        {downloadDirName && <p className="hint">{t.settingsDownloadDirLocateHint}</p>}
         <label className="checkbox">
           <input
             checked={settings.downloadAutoSave}
@@ -1231,6 +1314,40 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             </button>
           )}
         </div>
+      </div>
+
+      {/* --- Installation info --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsInstallInfo}</div>
+        <p className="hint">{t.settingsInstallInfoIntro}</p>
+        <ul className="mb-1 flex flex-col gap-1.5 text-xs">
+          <li className="flex gap-2">
+            <span className="w-[92px] shrink-0 text-muted">{t.settingsInstallVersion}</span>
+            <span className="min-w-0 break-all text-ink">{extensionVersion || '—'}</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="w-[92px] shrink-0 text-muted">{t.settingsInstallType}</span>
+            <span className="min-w-0 break-all text-ink">
+              {installType === null ? '…' : installTypeLabel}
+            </span>
+          </li>
+          <li className="flex gap-2">
+            <span className="w-[92px] shrink-0 text-muted">{t.settingsInstallId}</span>
+            <span className="min-w-0 font-mono break-all text-ink">{extensionId || '—'}</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="w-[92px] shrink-0 text-muted">{t.settingsInstallUrl}</span>
+            <span className="min-w-0 font-mono break-all text-ink">{extensionUrl || '—'}</span>
+          </li>
+        </ul>
+        {extensionsPageUrl && (
+          <div className="actions">
+            <button onClick={openExtensionsPage} type="button">
+              {t.settingsInstallOpenExtensions}
+            </button>
+          </div>
+        )}
+        {extensionsPageUrl && <p className="hint">{t.settingsInstallOpenHint}</p>}
       </div>
 
       <UpdateSettingsCard />

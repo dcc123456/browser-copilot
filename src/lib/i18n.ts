@@ -1324,6 +1324,26 @@ export interface Messages {
   settingsDownloadDirUnsupported: string
   settingsDownloadDirDisconnect: string
   settingsDownloadAutoSave: string
+  /** Opens the native folder dialog already anchored at the configured folder. */
+  settingsDownloadDirLocate: string
+  settingsDownloadDirLocateHint: string
+  /** Opens the browser's default Downloads folder in the OS file manager. */
+  settingsDownloadOpenSystem: string
+  settingsDownloadOpenFailed: string
+
+  // Settings · installation info
+  settingsInstallInfo: string
+  settingsInstallInfoIntro: string
+  settingsInstallVersion: string
+  settingsInstallType: string
+  settingsInstallTypeDevelopment: string
+  settingsInstallTypeStore: string
+  settingsInstallTypeOther: string
+  settingsInstallId: string
+  settingsInstallUrl: string
+  settingsInstallOpenExtensions: string
+  settingsInstallOpenHint: string
+  settingsInstallOpenFailed: string
 
   // Settings · local-agent bridge
   settingsLocalAgent: string
@@ -2976,6 +2996,26 @@ const en: Messages = {
     'This browser has no folder picker; downloads use its default download location.',
   settingsDownloadDirDisconnect: 'Disconnect',
   settingsDownloadAutoSave: 'Automatically save exports to this folder',
+  settingsDownloadDirLocate: 'Locate folder',
+  settingsDownloadDirLocateHint:
+    'Browsers do not let a page open Finder/Explorer on your behalf. This opens the native folder dialog already inside the configured folder.',
+  settingsDownloadOpenSystem: 'Open Downloads folder',
+  settingsDownloadOpenFailed: 'Could not open the folder.',
+
+  settingsInstallInfo: 'Installation',
+  settingsInstallInfoIntro:
+    'Extensions cannot read their own disk path. Unpacked installs can open the extensions page and use “Show in folder” on this extension’s card.',
+  settingsInstallVersion: 'Version',
+  settingsInstallType: 'Install type',
+  settingsInstallTypeDevelopment: 'Unpacked (development)',
+  settingsInstallTypeStore: 'Chrome Web Store',
+  settingsInstallTypeOther: 'Other',
+  settingsInstallId: 'Extension ID',
+  settingsInstallUrl: 'Extension URL',
+  settingsInstallOpenExtensions: 'Open extensions page',
+  settingsInstallOpenHint:
+    'Unpacked installs show the source folder on that card, with a “Show in folder” action.',
+  settingsInstallOpenFailed: 'Could not open the extensions page.',
 
   settingsLocalAgent: 'Local agent access',
   settingsLocalAgentIntro: 'Connect to the local MCP adapter that coding agents auto-spawn.',
@@ -4579,6 +4619,25 @@ const zhCN: Messages = {
   settingsDownloadDirUnsupported: '此浏览器没有文件夹选择器，文件将保存到浏览器默认下载位置。',
   settingsDownloadDirDisconnect: '断开',
   settingsDownloadAutoSave: '自动将导出内容保存到该文件夹',
+  settingsDownloadDirLocate: '定位到该目录',
+  settingsDownloadDirLocateHint:
+    '浏览器不允许网页直接打开 Finder/资源管理器。此按钮会打开系统文件夹对话框，并直接定位到该目录。',
+  settingsDownloadOpenSystem: '打开系统下载文件夹',
+  settingsDownloadOpenFailed: '无法打开文件夹。',
+
+  settingsInstallInfo: '安装信息',
+  settingsInstallInfoIntro:
+    '扩展无法读取自身的磁盘安装路径。开发版可打开扩展程序页，在该扩展卡片上点「在文件夹中显示」。',
+  settingsInstallVersion: '版本',
+  settingsInstallType: '安装方式',
+  settingsInstallTypeDevelopment: '开发版（已解压）',
+  settingsInstallTypeStore: 'Chrome 应用商店',
+  settingsInstallTypeOther: '其他',
+  settingsInstallId: '扩展 ID',
+  settingsInstallUrl: '扩展地址',
+  settingsInstallOpenExtensions: '打开扩展程序页',
+  settingsInstallOpenHint: '开发版在该卡片中会显示源文件夹，并提供「在文件夹中显示」。',
+  settingsInstallOpenFailed: '无法打开扩展程序页。',
 
   settingsLocalAgent: '本地 Agent 接入',
   settingsLocalAgentIntro: '连接编程助手自动拉起的本地 MCP 适配器。',
