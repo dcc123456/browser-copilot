@@ -3,17 +3,24 @@ import { messagesFor } from '../src/lib/i18n'
 import {
   PROVIDER_PRESETS,
   findPreset,
+  findPresetByBaseUrl,
+  isKeylessEndpoint,
   isLocalEndpoint,
   normalizeBaseUrl,
   normalizeSettingsPayload,
   profileFromPreset,
+  providerCanCallTools,
+  providerHasCredentials,
+  providerNeedsKey,
   validateProfile,
+  webSiteOf,
   type ProviderProfile,
 } from '../src/lib/providers'
 import { normalizeLocalAgentBindings, normalizeStoredSettings } from '../src/lib/storage'
-import { RUN_WINDOW_LIMITS } from '../src/lib/types'
+import { RUN_WINDOW_LIMITS, normalizeProviderTransport } from '../src/lib/types'
 
 const en = messagesFor('en')
+const zh = messagesFor('zh-CN')
 
 function profile(overrides: Partial<ProviderProfile> = {}): ProviderProfile {
   return {
@@ -154,6 +161,123 @@ describe('isLocalEndpoint', () => {
   it('treats remote hosts as non-local', () => {
     expect(isLocalEndpoint('https://api.deepseek.com/v1')).toBe(false)
     expect(isLocalEndpoint('not a url')).toBe(false)
+  })
+})
+
+describe('free providers', () => {
+  it('recognises only the exact keyless host', () => {
+    expect(isKeylessEndpoint('https://text.pollinations.ai/openai')).toBe(true)
+    expect(isKeylessEndpoint('https://text.pollinations.ai/openai/chat/completions')).toBe(true)
+    expect(isKeylessEndpoint('https://text.pollinations.ai.evil.com/openai')).toBe(false)
+    expect(isKeylessEndpoint('https://api.deepseek.com/v1')).toBe(false)
+    expect(isKeylessEndpoint('not a url')).toBe(false)
+  })
+
+  it('maps the two supported web-chat sites by exact hostname', () => {
+    expect(webSiteOf('https://chat.deepseek.com/')).toBe('deepseek')
+    expect(webSiteOf('https://chatgpt.com/')).toBe('chatgpt')
+    expect(webSiteOf('https://chatgpt.com.evil.com/')).toBeUndefined()
+    expect(webSiteOf('https://api.deepseek.com/v1')).toBeUndefined()
+  })
+
+  it('accepts an empty key for keyless and web profiles only', () => {
+    const pollinations = profile({
+      baseUrl: 'https://text.pollinations.ai/openai',
+      apiKey: '',
+      model: 'openai-fast',
+    })
+    expect(validateProfile(pollinations, en)).toEqual([])
+
+    const web = profile({
+      transport: 'web',
+      baseUrl: 'https://chat.deepseek.com/',
+      apiKey: '',
+      model: 'deepseek-web',
+    })
+    expect(validateProfile(web, en)).toEqual([])
+
+    const paid = profile({
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: '',
+      model: 'deepseek-chat',
+    })
+    expect(validateProfile(paid, en).map((problem) => problem.field)).toEqual(['apiKey'])
+  })
+
+  it('rejects a web profile whose site has no adapter', () => {
+    const unknown = profile({
+      transport: 'web',
+      baseUrl: 'https://chat.example.com/',
+      apiKey: '',
+      model: 'x',
+    })
+    expect(validateProfile(unknown, en).map((problem) => problem.field)).toEqual(['baseUrl'])
+  })
+
+  it('prefills a usable model only for keyless and web presets', () => {
+    const pollinations = profileFromPreset(findPreset('pollinations')!, 'p')
+    expect(pollinations).toMatchObject({
+      apiKey: '',
+      model: 'openai-fast',
+      models: ['openai-fast'],
+    })
+
+    const web = profileFromPreset(findPreset('deepseek-web')!, 'w')
+    expect(web).toMatchObject({
+      transport: 'web',
+      apiKey: '',
+      model: 'deepseek-web',
+      models: ['deepseek-web'],
+    })
+
+    const ark = profileFromPreset(findPreset('ark')!, 'a')
+    expect(ark.model).toBe('')
+    expect(ark.models).toEqual([])
+  })
+
+  it('reports credentials and tool capability per transport', () => {
+    expect(providerNeedsKey(profile({ apiKey: '' }))).toBe(true)
+    expect(
+      providerNeedsKey(profile({ apiKey: '', baseUrl: 'https://text.pollinations.ai/openai' })),
+    ).toBe(false)
+    expect(providerHasCredentials(profile({ apiKey: '' }))).toBe(false)
+    expect(
+      providerHasCredentials(
+        profile({ apiKey: '', baseUrl: 'https://text.pollinations.ai/openai' }),
+      ),
+    ).toBe(true)
+    expect(
+      providerHasCredentials(
+        profile({ apiKey: '', transport: 'web', baseUrl: 'https://chatgpt.com/' }),
+      ),
+    ).toBe(true)
+    expect(providerCanCallTools(profile())).toBe(true)
+    expect(providerCanCallTools(profile({ transport: 'web' }))).toBe(false)
+  })
+
+  it('localizes every preset hint in both locales', () => {
+    for (const preset of PROVIDER_PRESETS) {
+      if (!preset.hintKey) continue
+      expect(en[preset.hintKey]).toBeTruthy()
+      expect(zh[preset.hintKey]).toBeTruthy()
+    }
+  })
+
+  it('finds a free preset from its base URL after a custom edit', () => {
+    expect(findPresetByBaseUrl('https://text.pollinations.ai/openai')?.id).toBe('pollinations')
+    expect(findPresetByBaseUrl('https://chat.deepseek.com/')?.id).toBe('deepseek-web')
+    expect(findPresetByBaseUrl('https://api.deepseek.com/v1')?.id).toBe('deepseek')
+    expect(findPresetByBaseUrl('https://example.com/v1')).toBeUndefined()
+  })
+
+  it('normalizes an unknown transport back to the legacy HTTP path', () => {
+    expect(normalizeProviderTransport({ transport: 'web' as const })).toEqual({
+      transport: 'web',
+    })
+    expect(normalizeProviderTransport({ id: 'x', transport: 'ftp' as never })).toEqual({
+      id: 'x',
+    })
+    expect(normalizeProviderTransport({ id: 'x' })).toEqual({ id: 'x' })
   })
 })
 

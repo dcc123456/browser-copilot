@@ -32,6 +32,8 @@
  */
 
 import { getSettings } from '../../lib/storage'
+import { providerCanCallTools, providerHasCredentials } from '../../lib/providers'
+import { workerMessages } from '../worker-messages'
 import { AI_AGENT_FORBIDDEN_TOOLS } from '../../lib/tool-catalog'
 import { interpolate } from '../../lib/workflow/interpolate'
 import { sanitizeModelAnswer } from '../../lib/model-output'
@@ -286,8 +288,11 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   // ai-prompt block), instead of letting the agent loop throw opaquely.
   const settings = await getSettings()
   const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
-  if (!provider || !provider.apiKey.trim()) {
-    fail('AI 智能体: 未配置模型 provider / API Key')
+  if (!provider || !providerHasCredentials(provider)) {
+    return fail('AI 智能体: 未配置模型 provider / API Key')
+  }
+  if (!providerCanCallTools(provider)) {
+    return fail((await workerMessages()).settingsWebChatNoTools)
   }
 
   let elementText = ''

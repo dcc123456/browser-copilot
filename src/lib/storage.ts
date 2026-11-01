@@ -49,6 +49,7 @@ import {
   normalizeElementPickerFormat,
   normalizeLocalAgentUrl,
   normalizeProviderModels,
+  normalizeProviderTransport,
   normalizeRunWindowLimit,
   entryFields,
 } from './types'
@@ -199,6 +200,7 @@ export function normalizeStoredSettings(raw: unknown): Settings {
         )
         .map(normalizeThinkingProfile)
         .map(normalizeProviderModels)
+        .map(normalizeProviderTransport)
     : []
 
   // Never leave the pointer dangling: an unknown id would open the editor blank

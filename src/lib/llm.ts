@@ -17,7 +17,8 @@
 
 import { isImageAttachment, isTextAttachment } from './attachments'
 import type { AttachmentDescriptor } from './attachments'
-import { normalizeBaseUrl } from './providers'
+import { isKeylessEndpoint, normalizeBaseUrl } from './providers'
+import { sleepWithSignal } from './sleep'
 import { isUnsupportedThinkingDetail, thinkingBodyFor, type ThinkingLevel } from './thinking'
 import type { TokenAttribution } from './token-ledger'
 
@@ -732,25 +733,6 @@ function retryBackoffMs(attempt: number): number {
   return Math.min(base + Math.random() * RETRY_BASE_MS, RETRY_MAX_MS)
 }
 
-/** Sleeps, rejecting with an AbortError when the signal fires mid-wait. */
-function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException('Aborted', 'AbortError'))
-      return
-    }
-    const onAbort = (): void => {
-      clearTimeout(timer)
-      reject(new DOMException('Aborted', 'AbortError'))
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort)
-      resolve()
-    }, ms)
-    signal?.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
 /**
  * Aborts after `ms` without a {@link touch}, and restarts the clock on each
  * touch. The reason is a TimeoutError rather than an AbortError so the retry
@@ -789,11 +771,13 @@ function buildHeaders(request: {
   apiKey: string
   headers?: Record<string, string>
 }): Record<string, string> {
-  return {
+  const headers: Record<string, string> = {
     ...(request.headers ?? {}),
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${request.apiKey}`,
   }
+  // A keyless endpoint must not receive an empty bearer token.
+  if (request.apiKey.trim()) headers.Authorization = `Bearer ${request.apiKey}`
+  return headers
 }
 
 /**
@@ -817,7 +801,7 @@ export async function streamCompletion(
 ): Promise<StreamResult> {
   const who = request.providerLabel ?? 'The model provider'
 
-  if (!request.apiKey.trim()) {
+  if (!request.apiKey.trim() && !isKeylessEndpoint(request.baseUrl)) {
     throw new LlmError('No API key configured. Add one in Settings.')
   }
   const base = normalizeBaseUrl(request.baseUrl)

@@ -1,5 +1,5 @@
 import { effectiveLocale, messagesFor } from '../lib/i18n'
-import type { LocaleSetting, Messages } from '../lib/i18n'
+import type { LocaleSetting } from '../lib/i18n'
 /**
  * Service worker entry point.
  *
@@ -15,6 +15,11 @@ import { LlmError, listModels, testConnection } from '../lib/llm'
 import type { AttachmentDescriptor } from '../lib/attachments'
 import { rejectionMessage, sanitizeAttachments, toAttachmentSummaries } from '../lib/attachments'
 import { getUserDisplayText, toRestoreMessages } from './restore'
+import { workerMessages } from './worker-messages'
+import { streamModel } from './model-transport'
+import { streamWebChat } from './web-chat/transport'
+import { openWebChatWindow } from './web-chat/window'
+import { diagnoseWebChat } from './web-chat/diagnose'
 import {
   answerAskUser,
   answerConfirmation,
@@ -109,7 +114,7 @@ import {
   isWorkflowTriggerAlarm,
   handleWorkflowTriggerAlarm,
 } from './workflow-triggers'
-import { validateProfile } from '../lib/providers'
+import { validateProfile, webSiteOf } from '../lib/providers'
 import type { ElementPickerFormat } from '../lib/types'
 import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
 import { normalizeAgent, validateAgent } from '../lib/agents'
@@ -208,6 +213,7 @@ import {
   debugRunLabel,
   takeoverAutoRunBudget,
   takeoverMaxAttempts,
+  repairProviderOf,
   takeoverProviderOf,
   type TakeoverReasonKind,
 } from '../lib/workflow/ai-takeover'
@@ -278,7 +284,6 @@ import {
 } from './workflow-engine/goal-verification'
 import { latestFirstRuns, observeFirstRunOfRevision } from '../lib/workflow/replay-metrics'
 import { runUnattendedPrompt } from './agent-unattended'
-import { streamCompletion } from '../lib/llm'
 import { stripThinkBlocks } from '../lib/model-output'
 import {
   buildAuditPrompt,
@@ -1367,17 +1372,6 @@ function newDebugSessionId(): string {
 }
 
 /**
- * The worker's own localized strings.
- *
- * The worker has no UI, but it owns the messages it hands to the panel — and
- * some of them have to be in the panel's language, not the vendor's English.
- */
-async function workerMessages(): Promise<Messages> {
-  const settings = await getSettings()
-  return messagesFor(effectiveLocale(settings.locale, navigator.language))
-}
-
-/**
  * Restates a provider failure in the panel's language.
  *
  * Only the thinking-control failure is rewritten: the vendor's own wording is
@@ -1559,6 +1553,17 @@ async function handleCommand(
       if (problems.length > 0) {
         throw new Error(problems.map((problem) => problem.message).join(' '))
       }
+      if (command.profile.transport === 'web') {
+        try {
+          await streamWebChat(command.profile, {
+            messages: [{ role: 'user', content: 'ping' }],
+            providerLabel: command.profile.label,
+          })
+        } catch (error) {
+          throw await localizeLlmFailure(error)
+        }
+        return { type: 'provider.test' }
+      }
       try {
         await testConnection({
           apiKey: command.profile.apiKey,
@@ -1579,12 +1584,34 @@ async function handleCommand(
     }
 
     case 'provider.models': {
+      if (command.profile.transport === 'web') {
+        const models = command.profile.models?.length
+          ? command.profile.models
+          : [command.profile.model]
+        return {
+          type: 'provider.models',
+          models: models.filter((model) => model.length > 0),
+        }
+      }
       const models = await listModels({
         apiKey: command.profile.apiKey,
         baseUrl: command.profile.baseUrl,
         ...(command.profile.headers ? { headers: command.profile.headers } : {}),
       })
       return { type: 'provider.models', models }
+    }
+
+    case 'provider.openWeb': {
+      const site = webSiteOf(command.profile.baseUrl)
+      if (!site) throw new Error('This provider is not a supported web chat.')
+      await openWebChatWindow(site)
+      return { type: 'provider.openWeb' }
+    }
+
+    case 'provider.diagnoseWeb': {
+      const site = webSiteOf(command.profile.baseUrl)
+      if (!site) throw new Error('This provider is not a supported web chat.')
+      return { type: 'provider.diagnoseWeb', diagnosis: await diagnoseWebChat(site) }
     }
 
     case 'page.read':
@@ -2105,7 +2132,7 @@ async function handleCommand(
       const repairStarted =
         r.outcome === 'failed' && generatedRun && !takeover && !!r.trace && settings.autoRepairOnRun
       if (repairStarted) {
-        const repairModelConfig = takeoverProviderOf(settings)
+        const repairModelConfig = repairProviderOf(settings)
         void startBackgroundAutoRepair({
           workflow,
           runId: r.runId,
@@ -2389,11 +2416,9 @@ async function handleCommand(
               failure: { error?: string; takeoverNote?: string },
             ) =>
               timePhase('audit', async () => {
-                const result = await streamCompletion(
+                const result = await streamModel(
+                  provider,
                   {
-                    apiKey: provider.apiKey,
-                    baseUrl: provider.baseUrl,
-                    model: provider.model,
                     ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
                     attribution: {
                       consumer: 'ai-debug',
@@ -2406,7 +2431,6 @@ async function handleCommand(
                         content: buildAuditPrompt(wf, replayResult, failure),
                       },
                     ],
-                    headers: provider.headers,
                     signal: AbortSignal.timeout(AUDIT_TIMEOUT_MS),
                   },
                   {},
@@ -2583,11 +2607,9 @@ async function handleCommand(
                   // (a login flow that already logged in can never re-run).
                   // An unavailable judge (throw/timeout/garbage) degrades to
                   // the no-error standard.
-                  const result = await streamCompletion(
+                  const result = await streamModel(
+                    provider,
                     {
-                      apiKey: provider.apiKey,
-                      baseUrl: provider.baseUrl,
-                      model: provider.model,
                       ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
                       attribution: {
                         consumer: 'ai-debug',
@@ -2602,7 +2624,6 @@ async function handleCommand(
                           }),
                         },
                       ],
-                      headers: provider.headers,
                       signal: AbortSignal.timeout(GOAL_CHECK_TIMEOUT_MS),
                     },
                     {},
@@ -2668,7 +2689,7 @@ async function handleCommand(
         ...(command.windowId !== undefined ? { scopeWindowId: command.windowId } : {}),
       })
       const settings = await getSettings()
-      const modelConfig = takeoverProviderOf(settings)
+      const modelConfig = repairProviderOf(settings)
       const proposer = modelConfig
         ? createAiRepairProposer({
             apiKey: modelConfig.apiKey,
@@ -3097,7 +3118,7 @@ async function handleCommand(
       // Engine dependencies (same construction as workflows.repair).
       const recoveryRunner = createBackgroundRunner({ executeWorkflow })
       const recoverySettings = await getSettings()
-      const recoveryModel = takeoverProviderOf(recoverySettings)
+      const recoveryModel = repairProviderOf(recoverySettings)
       const recoveryProposer = recoveryModel
         ? createAiRepairProposer({
             apiKey: recoveryModel.apiKey,
@@ -3352,7 +3373,7 @@ async function handleCommand(
       const target = await getWorkflow(command.id)
       if (!target) throw new Error('Workflow not found.')
       const settings = await getSettings()
-      const modelConfig = takeoverProviderOf(settings)
+      const modelConfig = repairProviderOf(settings)
       retain()
       try {
         const outcome = await startBackgroundAutoRepair({

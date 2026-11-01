@@ -36,9 +36,11 @@
 
 import { collapseDoubledScheme, isInjectablePage } from '../../lib/pages'
 import { truncate } from '../../lib/extract'
-import { streamCompletion, type WireMessage } from '../../lib/llm'
+import type { WireMessage } from '../../lib/llm'
+import { streamModel } from '../model-transport'
 import type { TokenAttribution } from '../../lib/token-ledger'
 import { getSettings, listPasswords } from '../../lib/storage'
+import { providerHasCredentials } from '../../lib/providers'
 import { getFeishuConfig } from '../../lib/task-store'
 import { sendWebhookText } from '../../lib/feishu'
 import { entryFields, findField, type PasswordEntry } from '../../lib/types'
@@ -2180,19 +2182,15 @@ const aiPrompt: BlockExecutor = async (data, ctx) => {
   const prompt = interpolate(String(data['prompt'] ?? ''), ctx.variables, ctx.refData)
   const settings = await getSettings()
   const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
-  if (!provider || !provider.apiKey.trim()) {
+  if (!provider || !providerHasCredentials(provider)) {
     // Fail the block (engine onError: retry → fallback → stop) — never
     // continue without a model, downstream would act on an empty variable.
     throw new Error('AI 块: 未配置模型给 provider')
   }
   const messages: WireMessage[] = [{ role: 'user', content: prompt }]
   try {
-    const result = await streamCompletion({
-      apiKey: provider.apiKey,
-      baseUrl: provider.baseUrl,
-      model: provider.model,
+    const result = await streamModel(provider, {
       messages,
-      headers: provider.headers,
       ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
       attribution: ctx.attribution,
       signal: ctx.signal,

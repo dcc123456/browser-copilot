@@ -21,8 +21,9 @@
  * @module background/workflow-engine/node-fix-engine
  */
 
-import { streamCompletion } from '../../lib/llm'
+import { streamModel } from '../model-transport'
 import { getSettings } from '../../lib/storage'
+import { providerHasCredentials } from '../../lib/providers'
 import {
   buildNodeFixPrompt,
   NODE_FIX_MAX_ROUNDS,
@@ -151,16 +152,13 @@ function defaultCallModel(
   return async (prompt, onProgress) => {
     const settings = await getSettings()
     const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
-    if (!provider || !provider.apiKey.trim()) return null
+    if (!provider || !providerHasCredentials(provider)) return null
     onProgress(`${provider.model}`)
     let streamed = ''
-    const result = await streamCompletion(
+    const result = await streamModel(
+      provider,
       {
-        apiKey: provider.apiKey,
-        baseUrl: provider.baseUrl,
-        model: provider.model,
         attribution,
-        headers: provider.headers,
         ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
         messages: [{ role: 'user', content: prompt }],
         signal: AbortSignal.any([signal, AbortSignal.timeout(NODE_FIX_TIMEOUT_MS)]),

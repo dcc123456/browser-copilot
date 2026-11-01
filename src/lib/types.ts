@@ -319,6 +319,21 @@ export function normalizeProviderModels<T extends { model?: string; models?: unk
   return { ...profile, model: models.includes(active) ? active : (models[0] ?? ''), models }
 }
 
+/** How a provider's requests are delivered: HTTP API or a driven web chat. */
+export type ProviderTransport = 'http' | 'web'
+
+/**
+ * Keeps only the known transport value; anything else (including absence)
+ * means the legacy HTTP path, so old records and hand-edits stay usable.
+ */
+export function normalizeProviderTransport<T extends object>(profile: T): T {
+  const transport = (profile as { transport?: unknown }).transport
+  if (transport === 'web' || transport === undefined) return profile
+  const rest = { ...profile }
+  delete (rest as { transport?: unknown }).transport
+  return rest
+}
+
 /** 本地 Agent 接入默认连接地址。 */
 export const DEFAULT_LOCAL_AGENT_URL = 'ws://127.0.0.1:8765'
 

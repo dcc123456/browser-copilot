@@ -21,9 +21,20 @@ import {
   normalizeElementPickerFormat,
   normalizeLocalAgentUrl,
   normalizeProviderModels,
+  normalizeProviderTransport,
   normalizeRunWindowLimit,
 } from './types'
-import type { AgentMode, ElementPickerFormat, UnattendedWindowPolicy } from './types'
+import type {
+  AgentMode,
+  ElementPickerFormat,
+  ProviderTransport,
+  UnattendedWindowPolicy,
+} from './types'
+
+/** Keys whose message value is a plain string (not an interpolation function). */
+export type TextKey = {
+  [K in keyof Messages]: Messages[K] extends string ? K : never
+}[keyof Messages]
 
 /** A configured endpoint the agent can talk to. */
 export interface ProviderProfile {
@@ -32,6 +43,11 @@ export interface ProviderProfile {
   label: string
   /** Which preset this was created from; `'custom'` once freely edited. */
   presetId: string
+  /**
+   * How requests reach the model. Omitted means `'http'`; `'web'` routes to the
+   * background tab transport that drives a logged-in free web chat.
+   */
+  transport?: ProviderTransport
   /** Endpoint base. `/chat/completions` is appended. */
   baseUrl: string
   apiKey: string
@@ -72,8 +88,18 @@ export interface ProviderPreset {
   suggestedModel: string
   /** Where to get a key, and any vendor-specific gotcha. */
   hint: string
+  /** Localized hint; takes precedence over the legacy English {@link hint}. */
+  hintKey?: TextKey
   /** Docs URL for keys/models. */
   docsUrl?: string
+  /** `'web'` presets drive a free logged-in web chat instead of an API. */
+  transport?: ProviderTransport
+  /** Vendor offers a standing no-cost tier. */
+  free?: boolean
+  /** No credential at all is needed. */
+  keyless?: boolean
+  /** Whether the suggested model can call tools on the free tier. */
+  tools?: true | false | 'varies'
   /**
    * Candidate endpoints the vendor exposes (e.g. standard, Coding Plan, Agent
    * Plan). The first entry corresponds to `baseUrl`. Optional — presets without
@@ -90,6 +116,86 @@ export interface ProviderPreset {
  * `/chat/completions`.
  */
 export const PROVIDER_PRESETS: ProviderPreset[] = [
+  {
+    id: 'pollinations',
+    label: 'Pollinations',
+    baseUrl: 'https://text.pollinations.ai/openai',
+    suggestedModel: 'openai-fast',
+    keyless: true,
+    free: true,
+    tools: true,
+    hint: 'Free and anonymous; no key required. Requests go directly from this extension to Pollinations.',
+    hintKey: 'presetPollinationsHint',
+    docsUrl: 'https://pollinations.ai/',
+  },
+  {
+    id: 'gemini',
+    label: 'Google AI Studio (Gemini)',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    suggestedModel: 'gemini-2.5-flash',
+    free: true,
+    tools: true,
+    hint: 'Free tier via a Google AI Studio key. Uses the OpenAI-compatible endpoint.',
+    hintKey: 'presetGeminiHint',
+    docsUrl: 'https://aistudio.google.com/app/apikey',
+  },
+  {
+    id: 'cerebras',
+    label: 'Cerebras',
+    baseUrl: 'https://api.cerebras.ai/v1',
+    suggestedModel: 'llama-3.3-70b',
+    free: true,
+    tools: true,
+    hint: 'Free tier via a Cerebras Cloud key.',
+    hintKey: 'presetCerebrasHint',
+    docsUrl: 'https://cloud.cerebras.ai/',
+  },
+  {
+    id: 'sambanova',
+    label: 'SambaNova',
+    baseUrl: 'https://api.sambanova.ai/v1',
+    suggestedModel: 'Meta-Llama-3.3-70B-Instruct',
+    free: true,
+    tools: true,
+    hint: 'Free tier via a SambaNova Cloud key.',
+    hintKey: 'presetSambaNovaHint',
+    docsUrl: 'https://cloud.sambanova.ai/',
+  },
+  {
+    id: 'chutes',
+    label: 'Chutes',
+    baseUrl: 'https://llm.chutes.ai/v1',
+    suggestedModel: 'deepseek-ai/DeepSeek-V3-0324',
+    free: true,
+    tools: 'varies',
+    hint: 'Free tier via a Chutes key. Often hosts DeepSeek models; tool support varies by model.',
+    hintKey: 'presetChutesHint',
+    docsUrl: 'https://chutes.ai/',
+  },
+  {
+    id: 'deepseek-web',
+    label: 'DeepSeek Web',
+    baseUrl: 'https://chat.deepseek.com/',
+    suggestedModel: 'deepseek-web',
+    transport: 'web',
+    free: true,
+    keyless: true,
+    tools: false,
+    hint: 'Drives your logged-in free DeepSeek web chat in a background window. Chat/text only; no tool calling.',
+    hintKey: 'presetDeepSeekWebHint',
+  },
+  {
+    id: 'chatgpt-web',
+    label: 'ChatGPT Web',
+    baseUrl: 'https://chatgpt.com/',
+    suggestedModel: 'chatgpt-web',
+    transport: 'web',
+    free: true,
+    keyless: true,
+    tools: false,
+    hint: 'Drives your logged-in free ChatGPT web chat in a background window. Chat/text only; no tool calling.',
+    hintKey: 'presetChatGPTWebHint',
+  },
   {
     id: 'deepseek',
     label: 'DeepSeek',
@@ -131,7 +237,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     suggestedModel: 'deepseek/deepseek-chat',
+    free: true,
+    tools: 'varies',
     hint: 'One key for many vendors. Model IDs are namespaced, e.g. deepseek/deepseek-chat.',
+    hintKey: 'presetOpenRouterHint',
     docsUrl: 'https://openrouter.ai/keys',
   },
   {
@@ -198,6 +307,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: '智谱 GLM',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     suggestedModel: 'glm-4-flash',
+    free: true,
     hint: 'Create a key at open.bigmodel.cn. Models such as glm-4-flash, glm-4-plus.',
     docsUrl: 'https://open.bigmodel.cn/',
     endpoints: [
@@ -247,6 +357,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'GitHub Models',
     baseUrl: 'https://models.github.ai/inference',
     suggestedModel: 'gpt-4.1',
+    free: true,
     hint: 'Free models via your GitHub account. Models such as gpt-4.1.',
     docsUrl: 'https://github.com/marketplace/models',
   },
@@ -255,6 +366,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Groq',
     baseUrl: 'https://api.groq.com/openai/v1',
     suggestedModel: 'llama-3.3-70b-versatile',
+    free: true,
     hint: 'Create a key at console.groq.com. Models such as llama-3.3-70b-versatile.',
     docsUrl: 'https://console.groq.com/keys',
   },
@@ -263,6 +375,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Mistral',
     baseUrl: 'https://api.mistral.ai/v1',
     suggestedModel: 'mistral-small-latest',
+    free: true,
     hint: 'Create a key at console.mistral.ai. Models such as mistral-small-latest.',
     docsUrl: 'https://www.mistral.ai/',
   },
@@ -336,7 +449,11 @@ export function validateProfile(profile: ProviderProfile, t: Messages): ProfileP
     }
   }
 
-  if (!profile.apiKey.trim()) {
+  if (profile.transport === 'web' && !webSiteOf(profile.baseUrl)) {
+    // A web profile with an unknown site has no adapter to drive.
+    problems.push({ field: 'baseUrl', message: t.errorProviderBaseUrlInvalid })
+  }
+  if (providerNeedsKey(profile) && !profile.apiKey.trim()) {
     problems.push({ field: 'apiKey', message: t.errorProviderApiKey })
   }
   if (!profile.model.trim()) {
@@ -349,16 +466,19 @@ export function validateProfile(profile: ProviderProfile, t: Messages): ProfileP
 
 /** Builds a profile from a preset, ready to be edited. */
 export function profileFromPreset(preset: ProviderPreset, id: string): ProviderProfile {
+  // Keyless and web profiles have exactly one sensible model and no key, so
+  // they are usable as-is. Every other preset keeps the empty-model contract:
+  // a prefilled model would filter fetched-model suggestions down to it.
+  const usableAsIs = preset.keyless === true || preset.transport === 'web'
   return {
     id,
     label: preset.label,
     presetId: preset.id,
+    ...(preset.transport === 'web' ? { transport: 'web' as const } : {}),
     baseUrl: preset.baseUrl,
     apiKey: '',
-    // No model: the user adds the ones they want. A prefilled model would
-    // filter the fetched-model suggestions down to that single entry.
-    model: '',
-    models: [],
+    model: usableAsIs ? preset.suggestedModel : '',
+    models: usableAsIs && preset.suggestedModel ? [preset.suggestedModel] : [],
   }
 }
 
@@ -375,6 +495,82 @@ export function isLocalEndpoint(baseUrl: string): boolean {
   } catch {
     return false
   }
+}
+
+/** Free web chats this extension can drive in a background tab. */
+export type WebChatSiteId = 'deepseek' | 'chatgpt'
+
+/** One selector candidate's result on the live page. */
+export interface WebChatSelectorCheck {
+  candidate: string
+  found: boolean
+  matched?: number
+  usedSpec?: string
+}
+
+/** What the Diagnose action reports for a web-chat site. */
+export interface WebChatDiagnosis {
+  site: WebChatSiteId
+  url: string
+  title: string
+  windowId: number
+  tabId: number
+  selectors: Record<
+    'composer' | 'send' | 'reply' | 'stop' | 'login' | 'newChat',
+    WebChatSelectorCheck[]
+  >
+}
+
+const WEB_CHAT_HOSTS: Record<string, WebChatSiteId> = {
+  'chat.deepseek.com': 'deepseek',
+  'chatgpt.com': 'chatgpt',
+}
+
+/** Which web-chat adapter (if any) a base URL points at. */
+export function webSiteOf(baseUrl: string): WebChatSiteId | undefined {
+  try {
+    return WEB_CHAT_HOSTS[new URL(normalizeBaseUrl(baseUrl)).hostname]
+  } catch {
+    return undefined
+  }
+}
+
+/** Hosts that serve completions with no credential at all. */
+const KEYLESS_HOSTS = new Set(['text.pollinations.ai'])
+
+/**
+ * Exact-host match on purpose: a lookalike domain (`text.pollinations.ai.evil`)
+ * must not silently drop the Authorization header.
+ */
+export function isKeylessEndpoint(baseUrl: string): boolean {
+  try {
+    return KEYLESS_HOSTS.has(new URL(normalizeBaseUrl(baseUrl)).hostname)
+  } catch {
+    return false
+  }
+}
+
+/** True when this profile cannot work without an API key. */
+export function providerNeedsKey(profile: ProviderProfile): boolean {
+  return profile.transport !== 'web' && !isKeylessEndpoint(profile.baseUrl)
+}
+
+/** True when a request can be attempted at all. */
+export function providerHasCredentials(profile: ProviderProfile): boolean {
+  return !providerNeedsKey(profile) || profile.apiKey.trim().length > 0
+}
+
+/** Web-chat profiles never receive the `tools` field. */
+export function providerCanCallTools(profile: ProviderProfile): boolean {
+  return profile.transport !== 'web'
+}
+
+/** Finds the preset whose endpoint matches, including after a custom edit. */
+export function findPresetByBaseUrl(baseUrl: string): ProviderPreset | undefined {
+  const normalized = normalizeBaseUrl(baseUrl)
+  return PROVIDER_PRESETS.find(
+    (preset) => preset.baseUrl.length > 0 && normalizeBaseUrl(preset.baseUrl) === normalized,
+  )
 }
 
 /**
@@ -431,6 +627,7 @@ export function normalizeSettingsPayload(raw: unknown): {
         )
         .map(normalizeThinkingProfile)
         .map(normalizeProviderModels)
+        .map(normalizeProviderTransport)
     : []
   const activeRaw = value.activeProviderId
   const activeProviderId = typeof activeRaw === 'string' ? activeRaw : ''

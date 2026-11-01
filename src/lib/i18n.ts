@@ -1058,6 +1058,41 @@ export interface Messages {
   // Settings
   settingsProviders: string
   settingsProvidersIntro: string
+  settingsFreeProviders: string
+  settingsWebChatProviders: string
+  settingsOtherProviders: string
+  settingsFreeBadge: string
+  settingsKeyOptional: string
+  settingsKeyNotRequired: string
+  settingsNoKeyNeeded: string
+  settingsFreeToolsWarning: string
+  settingsEnableFreeModel: string
+  settingsWebChatBadge: string
+  settingsWebChatNoTools: string
+  settingsWebChatLoginHint: string
+  settingsWebChatOpenWindow: string
+  settingsWebChatTest: string
+  settingsWebChatDiagnose: string
+  settingsWebChatLoginRequired: string
+  settingsWebChatSelectorMissing: string
+  settingsWebChatTimeout: string
+  settingsWebChatEmptyReply: string
+  settingsWebChatAttachmentsUnsupported: string
+  settingsWebChatModelNote: string
+  settingsWebChatToS: string
+  settingsEnableDeepSeekWeb: string
+  settingsEnableChatGPTWeb: string
+  settingsWebChatEnabled: (params: { name: string }) => string
+  settingsWebChatDiagnoseReport: (params: { report: string }) => string
+  chatWebChatModeWarning: string
+  presetPollinationsHint: string
+  presetGeminiHint: string
+  presetCerebrasHint: string
+  presetSambaNovaHint: string
+  presetChutesHint: string
+  presetOpenRouterHint: string
+  presetDeepSeekWebHint: string
+  presetChatGPTWebHint: string
   settingsNoProvider: string
   settingsAddProvider: string
   settingsChoosePreset: string
@@ -2708,6 +2743,56 @@ const en: Messages = {
   settingsProviders: 'Model providers',
   settingsProvidersIntro:
     'Any OpenAI-compatible endpoint works — DeepSeek, Volcengine Ark, OpenAI, OpenRouter, or a local Ollama. Pick a preset to prefill the base URL.',
+  settingsFreeProviders: 'Free to try',
+  settingsWebChatProviders: 'Free web chat',
+  settingsOtherProviders: 'All providers',
+  settingsFreeBadge: 'Free',
+  settingsKeyOptional: 'Optional — no key needed',
+  settingsKeyNotRequired:
+    'This provider needs no API key; requests go directly from this extension to the service.',
+  settingsNoKeyNeeded: 'no key needed',
+  settingsFreeToolsWarning:
+    'Tool calling on free models varies. If the agent cannot act on the page, test the model or use one known to support function calling.',
+  settingsEnableFreeModel: 'Enable a free model (no key)',
+  settingsWebChatBadge: 'Web · free',
+  settingsWebChatNoTools:
+    'Web-chat providers cannot call tools. Use chat mode (or a text-only workflow step); switch to an API provider for page automation.',
+  settingsWebChatLoginHint:
+    'The extension opens this provider in a background window. If it asks you to log in, do so there once — the conversation still stays in this panel.',
+  settingsWebChatOpenWindow: 'Open window',
+  settingsWebChatTest: 'Test web chat',
+  settingsWebChatDiagnose: 'Diagnose',
+  settingsWebChatLoginRequired: 'Log in to the provider in the background window, then try again.',
+  settingsWebChatSelectorMissing:
+    'The provider page structure changed; the expected input or reply element was not found. Run Diagnose and update the selectors.',
+  settingsWebChatTimeout: 'The web chat did not finish answering in time.',
+  settingsWebChatEmptyReply: 'The web chat returned an empty reply.',
+  settingsWebChatAttachmentsUnsupported:
+    'Web-chat providers do not support image or file attachments yet.',
+  settingsWebChatModelNote:
+    'The model is whatever is selected on the provider page; this label is for display only.',
+  settingsWebChatToS:
+    'Automating a web chat may violate the provider’s terms. The extension only operates the page like a user, never bypasses captchas, and keeps the session in your browser.',
+  settingsEnableDeepSeekWeb: 'Enable DeepSeek Web (free)',
+  settingsEnableChatGPTWeb: 'Enable ChatGPT Web (free)',
+  settingsWebChatEnabled: ({ name }) =>
+    `${name} is ready. Log in in the background window if asked.`,
+  settingsWebChatDiagnoseReport: ({ report }) => `Diagnostic: ${report}`,
+  chatWebChatModeWarning:
+    'The active web-chat provider cannot call tools. Switch the mode to Chat, or choose an API provider for page automation.',
+  presetPollinationsHint:
+    'Free and anonymous — no key. Requests go directly from this extension to Pollinations; the anonymous tier is rate-limited and text-only.',
+  presetGeminiHint:
+    'Free tier via a Google AI Studio key, using Google’s OpenAI-compatible endpoint.',
+  presetCerebrasHint: 'Free tier via a Cerebras Cloud key.',
+  presetSambaNovaHint: 'Free tier via a SambaNova Cloud key.',
+  presetChutesHint: 'Free tier via a Chutes key. Often hosts DeepSeek models; tool support varies.',
+  presetOpenRouterHint:
+    'Free models end in “:free”. Model IDs are namespaced, e.g. deepseek/deepseek-chat. The free catalog rotates.',
+  presetDeepSeekWebHint:
+    'Drives your logged-in free DeepSeek web chat in a background window. Chat/text only; no tool calling.',
+  presetChatGPTWebHint:
+    'Drives your logged-in free ChatGPT web chat in a background window. Chat/text only; no tool calling.',
   settingsNoProvider: 'No provider yet. Add one to enable the agent.',
   settingsAddProvider: 'Add a provider',
   settingsChoosePreset: 'Choose a preset…',
@@ -4361,6 +4446,51 @@ const zhCN: Messages = {
   settingsProviders: '模型服务',
   settingsProvidersIntro:
     '支持任意 OpenAI 兼容接口——DeepSeek、火山方舟、OpenAI、OpenRouter，或本地 Ollama。选择预设可自动填入接口地址。',
+  settingsFreeProviders: '免费可用',
+  settingsWebChatProviders: '免费网页聊天',
+  settingsOtherProviders: '全部服务',
+  settingsFreeBadge: '免费',
+  settingsKeyOptional: '可选 —— 无需密钥',
+  settingsKeyNotRequired: '该服务无需 API 密钥，请求由本扩展直接发往服务商。',
+  settingsNoKeyNeeded: '无需密钥',
+  settingsFreeToolsWarning:
+    '免费模型的工具调用支持不一致。若 agent 无法操作页面，请先测试模型，或改用支持函数调用的模型。',
+  settingsEnableFreeModel: '一键启用免费模型（无需密钥）',
+  settingsWebChatBadge: '网页版 · 免费',
+  settingsWebChatNoTools:
+    '网页版模型不支持工具调用。请使用 Chat 模式（或纯文本工作流步骤）；需要操作页面时请切换到 API 服务商。',
+  settingsWebChatLoginHint:
+    '扩展会在后台窗口打开该服务。如果提示登录，在那个窗口登录一次即可——对话仍然留在本面板。',
+  settingsWebChatOpenWindow: '打开窗口',
+  settingsWebChatTest: '测试网页版',
+  settingsWebChatDiagnose: '诊断',
+  settingsWebChatLoginRequired: '请先在后台窗口登录该服务，然后重试。',
+  settingsWebChatSelectorMissing:
+    '服务网页结构可能已更新：没有找到预期的输入框或回复元素。请运行“诊断”并更新选择器。',
+  settingsWebChatTimeout: '网页聊天在限定时间内没有完成回复。',
+  settingsWebChatEmptyReply: '网页聊天返回了空回复。',
+  settingsWebChatAttachmentsUnsupported: '网页版暂不支持图片或文件附件。',
+  settingsWebChatModelNote: '实际模型是网页上当前选中的模型；这里的名称仅用于显示。',
+  settingsWebChatToS:
+    '自动化网页聊天可能违反服务商条款。扩展只像用户一样操作页面，不绕过验证码，会话保留在你的浏览器中。',
+  settingsEnableDeepSeekWeb: '启用 DeepSeek 网页版（免费）',
+  settingsEnableChatGPTWeb: '启用 ChatGPT 网页版（免费）',
+  settingsWebChatEnabled: ({ name }) => `${name} 已就绪。如提示登录，请在后台窗口完成登录。`,
+  settingsWebChatDiagnoseReport: ({ report }) => `诊断结果：${report}`,
+  chatWebChatModeWarning:
+    '当前网页版服务不支持工具调用。请把模式切到 Chat，或改用 API 服务商来操作页面。',
+  presetPollinationsHint:
+    '免费匿名，无需密钥。请求由本扩展直接发往 Pollinations；匿名档有限流，仅支持文本。',
+  presetGeminiHint: '通过 Google AI Studio 的密钥使用免费额度，走 Google 的 OpenAI 兼容端点。',
+  presetCerebrasHint: '通过 Cerebras Cloud 的密钥使用免费额度。',
+  presetSambaNovaHint: '通过 SambaNova Cloud 的密钥使用免费额度。',
+  presetChutesHint: '通过 Chutes 的密钥使用免费额度。常有 DeepSeek 模型；工具支持因模型而异。',
+  presetOpenRouterHint:
+    '免费模型以“:free”结尾。模型 ID 带命名空间，例如 deepseek/deepseek-chat；免费目录会轮换。',
+  presetDeepSeekWebHint:
+    '在后台窗口驱动你已登录的免费 DeepSeek 网页聊天。仅聊天/纯文本，不支持工具调用。',
+  presetChatGPTWebHint:
+    '在后台窗口驱动你已登录的免费 ChatGPT 网页聊天。仅聊天/纯文本，不支持工具调用。',
   settingsNoProvider: '尚未配置服务。添加一个后才能使用 agent。',
   settingsAddProvider: '添加模型服务',
   settingsChoosePreset: '选择预设…',

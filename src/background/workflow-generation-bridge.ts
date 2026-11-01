@@ -21,7 +21,8 @@
  */
 
 import { getSettings, newId } from '../lib/storage'
-import { takeoverProviderOf } from '../lib/workflow/ai-takeover'
+import { providerHasCredentials } from '../lib/providers'
+import { repairProviderOf } from '../lib/workflow/ai-takeover'
 import type { Workflow, WorkflowSettings } from '../lib/workflow/types'
 import type { TrialRunRecord } from '../lib/workflow/trial-run'
 import {
@@ -492,8 +493,8 @@ export interface UnattendedRepairRequest extends UnattendedVerificationRequest {
 async function repairModelFromSettings(): Promise<RepairRuntimeModelConfig | undefined> {
   try {
     const settings = await getSettings()
-    const provider = takeoverProviderOf(settings)
-    if (!provider?.apiKey.trim()) return undefined
+    const provider = repairProviderOf(settings)
+    if (!provider || !providerHasCredentials(provider)) return undefined
     return {
       apiKey: provider.apiKey,
       baseUrl: provider.baseUrl,

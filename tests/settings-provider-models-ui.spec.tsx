@@ -260,3 +260,63 @@ describe('the provider model list', () => {
     expect(addedModels(container)).toEqual(['deepseek-reasoner'])
   })
 })
+
+describe('free providers', () => {
+  it('shows a keyless provider as needing no key and groups the presets', async () => {
+    const container = await openProviderEditor(
+      settingsWith({
+        label: 'Pollinations',
+        presetId: 'pollinations',
+        baseUrl: 'https://text.pollinations.ai/openai',
+        apiKey: '',
+        model: 'openai-fast',
+        models: ['openai-fast'],
+      }),
+    )
+    const en = messagesFor('en')
+
+    expect(container.textContent).toContain(en.settingsNoKeyNeeded)
+    expect(container.textContent).toContain(en.settingsKeyNotRequired)
+    const freeBadge = [...container.querySelectorAll('span')].find(
+      (candidate) => candidate.textContent?.trim() === en.settingsFreeBadge,
+    )
+    expect(freeBadge).toBeDefined()
+
+    const keyInput = container.querySelector('#p-key') as HTMLInputElement | null
+    expect(keyInput?.placeholder).toBe(en.settingsKeyOptional)
+
+    const groups = [...container.querySelectorAll('optgroup')].map((group) =>
+      group.getAttribute('label'),
+    )
+    expect(groups).toContain(en.settingsFreeProviders)
+    expect(groups).toContain(en.settingsWebChatProviders)
+  })
+})
+
+describe('web-chat providers', () => {
+  it('hides the key and model fetch and exposes the window actions', async () => {
+    const container = await openProviderEditor(
+      settingsWith({
+        label: 'DeepSeek Web',
+        presetId: 'deepseek-web',
+        transport: 'web',
+        baseUrl: 'https://chat.deepseek.com/',
+        apiKey: '',
+        model: 'deepseek-web',
+        models: ['deepseek-web'],
+      }),
+    )
+    const en = messagesFor('en')
+
+    expect(container.querySelector('#p-key')).toBeNull()
+    expect(container.textContent).toContain(en.settingsWebChatLoginHint)
+
+    const buttons = [...container.querySelectorAll('button')].map((button) =>
+      button.textContent?.trim(),
+    )
+    expect(buttons).not.toContain(en.settingsFetchModels)
+    expect(buttons).toContain(en.settingsWebChatTest)
+    expect(buttons).toContain(en.settingsWebChatOpenWindow)
+    expect(buttons).toContain(en.settingsWebChatDiagnose)
+  })
+})

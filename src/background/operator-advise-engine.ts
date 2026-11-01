@@ -22,9 +22,9 @@
  * @module background/operator-advise-engine
  */
 
-import { streamCompletion } from '../lib/llm'
+import { streamModel } from './model-transport'
 import { getSettings } from '../lib/storage'
-import type { ProviderProfile } from '../lib/providers'
+import { providerHasCredentials, type ProviderProfile } from '../lib/providers'
 import { thinkingBodyFor } from '../lib/thinking'
 import { entityKeyFor, type TokenAttribution } from '../lib/token-ledger'
 import { summarizeSnapshot } from '../lib/ops'
@@ -167,7 +167,7 @@ function dataUrlBytes(dataUrl: string): number {
 async function resolveActiveProvider(): Promise<ProviderProfile> {
   const settings = await getSettings()
   const provider = settings.providers.find((profile) => profile.id === settings.activeProviderId)
-  if (!provider || !provider.apiKey.trim()) {
+  if (!provider || !providerHasCredentials(provider)) {
     throw new Error('No AI provider is configured with an API key.')
   }
   return provider
@@ -181,13 +181,10 @@ function defaultCallModel(
   onDelta?: (delta: OperatorAdviseDelta) => void,
 ) {
   return async (prompt: string, image?: { dataUrl: string; mimeType: string }): Promise<string> => {
-    const result = await streamCompletion(
+    const result = await streamModel(
+      provider,
       {
-        apiKey: provider.apiKey,
-        baseUrl: provider.baseUrl,
-        model: provider.model,
         attribution,
-        headers: provider.headers,
         ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
         // One request carries everything: the digest, the offer and the
         // conversation. Same shape as the AI Fix call, so a follow-up message

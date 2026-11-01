@@ -15,10 +15,11 @@
  *
  * @module background/workflow-engine/workflow-review
  */
-import { streamCompletion } from '../../lib/llm'
+import { streamModel } from '../model-transport'
 import { entityKeyFor } from '../../lib/token-ledger'
 import { stripThinkBlocks } from '../../lib/model-output'
 import { getSettings } from '../../lib/storage'
+import { providerHasCredentials } from '../../lib/providers'
 import { OPERATOR_GUIDE } from '../../lib/workflow/operator-guide'
 import {
   reviewStepsOf,
@@ -171,7 +172,7 @@ export async function reviewWorkflow(
 ): Promise<WorkflowReview | null> {
   const settings = await getSettings()
   const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
-  if (!provider || !provider.apiKey.trim()) return null
+  if (!provider || !providerHasCredentials(provider)) return null
   const steps = reviewableSteps(workflow)
   if (steps.length === 0) return null
   onLog?.(`模型：${provider.model} · 正在审查 ${steps.length} 个步骤…`)
@@ -180,18 +181,15 @@ export async function reviewWorkflow(
   let loggedVerdicts = 0
   let sawFirstToken = false
   try {
-    const result = await streamCompletion(
+    const result = await streamModel(
+      provider,
       {
-        apiKey: provider.apiKey,
-        baseUrl: provider.baseUrl,
-        model: provider.model,
         attribution: {
           consumer: 'ai-debug',
           entityKey: entityKeyFor('workflow', workflow.id),
           entityLabel: workflow.name,
         },
         messages: [{ role: 'user', content: buildReviewPrompt(workflow) }],
-        headers: provider.headers,
         ...(provider.thinkingEffort ? { thinking: provider.thinkingEffort } : {}),
         // No hard max_tokens cap (unlike the old 1500): a thinking model spends
         // that budget on reasoning before emitting any content, truncating

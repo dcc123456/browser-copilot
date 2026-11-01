@@ -15,10 +15,13 @@ import type { Messages } from '../lib/i18n'
 import {
   PROVIDER_PRESETS,
   findPreset,
+  findPresetByBaseUrl,
+  isKeylessEndpoint,
   isLocalEndpoint,
   normalizeBaseUrl,
   profileFromPreset,
   validateProfile,
+  webSiteOf,
   type ProviderProfile,
 } from '../lib/providers'
 import { providerModels } from '../lib/storage'
@@ -145,6 +148,8 @@ export default function ModelsTab() {
   const [pending, setPending] = useState<'test' | 'models' | null>(null)
   const [revealKey, setRevealKey] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [freeBusy, setFreeBusy] = useState(false)
+  const [webBusy, setWebBusy] = useState<string | null>(null)
   /** Outcome line of the last provider-dialog action (test ok / save error). */
   const [providerNotice, setProviderNotice] = useState<{
     kind: 'ok' | 'error'
@@ -172,6 +177,16 @@ export default function ModelsTab() {
 
   const preset = draft ? findPreset(draft.presetId) : undefined
   const localEndpoint = draft ? isLocalEndpoint(draft.baseUrl) : false
+  const keyOptional = draft ? isKeylessEndpoint(draft.baseUrl) || draft.transport === 'web' : false
+  const hintText = preset?.hintKey ? t[preset.hintKey] : preset?.hint
+  const freePresets = PROVIDER_PRESETS.filter(
+    (option) => option.free && option.transport !== 'web' && option.id !== 'custom',
+  )
+  const webPresets = PROVIDER_PRESETS.filter((option) => option.transport === 'web')
+  const otherPresets = PROVIDER_PRESETS.filter(
+    (option) => !option.free && option.transport !== 'web' && option.id !== 'custom',
+  )
+  const customPreset = PROVIDER_PRESETS.find((option) => option.id === 'custom')
   const presetEndpoints = preset?.endpoints ?? []
   // The endpoint picker is controlled and reflects whichever preset endpoint
   // the current base URL matches. A hand-edited URL matches none → the
@@ -206,6 +221,99 @@ export default function ModelsTab() {
     setShowAdvanced(false)
     setProviderNotice(null)
     setOpenDialog('provider')
+  }
+
+  /** One click: reuse a keyless free provider or create and activate one. */
+  const enableFreeApi = async (): Promise<void> => {
+    const pollinations = findPreset('pollinations')
+    if (!pollinations) return
+    setFreeBusy(true)
+    try {
+      const existing = settings.providers.find(
+        (profile) => profile.transport !== 'web' && isKeylessEndpoint(profile.baseUrl),
+      )
+      if (existing) {
+        await mutate({ type: 'provider.activate', id: existing.id })
+        setNotice({ kind: 'ok', text: t.settingsSaved({ name: existing.label }) })
+        return
+      }
+      const profile = profileFromPreset(pollinations, newLocalId())
+      const saved = await mutate({ type: 'provider.save', profile })
+      if (!saved) return
+      await mutate({ type: 'provider.activate', id: profile.id, model: profile.model })
+      setNotice({ kind: 'ok', text: t.settingsSaved({ name: profile.label }) })
+    } finally {
+      setFreeBusy(false)
+    }
+  }
+
+  /** Creates/activates a free web-chat provider and opens its login window. */
+  const enableWebChat = async (presetId: 'deepseek-web' | 'chatgpt-web'): Promise<void> => {
+    const preset = findPreset(presetId)
+    if (!preset) return
+    setWebBusy(presetId)
+    try {
+      const site = webSiteOf(preset.baseUrl)
+      const existing = settings.providers.find(
+        (profile) => profile.transport === 'web' && webSiteOf(profile.baseUrl) === site,
+      )
+      const profile = existing ?? profileFromPreset(preset, newLocalId())
+      if (!existing) {
+        const saved = await mutate({ type: 'provider.save', profile })
+        if (!saved) return
+      }
+      const activated = await mutate({
+        type: 'provider.activate',
+        id: profile.id,
+        model: profile.model,
+      })
+      if (!activated) return
+      await sendCommand({ type: 'provider.openWeb', profile })
+      setNotice({ kind: 'ok', text: t.settingsWebChatEnabled({ name: profile.label }) })
+    } catch (error) {
+      setNotice({ kind: 'error', text: (error as Error).message })
+    } finally {
+      setWebBusy(null)
+    }
+  }
+
+  const testWebProfile = async (profile: ProviderProfile): Promise<void> => {
+    setWebBusy(`${profile.id}:test`)
+    try {
+      await sendCommand({ type: 'provider.test', profile })
+      setNotice({ kind: 'ok', text: t.settingsTestOk({ name: profile.label }) })
+    } catch (error) {
+      setNotice({ kind: 'error', text: (error as Error).message })
+    } finally {
+      setWebBusy(null)
+    }
+  }
+
+  const openWebProfile = async (profile: ProviderProfile): Promise<void> => {
+    try {
+      await sendCommand({ type: 'provider.openWeb', profile })
+    } catch (error) {
+      setNotice({ kind: 'error', text: (error as Error).message })
+    }
+  }
+
+  const diagnoseWebProfile = async (profile: ProviderProfile): Promise<void> => {
+    setWebBusy(`${profile.id}:diagnose`)
+    try {
+      const result = await sendCommand({ type: 'provider.diagnoseWeb', profile })
+      if (result.type !== 'provider.diagnoseWeb') return
+      const report = Object.entries(result.diagnosis.selectors)
+        .map(([field, checks]) => {
+          const matched = checks.filter((check) => check.found).map((check) => check.candidate)
+          return `${field}: ${matched.length > 0 ? matched.join(', ') : 'none'}`
+        })
+        .join(' · ')
+      setNotice({ kind: 'ok', text: t.settingsWebChatDiagnoseReport({ report }) })
+    } catch (error) {
+      setNotice({ kind: 'error', text: (error as Error).message })
+    } finally {
+      setWebBusy(null)
+    }
   }
 
   /** Adds the typed model to the provider's list; the first one becomes the
@@ -483,6 +591,18 @@ export default function ModelsTab() {
             <div className="card provider-card" key={profile.id} style={{ marginBottom: 8 }}>
               <div className="card-head">
                 <span className="card-title">{profile.label}</span>
+                {(profile.transport === 'web' || findPresetByBaseUrl(profile.baseUrl)?.free) && (
+                  <span
+                    className={[
+                      'rounded border px-1.5 py-0.5 text-[11px]',
+                      profile.transport === 'web'
+                        ? 'border-accent/30 bg-accent-soft text-accent'
+                        : 'border-ok/30 bg-ok-surface text-ok',
+                    ].join(' ')}
+                  >
+                    {profile.transport === 'web' ? t.settingsWebChatBadge : t.settingsFreeBadge}
+                  </span>
+                )}
                 {isActive ? (
                   <span className="status-ok">{t.settingsActive}</span>
                 ) : (
@@ -519,6 +639,8 @@ export default function ModelsTab() {
                   <span>
                     {profile.apiKey ? (
                       <span className="status-ok">{t.settingsKeyConfigured}</span>
+                    ) : profile.transport === 'web' || isKeylessEndpoint(profile.baseUrl) ? (
+                      <span className="status-ok">{t.settingsNoKeyNeeded}</span>
                     ) : (
                       t.settingsNoKey
                     )}
@@ -531,7 +653,35 @@ export default function ModelsTab() {
                   </div>
                 )}
               </div>
+              {profile.transport === 'web' && <p className="hint">{t.settingsWebChatNoTools}</p>}
               <div className="actions">
+                {profile.transport === 'web' && (
+                  <>
+                    <button
+                      disabled={webBusy !== null}
+                      onClick={() => void testWebProfile(profile)}
+                      type="button"
+                    >
+                      {webBusy === `${profile.id}:test` ? t.settingsTesting : t.settingsWebChatTest}
+                    </button>
+                    <button
+                      disabled={webBusy !== null}
+                      onClick={() => void openWebProfile(profile)}
+                      type="button"
+                    >
+                      {t.settingsWebChatOpenWindow}
+                    </button>
+                    <button
+                      disabled={webBusy !== null}
+                      onClick={() => void diagnoseWebProfile(profile)}
+                      type="button"
+                    >
+                      {webBusy === `${profile.id}:diagnose`
+                        ? t.settingsSaving
+                        : t.settingsWebChatDiagnose}
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={() => {
                     setDraft(toDraft(profile))
@@ -561,7 +711,34 @@ export default function ModelsTab() {
           )
         })}
 
-        <div className="field" style={{ marginTop: 10 }}>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <button
+            className="primary"
+            disabled={freeBusy}
+            onClick={() => void enableFreeApi()}
+            type="button"
+          >
+            {freeBusy ? t.settingsSaving : t.settingsEnableFreeModel}
+          </button>
+          <button
+            className="primary"
+            disabled={webBusy !== null}
+            onClick={() => void enableWebChat('deepseek-web')}
+            type="button"
+          >
+            {webBusy === 'deepseek-web' ? t.settingsSaving : t.settingsEnableDeepSeekWeb}
+          </button>
+          <button
+            className="primary"
+            disabled={webBusy !== null}
+            onClick={() => void enableWebChat('chatgpt-web')}
+            type="button"
+          >
+            {webBusy === 'chatgpt-web' ? t.settingsSaving : t.settingsEnableChatGPTWeb}
+          </button>
+        </div>
+
+        <div className="field">
           <label htmlFor="add-preset">{t.settingsAddProvider}</label>
           <select
             defaultValue=""
@@ -574,11 +751,32 @@ export default function ModelsTab() {
             <option disabled value="">
               {t.settingsChoosePreset}
             </option>
-            {PROVIDER_PRESETS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
+            {freePresets.length > 0 && (
+              <optgroup label={t.settingsFreeProviders}>
+                {freePresets.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {webPresets.length > 0 && (
+              <optgroup label={t.settingsWebChatProviders}>
+                {webPresets.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label={t.settingsOtherProviders}>
+              {otherPresets.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </optgroup>
+            {customPreset && <option value={customPreset.id}>{customPreset.label}</option>}
           </select>
         </div>
       </div>
@@ -594,11 +792,13 @@ export default function ModelsTab() {
                 label={pending === 'test' ? t.settingsTesting : t.settingsTest}
                 onClick={() => void runTest()}
               />
-              <FormDialogPrimaryButton
-                disabled={pending !== null}
-                label={pending === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
-                onClick={() => void fetchModels()}
-              />
+              {draft.transport !== 'web' && (
+                <FormDialogPrimaryButton
+                  disabled={pending !== null}
+                  label={pending === 'models' ? t.settingsFetchingModels : t.settingsFetchModels}
+                  onClick={() => void fetchModels()}
+                />
+              )}
               <FormDialogPrimaryButton
                 disabled={pending !== null}
                 label={t.save}
@@ -628,7 +828,27 @@ export default function ModelsTab() {
             </div>
           )}
 
-          {preset?.hint && <p className="hint">{preset.hint}</p>}
+          {hintText && <p className="hint">{hintText}</p>}
+
+          {preset?.transport === 'web' && (
+            <div
+              className="mb-3 rounded-lg border border-warn/30 bg-warn-surface px-3 py-2 text-[12.5px] leading-relaxed text-warn"
+              role="status"
+            >
+              <p>{t.settingsWebChatNoTools}</p>
+              <p className="mt-1">{t.settingsWebChatToS}</p>
+            </div>
+          )}
+
+          {preset?.transport !== 'web' &&
+            (preset?.tools === 'varies' || preset?.tools === false) && (
+              <div
+                className="mb-3 rounded-lg border border-warn/30 bg-warn-surface px-3 py-2 text-[12.5px] leading-relaxed text-warn"
+                role="status"
+              >
+                {t.settingsFreeToolsWarning}
+              </div>
+            )}
 
           <div className="field">
             <label htmlFor="p-label">{t.settingsName}</label>
@@ -679,25 +899,41 @@ export default function ModelsTab() {
             </div>
           )}
 
-          <div className="field">
-            <label htmlFor="p-key">{t.settingsApiKey}</label>
-            <input
-              autoComplete="off"
-              id="p-key"
-              onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
-              placeholder={localEndpoint ? t.settingsKeyPlaceholderLocal : 'sk-…'}
-              type={revealKey ? 'text' : 'password'}
-              value={draft.apiKey}
-            />
-          </div>
-          <label className="inline-check">
-            <input
-              checked={revealKey}
-              onChange={(event) => setRevealKey(event.target.checked)}
-              type="checkbox"
-            />
-            {t.settingsShowKey}
-          </label>
+          {draft.transport === 'web' ? (
+            <div className="mb-3 rounded-lg border border-accent/30 bg-accent-soft px-3 py-2 text-[12.5px] leading-relaxed text-accent">
+              <p>{t.settingsWebChatLoginHint}</p>
+              <p className="mt-1">{t.settingsWebChatModelNote}</p>
+            </div>
+          ) : (
+            <>
+              <div className="field">
+                <label htmlFor="p-key">{t.settingsApiKey}</label>
+                <input
+                  autoComplete="off"
+                  id="p-key"
+                  onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
+                  placeholder={
+                    keyOptional
+                      ? t.settingsKeyOptional
+                      : localEndpoint
+                        ? t.settingsKeyPlaceholderLocal
+                        : 'sk-…'
+                  }
+                  type={revealKey ? 'text' : 'password'}
+                  value={draft.apiKey}
+                />
+                {keyOptional && <p className="hint">{t.settingsKeyNotRequired}</p>}
+              </div>
+              <label className="inline-check">
+                <input
+                  checked={revealKey}
+                  onChange={(event) => setRevealKey(event.target.checked)}
+                  type="checkbox"
+                />
+                {t.settingsShowKey}
+              </label>
+            </>
+          )}
 
           <div className="field" style={{ marginTop: 10 }}>
             <label htmlFor="p-model">{t.settingsModel}</label>
@@ -798,11 +1034,13 @@ export default function ModelsTab() {
             </p>
           </div>
 
-          <button onClick={() => setShowAdvanced(!showAdvanced)} type="button">
-            {showAdvanced ? t.settingsHideAdvanced : t.settingsShowAdvanced}
-          </button>
+          {draft.transport !== 'web' && (
+            <button onClick={() => setShowAdvanced(!showAdvanced)} type="button">
+              {showAdvanced ? t.settingsHideAdvanced : t.settingsShowAdvanced}
+            </button>
+          )}
 
-          {showAdvanced && (
+          {draft.transport !== 'web' && showAdvanced && (
             <div style={{ marginTop: 10 }}>
               <div className="row">
                 <div className="field">
