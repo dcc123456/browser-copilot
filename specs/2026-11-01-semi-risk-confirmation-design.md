@@ -52,14 +52,14 @@ screenshot, load_tools, ask_user, present_plan
 - 调用层 `assessActionRisk(name, args, resolve)`（`src/lib/action-risk.ts`，纯函数、
   chrome-free）返回 `{risky, reason}`：
 
-| reason | 触发 |
-| --- | --- |
-| `payment` | 命中付款/订单/订阅等词（中英双语词表） |
-| `credentials` | `type=password` 输入框、密码/验证码/卡号/OTP 等词，或 `get_secret` |
-| `destructive` | 删除/清空/重置/注销/退订等词 |
-| `sending` | 发送/发布/分享/评论/回复等词，或 `press_key` 的 Enter |
-| `script` | `run_javascript` |
-| `persistent` | `create_skill`、`create_scheduled_task` |
+| reason           | 触发                                                                      |
+| ---------------- | ------------------------------------------------------------------------- |
+| `payment`        | 命中付款/订单/订阅等词（中英双语词表）                                    |
+| `credentials`    | `type=password` 输入框、密码/验证码/卡号/OTP 等词，或 `get_secret`        |
+| `destructive`    | 删除/清空/重置/注销/退订等词                                              |
+| `sending`        | 发送/发布/分享/评论/回复等词，或 `press_key` 的 Enter                     |
+| `script`         | `run_javascript`                                                          |
+| `persistent`     | `create_skill`、`create_scheduled_task`                                   |
 | `unknown-target` | 元素动作（click/fill/select_option/set_checkbox）既无强标识也无输入框类型 |
 
 ### 2.2 目标证据从哪来

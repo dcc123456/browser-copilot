@@ -17,7 +17,13 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
   or a local Ollama/LM Studio. Bring your own key.
 - 🎚️ **You choose how autonomous it is.** Five modes from plain chat to full
   auto, plus a workflow-generate mode that turns a run into a reusable
-  workflow; semi-auto shows every click for your approval first.
+  workflow; semi-auto asks only before risky actions — payments, passwords,
+  deletions, sending — and lets reading and scrolling run.
+- 💸 **Only the tools a step needs are sent.** The specialised page tools
+  (scrolling, keys, form controls, vision, scripts) load by group on demand
+  instead of riding on every request, and read-only mode withholds every write
+  tool outright — which cut round-one tool schemas by about a third. Settings →
+  Tools lists every switch by loading group, so it is clear what loads when.
 - 🧩 **Skills** turn repeatable know-how (review checklists, style guides,
   extraction formats) into one-tap instructions the model must follow.
 - 🎬 **Workflows run whole procedures on their own.** Record yourself doing a
@@ -238,9 +244,13 @@ Use the dropdown at the bottom-left of the chat. The choice applies to the
 **next action**, even mid-reply:
 
 - 💬 **Chat** — pure conversation; no reading or acting on the page (cheapest).
-- 🔒 **Read-only** — reads only; no click, type, navigation, or fill.
-- 🛡 **Semi-auto** (default) — every page-changing action is shown to you first
-  for approval.
+- 🔒 **Read-only** — reads only; every write tool is withheld from the model, so
+  it cannot click, type, navigate, or fill.
+- 🛡 **Semi-auto** (default) — only risky actions wait for your one-click
+  approval: paying or committing an order, typing passwords or codes, deleting
+  or resetting, sending or publishing, scripts, and creating skills or
+  scheduled tasks. Reading, scrolling, waiting, navigation and named benign
+  clicks run immediately.
 - ⚡ **Full auto** — actions run without confirmation.
 - 🧩 **Workflow generate** — acts like full auto while it learns the task: every
   step that succeeds becomes a node in a workflow draft, which you save when
@@ -301,13 +311,15 @@ while a task runs.
 | Mode                      | Behavior                                                                                                                                                                               | Best for                                                                                        |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | 💬 **Chat**               | Pure conversation. No page-reading or action tools are sent to the model, so it cannot touch the page and uses the fewest tokens. You can still attach a text selection.               | Brainstorming, writing, Q&A, translation — anything where you don't want it acting on the page. |
-| 🔒 **Read-only**          | Reads only; no click, type, navigation, or fill.                                                                                                                                       | Review, summary, translation — zero side effects.                                               |
-| 🛡 **Semi-auto** (default) | Every page-changing action is shown for approval first.                                                                                                                                | Everyday use; stay in control of each click.                                                    |
+| 🔒 **Read-only**          | Reads only. No write tool is sent to the model at all, so it cannot click, type, navigate, or fill.                                                                                    | Review, summary, translation — zero side effects.                                               |
+| 🛡 **Semi-auto** (default) | Only risky actions ask first: payments, passwords/codes, deletions, sending, scripts, persistent writes. Reads, scrolling, navigation and named benign clicks run immediately.         | Everyday use; stay in control of the actions that matter.                                       |
 | ⚡ **Full auto**          | Actions run without confirmation.                                                                                                                                                      | Repetitive, trusted flows.                                                                      |
 | 🧩 **Workflow generate**  | Drives the page exactly like full auto, but only a step that truly succeeded becomes a node in a workflow draft; no per-step approval. Saving the draft is offered when the turn ends. | Turning a task you can describe into a reusable workflow.                                       |
 
-In semi-auto the confirmation card names the exact button/field/URL. In full
-auto every action is still logged on the **Data** tab for audit. Workflow
+In semi-auto the confirmation card names the exact button/field/URL, and an
+element the assistant cannot identify is treated as risky and asks rather than
+guessing. In full auto every action is still logged on the **Data** tab for
+audit. Workflow
 generate is **not a dry run**: its operators really click, type and navigate,
 and JavaScript-code blocks run arbitrary code in the page — use it only on
 sites you trust and review the generated workflow before running it.
@@ -361,9 +373,9 @@ unacceptable.
   previous global behaviour; keyboard shortcuts and context-menu runs act in
   the window where you used them.
 - **Reading the page.** Either tick **Attach selection** to send highlighted
-  text up front, or let the assistant read it itself (which asks for
-  confirmation in semi-auto unless you attached). The grant is scoped to that
-  page (origin + path); switching tabs re-gates.
+  text up front, or let the assistant read the page itself. Reading is an
+  observation, so it never asks for approval — in read-only and semi-auto
+  alike; only risky actions do.
 - **Attach selection** captures only `window.getSelection()`, so you control
   exactly what is sent.
 - **Markdown.** Replies render headings, lists, tables, and code blocks (with a
@@ -392,7 +404,12 @@ unacceptable.
 - **Storage location.** Settings → Storage location lets you choose a folder on
   your disk; everything is then stored as real files there (see
   [Saved data and privacy](#saved-data-and-privacy)). Until you pick one,
-  data stays in browser storage.
+  data stays in browser storage. A **Locate** action opens that folder in the
+  system file manager, and a second entry opens the browser's default
+  Downloads folder.
+- **Installation.** Settings shows the version, install type (unpacked or
+  store), extension ID and a link to the extension's `chrome://extensions`
+  card; an unpacked install can also open its source folder from there.
 - **History.** The clock icon opens past conversations — continue, preview,
   rename, or delete. Threads persist on this machine (newest 200 messages
   each) — as real files once a storage folder is set.
@@ -639,7 +656,9 @@ defaults — the schedule itself carries no parameters. The `create_scheduled_ta
 agent tool accepts the same cadences, including `kind: "cron"`.
 
 Each run is recorded in **Recent runs** with its start time, outcome, steps, and a
-short summary — and can be terminated mid-flight. Tasks only fire while the
+short summary — and can be terminated mid-flight: while a workflow or task is
+running, its card swaps **Run now** for **Terminate**, which stops every live
+run of that item. Tasks only fire while the
 browser is open (the service worker is woken by the alarm); they don't run when
 Chrome is closed. Turn on **Notify via Feishu when done** to push the result out.
 A task created from the chat shows up in the list right away, and **Edit** opens

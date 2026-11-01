@@ -6,18 +6,61 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-### Docs — READMEs catch up with 0.6.6–0.6.15
+_To be released._
 
-Both READMEs now cover the workflow marketplace (public and team sources,
-publishing, applying, updates), the Settings page element picker and
-`read_selected_element`, in-panel feedback issues, the fifth chat mode
-(workflow generate), workflow groups, the canvas assistant and data table, the
-AI-agent block's skills/tools switches, several trigger methods and cron on
-scheduled tasks, composer `/` commands, `@` attachments and the model picker,
-and the batch-based action-step limit. They also gain the Firefox `.xpi`
-install path, the `-firefox` build commands, and the server runner section in
-the English edition. The release rule now requires both READMEs to be updated
-for every tag.
+## [0.6.16] - 2026-11-01
+
+### Added — Semi-auto asks only before risky actions
+
+Semi-auto used to ask before every page-changing action, which turned reading
+and scrolling into a click-through chore. It now asks only for actions the
+classifier considers risky: paying or committing an order, typing a password or
+verification code (and filling a saved credential), deleting or resetting,
+sending or publishing, running page JavaScript, and creating a skill or
+scheduled task. Reading the page, taking a screenshot, scrolling, waiting,
+navigation and tab bookkeeping run immediately, and so does a click or fill
+whose target has a recognisable accessible name. An element the assistant
+cannot identify is treated as risky and asks rather than guessing; a bare CSS
+selector that matches a payment/delete/send word also asks. A `run_plan` whose
+any step is risky asks once for the whole plan. The semi-auto hint, the system
+prompt and the affected tool descriptions say so.
+
+### Added — Read-only mode withholds every write tool
+
+A read-only turn no longer receives any write tool schema, so the model cannot
+click, type, navigate, fill, scroll, run a script, create a skill or a scheduled
+task — and the prompt is smaller. Filling a saved credential (`get_secret`) is
+now classified as an action, closing the hole that let read-only use it.
+`load_tools` in read-only offers only groups that contain something readable
+(tabs, data, skills, ops, delegate) instead of groups it could never load.
+Page reads never ask for approval in any mode; the old "attached page" waiver is
+gone.
+
+### Added — Specialised page tools load by group
+
+Full auto used to re-send 18 tool schemas (~15.7k characters) on every round,
+although most conversations only use the browse loop. Form controls, scrolling,
+keys, vision and scripts now ride on-demand groups through `load_tools`, cutting
+round one from 19,863 to about 12,400 characters. A stray call still works:
+dispatch auto-loads the group and asks the model to retry immediately, and
+`run_plan` drives grouped tools directly. Read-only and workflow generation keep
+the image reads advertised, and a stray native action in workflow mode is
+refused before it can load a group that mode never offers.
+
+### Added — Stop a running workflow or task from its card
+
+While a workflow or a scheduled task is running, its card shows **Running** and
+swaps **Run now** for **Terminate**, which cancels every live run of that item;
+the History activity board uses the same live snapshot. The button stays
+clickable for as long as the run is in flight.
+
+### Added — Locate folders and inspect the installation in Settings
+
+The download-folder setting gained a **Locate** action that opens the native
+folder dialog anchored at the configured folder, plus an entry that opens the
+browser's default Downloads folder. A new installation card shows the version,
+install type, extension ID and a link to the extension's `chrome://extensions`
+card; an unpacked install can open its source folder from there.
 
 ### Added — Send feedback from Settings
 
@@ -43,6 +86,23 @@ the repository the workflow was last published to, and keeps drafts separate
 per repository. A connection made before this version keeps working and is
 migrated on the next change.
 
+### Changed — Tool switches are grouped by loading group
+
+Settings → Tools used to be one flat list of forty switches. It now renders one
+section per loading group, in load order, so it answers "what loads when"
+rather than just "what exists"; the group definition moved to the chrome-free
+library so the worker and the settings sections share one source.
+
+### Changed — Notices, menus and the workflow condition editor
+
+Every top-of-panel notice can be dismissed through one shared banner. The
+add-workflow menu opens on click instead of hover. The while-loop condition
+builder now matches Automa: a full-width accent trigger, an AND rail, an OR
+divider, and side-by-side value inputs; the conditions block's Add path is an
+accent action above a plain path list. Log-data workflows are picked from a
+shared dropdown instead of pasting an id, truncated history and token names are
+exposed on hover, and the token board shows workflow names instead of ids.
+
 ### Fixed — Republishing a workflow no longer fails as a conflict
 
 Updating a listing reused the GitHub Contents API call without the existing
@@ -50,6 +110,25 @@ blob's `sha`, which GitHub rejects with 422, surfaced as "conflicting changes".
 An overwrite now echoes each file's `sha` and deletes files the listing no
 longer produces, so a same-author republish is a normal update PR. The apply
 button also reads "Update" when an installed workflow has a newer listing.
+
+### Fixed — Operator nodes show the operator name
+
+A generated node titled itself with the internal operator id; it now shows the
+operator's display name.
+
+### Docs — READMEs catch up with 0.6.6–0.6.16
+
+Both READMEs now cover the workflow marketplace (public and team sources,
+publishing, applying, updates), the Settings page element picker and
+`read_selected_element`, in-panel feedback issues, the fifth chat mode
+(workflow generate), workflow groups, the canvas assistant and data table, the
+AI-agent block's skills/tools switches, several trigger methods and cron on
+scheduled tasks, composer `/` commands, `@` attachments and the model picker,
+the batch-based action-step limit, on-demand tool groups, the risk-based
+semi-auto approval, the read-only tool cut, and the new Settings folder and
+installation entries. They also gain the Firefox `.xpi` install path, the
+`-firefox` build commands, and the server runner section in the English
+edition. The release rule now requires both READMEs to be updated for every tag.
 
 ## [0.6.15] - 2026-10-28
 
