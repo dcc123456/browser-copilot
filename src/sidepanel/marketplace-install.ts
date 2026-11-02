@@ -22,7 +22,12 @@ import {
   type PublishedDependency,
 } from '../lib/marketplace/apply'
 import { assetRepoPath } from '../lib/marketplace/meta'
-import { fetchRepoWorkflow, fetchRepoWorkflowAt, type RepoReadAccess } from '../lib/marketplace/raw'
+import {
+  fetchRepoMeta,
+  fetchRepoWorkflow,
+  fetchRepoWorkflowAt,
+  type RepoReadAccess,
+} from '../lib/marketplace/raw'
 import { PUBLIC_REPO, repoFullName, type RepoRef } from '../lib/marketplace/repo'
 import { MarketplaceError, type MarketplaceCard } from '../lib/marketplace/types'
 import type { PasswordEntry } from '../lib/types'
@@ -89,15 +94,24 @@ export async function installFromCard(
   library: readonly Workflow[],
   source: InstallSource = { repo: PUBLIC_REPO },
 ): Promise<ApplyPlan> {
-  const published = await fetchRepoWorkflow(source.repo, card.meta.slug, source.access)
+  // The card comes from a catalog snapshot that can be hours old, while the
+  // files below are read fresh. Meta decides which dependencies are bundled and
+  // which credentials are imported, so a stale card would install new workflow
+  // bytes without them. Re-read it and plan from the same revision as the body.
+  const meta = await fetchRepoMeta(source.repo, card.meta.slug, source.access)
+  if (meta === null) {
+    throw new MarketplaceError('not-found', `The published meta for ${card.meta.slug} is missing`)
+  }
+  const current: MarketplaceCard = { ...card, meta }
+  const published = await fetchRepoWorkflow(source.repo, meta.slug, source.access)
   if (published === null) {
-    throw new MarketplaceError('not-found', `The published file for ${card.meta.slug} is missing`)
+    throw new MarketplaceError('not-found', `The published file for ${meta.slug} is missing`)
   }
   const dependencies = await Promise.all(
-    (card.meta.dependencies ?? []).map(async (entry): Promise<PublishedDependency> => {
+    (meta.dependencies ?? []).map(async (entry): Promise<PublishedDependency> => {
       const body = await fetchRepoWorkflowAt(
         source.repo,
-        assetRepoPath(card.meta.slug, entry.path),
+        assetRepoPath(meta.slug, entry.path),
         source.access,
       )
       if (body === null) {
@@ -106,10 +120,10 @@ export async function installFromCard(
       return { entry, published: body }
     }),
   )
-  const credentials = card.meta.secrets?.length ? await localCredentials() : []
+  const credentials = meta.secrets?.length ? await localCredentials() : []
   const plan = await fileIntoBundleGroup(
     planApplyBundle(
-      card,
+      current,
       published,
       dependencies,
       library,

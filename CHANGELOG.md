@@ -6,7 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-_To be released._
+### Fixed — Applying a listing reads `meta.json` again
+
+A marketplace card comes from a catalog snapshot that can be hours old, while
+its workflow file was already fetched fresh. A listing republished with
+credentials or new bundled workflows could therefore be applied with the old
+meta: `get-secret` steps kept the publisher's private credential ids and the
+credentials themselves were never imported. Apply and update now re-read
+`meta.json` and plan from the same revision as the body, so the credentials and
+bundles always match the installed graph.
 
 ## [0.6.16] - 2026-11-01
 

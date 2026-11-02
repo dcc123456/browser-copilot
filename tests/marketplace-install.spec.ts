@@ -49,6 +49,7 @@ const mock = vi.hoisted(() => {
     return { type: command.type }
   }
   const published = {
+    meta: null as unknown,
     parent: null as unknown,
     dependency: null as unknown,
   }
@@ -58,6 +59,7 @@ const mock = vi.hoisted(() => {
 
 vi.mock('../src/lib/messages', () => ({ sendCommand: mock.sendCommand }))
 vi.mock('../src/lib/marketplace/raw', () => ({
+  fetchRepoMeta: async () => mock.published.meta,
   fetchRepoWorkflow: async (repo: unknown) => {
     mock.reads.push(repo)
     return mock.published.parent
@@ -68,8 +70,20 @@ vi.mock('../src/lib/marketplace/raw', () => ({
   },
 }))
 
-const { installFromCard } = await import('../src/sidepanel/marketplace-install')
+const { installFromCard: installFromPublished } =
+  await import('../src/sidepanel/marketplace-install')
 const { buildMeta } = await import('../src/lib/marketplace/meta')
+
+/** Installs with the card's own meta, as a fresh catalog snapshot would. */
+function installFromCard(
+  card: MarketplaceCard,
+  existing: Workflow | undefined,
+  library: readonly Workflow[],
+  source?: Parameters<typeof installFromPublished>[3],
+): ReturnType<typeof installFromPublished> {
+  mock.published.meta = card.meta
+  return installFromPublished(card, existing, library, source)
+}
 
 const SLUG = 'scrape-orders-abcdef'
 const NOW = Date.parse('2026-10-26T09:00:00.000Z')
@@ -296,6 +310,46 @@ describe('installing a bundle', () => {
     expect(savedWorkflows()[0]!.drawflow.nodes[0]!.data).toMatchObject({
       credential: 'mkt-scrape-orders-abcdef-gh::token',
     })
+  })
+
+  it('plans from freshly published meta, not a stale catalog card', async () => {
+    // The card was cached before the republish, so it still has no bundle and
+    // no credentials; the repository already serves the newer meta.
+    const stale = card([], [])
+    mock.published.parent = secretGraph('Scrape orders', 'gh::token')
+    mock.published.meta = buildMeta({
+      slug: SLUG,
+      title: 'Scrape orders',
+      description: 'Open the orders page.',
+      category: 'ecommerce',
+      dependencies: [dependency('child-1', 'Collect numbers')],
+      secrets: [{ id: 'gh', label: 'GitHub', fields: [{ key: 'token', value: 'ghp_fresh' }] }],
+      author: 'octocat',
+      version: 3,
+      hash: 'd'.repeat(64),
+      now: new Date(NOW),
+    })
+
+    const plan = await installFromPublished(stale, undefined, [])
+
+    expect(plan.status).toBe('new')
+    expect(plan.workflow.marketplace?.version).toBe(3)
+    expect(savedPasswords()[0]!.fields).toEqual([{ key: 'token', value: 'ghp_fresh' }])
+    expect(savedWorkflows().map((workflow) => workflow.name)).toEqual([
+      'Collect numbers',
+      'Scrape orders',
+    ])
+    expect(savedWorkflows()[1]!.drawflow.nodes[0]!.data).toMatchObject({
+      credential: 'mkt-scrape-orders-abcdef-gh::token',
+    })
+  })
+
+  it('refuses to install when the published meta is gone', async () => {
+    mock.published.meta = null
+
+    await expect(installFromPublished(card(), undefined, [])).rejects.toThrow(/meta/)
+
+    expect(savedWorkflows()).toEqual([])
   })
 
   it('reads from and records the team repository when that is the source', async () => {
