@@ -1,10 +1,13 @@
 /**
- * The dedicated background window each free web chat runs in.
+ * The background tab each free web chat runs in.
  *
- * A tab is required: Chrome cannot render a third-party site in an offscreen
- * document, and extension pages cannot read a cross-origin iframe. The window
- * is unfocused and reused across turns; per-site queues keep two requests from
- * typing into the same conversation at once.
+ * A real tab is required: Chrome cannot render a third-party site in an
+ * offscreen document, and extension pages cannot read a cross-origin iframe.
+ * The tab is created **inactive in the current window** (never a new window, so
+ * it does not steal focus) and reused across turns. The browser shares cookies
+ * and localStorage across tabs, so an existing login applies without visiting
+ * the site first. Per-site queues keep two requests from typing into the same
+ * conversation at once.
  *
  * @module background/web-chat/window
  */
@@ -118,28 +121,27 @@ export async function ensureWebChatWindow(site: WebChatSiteId): Promise<WebChatW
   }
 
   const adapter = WEB_CHAT_ADAPTERS[site]
-  const created = await chrome.windows.create({
+  // Inactive tab in the window the user is already in: never a new window,
+  // never a focus jump. The site's cookies/localStorage are shared, so an
+  // existing login applies to this fresh tab.
+  const targetWindow = await chrome.windows
+    .getLastFocused({ windowTypes: ['normal'] })
+    .catch(() => undefined)
+  const created = await chrome.tabs.create({
     url: adapter.url,
-    focused: false,
-    type: 'normal',
-    width: 520,
-    height: 820,
+    active: false,
+    ...(targetWindow?.id === undefined ? {} : { windowId: targetWindow.id }),
   })
-  if (typeof created?.id !== 'number') {
-    throw new Error('Could not open the web-chat window.')
-  }
-  const tabs = await chrome.tabs.query({ windowId: created.id })
-  const tabId = tabs[0]?.id ?? created.tabs?.[0]?.id
-  if (typeof tabId !== 'number') {
+  if (typeof created?.id !== 'number' || typeof created.windowId !== 'number') {
     throw new Error('Could not open the web-chat tab.')
   }
-  cache[site] = { windowId: created.id, tabId }
+  cache[site] = { windowId: created.windowId, tabId: created.id }
   await persist()
-  await waitForInjectableTab(tabId)
-  return refOf(created.id, tabId)
+  await waitForInjectableTab(created.id)
+  return refOf(created.windowId, created.id)
 }
 
-/** Brings the window forward so the user can sign in or solve a challenge. */
+/** Brings the tab forward only when the user must sign in or solve a challenge. */
 export async function openWebChatWindow(site: WebChatSiteId): Promise<WebChatWindowRef> {
   const ref = await ensureWebChatWindow(site)
   await chrome.windows.update(ref.windowId, { focused: true })

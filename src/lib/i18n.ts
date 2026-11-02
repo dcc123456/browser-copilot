@@ -2755,8 +2755,8 @@ const en: Messages = {
   settingsWebChatNoTools:
     'Web-chat providers cannot call tools. Use chat mode (or a text-only workflow step); switch to an API provider for page automation.',
   settingsWebChatLoginHint:
-    'The extension opens this provider in a background window. If it asks you to log in, do so there once — the conversation still stays in this panel.',
-  settingsWebChatOpenWindow: 'Open window',
+    'The extension uses an inactive background tab in your current window. If it asks you to log in, do so there once — the conversation still stays in this panel.',
+  settingsWebChatOpenWindow: 'Open tab',
   settingsWebChatTest: 'Test web chat',
   settingsWebChatDiagnose: 'Diagnose',
   settingsWebChatLoginRequired: 'Log in to the provider in the background window, then try again.',
@@ -2765,9 +2765,9 @@ const en: Messages = {
   settingsWebChatTimeout: 'The web chat did not finish answering in time.',
   settingsWebChatEmptyReply: 'The web chat returned an empty reply.',
   settingsWebChatWindowUnavailable:
-    'The web-chat window is unavailable. Open it and log in, or switch to Pollinations / an API provider to chat inside the panel.',
+    'The background web-chat tab is unavailable. Open it and log in, or switch to Pollinations / an API provider to chat inside the panel.',
   chatWebChatProviderHint:
-    'This model drives a background web-chat window. To chat only inside the panel, switch to Pollinations or an API provider.',
+    'This model uses an inactive background tab for the free web chat. To chat only inside the panel, switch to Pollinations or an API provider.',
   settingsWebChatAttachmentsUnsupported:
     'Web-chat providers do not support image or file attachments yet.',
   settingsWebChatModelNote:
@@ -2787,9 +2787,9 @@ const en: Messages = {
   presetOpenRouterHint:
     'Free models end in “:free”. Model IDs are namespaced, e.g. deepseek/deepseek-chat. The free catalog rotates.',
   presetDeepSeekWebHint:
-    'Drives your logged-in free DeepSeek web chat in a background window. Chat/text only; no tool calling.',
+    'Drives your logged-in free DeepSeek web chat in an inactive tab in your current window. Chat/text only; no tool calling.',
   presetChatGPTWebHint:
-    'Drives your logged-in free ChatGPT web chat in a background window. Chat/text only; no tool calling.',
+    'Drives your logged-in free ChatGPT web chat in an inactive tab in your current window. Chat/text only; no tool calling.',
   settingsNoProvider: 'No provider yet. Add one to enable the agent.',
   settingsAddProvider: 'Add a provider',
   settingsChoosePreset: 'Choose a preset…',
@@ -4456,8 +4456,8 @@ const zhCN: Messages = {
   settingsWebChatNoTools:
     '网页版模型不支持工具调用。请使用 Chat 模式（或纯文本工作流步骤）；需要操作页面时请切换到 API 服务商。',
   settingsWebChatLoginHint:
-    '扩展会在后台窗口打开该服务。如果提示登录，在那个窗口登录一次即可——对话仍然留在本面板。',
-  settingsWebChatOpenWindow: '打开窗口',
+    '扩展会在当前窗口使用一个不激活的后台标签页。如果提示登录，在那个标签页登录一次即可——对话仍然留在本面板。',
+  settingsWebChatOpenWindow: '打开标签页',
   settingsWebChatTest: '测试网页版',
   settingsWebChatDiagnose: '诊断',
   settingsWebChatLoginRequired: '请先在后台窗口登录该服务，然后重试。',
@@ -4466,9 +4466,9 @@ const zhCN: Messages = {
   settingsWebChatTimeout: '网页聊天在限定时间内没有完成回复。',
   settingsWebChatEmptyReply: '网页聊天返回了空回复。',
   settingsWebChatWindowUnavailable:
-    '网页聊天窗口不可用。请打开窗口并登录，或切换到 Pollinations / API 服务商，直接在插件里聊天。',
+    '后台网页聊天标签页不可用。请打开它并登录，或切换到 Pollinations / API 服务商，直接在插件里聊天。',
   chatWebChatProviderHint:
-    '该模型会驱动一个后台网页聊天窗口。若只想在插件里聊天，请切换到 Pollinations 或 API 服务商。',
+    '该模型会在当前窗口使用一个不激活的后台标签页来运行免费网页聊天。若只想在插件里聊天，请切换到 Pollinations 或 API 服务商。',
   settingsWebChatAttachmentsUnsupported: '网页版暂不支持图片或文件附件。',
   settingsWebChatModelNote: '实际模型是网页上当前选中的模型；这里的名称仅用于显示。',
   settingsWebChatToS:
@@ -4485,9 +4485,9 @@ const zhCN: Messages = {
   presetOpenRouterHint:
     '免费模型以“:free”结尾。模型 ID 带命名空间，例如 deepseek/deepseek-chat；免费目录会轮换。',
   presetDeepSeekWebHint:
-    '在后台窗口驱动你已登录的免费 DeepSeek 网页聊天。仅聊天/纯文本，不支持工具调用。',
+    '在当前窗口的不激活标签页中驱动你已登录的免费 DeepSeek 网页聊天。仅聊天/纯文本，不支持工具调用。',
   presetChatGPTWebHint:
-    '在后台窗口驱动你已登录的免费 ChatGPT 网页聊天。仅聊天/纯文本，不支持工具调用。',
+    '在当前窗口的不激活标签页中驱动你已登录的免费 ChatGPT 网页聊天。仅聊天/纯文本，不支持工具调用。',
   settingsNoProvider: '尚未配置服务。添加一个后才能使用 agent。',
   settingsAddProvider: '添加模型服务',
   settingsChoosePreset: '选择预设…',

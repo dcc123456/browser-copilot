@@ -14,7 +14,7 @@
 目标拆成两条并行能力：
 
 1. **Track A · 免费 API**：Pollinations（免密钥）+ 官方免费额度（Gemini / Groq / Cerebras / SambaNova / Chutes / OpenRouter `:free` / GitHub Models / 智谱 GLM-4-Flash）。
-2. **Track B · 免费网页版**：在独立后台窗口里驱动 `chat.deepseek.com` / `chatgpt.com`，把回复流式回传到插件对话；仅 chat 与纯文本调用点。
+2. **Track B · 免费网页版**：在当前窗口的**不激活后台标签页**里驱动 `chat.deepseek.com` / `chatgpt.com`（永不新开窗口、不抢焦点），把回复流式回传到插件对话；仅 chat 与纯文本调用点。
 
 ## 2. 选型与证据
 
@@ -89,13 +89,15 @@
   `undefined`，即 v1 不把网页版交给自动修复。
 - 这**不是第三条浏览器驱动**：网页版 transport 复用现有 `driver.ts` + `inpage/kernel.ts`。
 
-### 3.3 后台窗口与站点适配
+### 3.3 后台标签页与站点适配
 
-- 每个站点一个独立、不抢焦点的窗口，缓存于 `chrome.storage.session`（`bc:webChatTabs`），
-  跨 turn 复用；同一站点的请求串行，避免两次发送写进同一对话。
-- 新建窗口后先等 tab 的 URL 变为 http(s) 再注入；否则 driver 会看到 `chrome://newtab`
-  并报“没有可操作的网页标签页”。窗口丢失/不可注入统一转成 `window-unavailable` 错误，
-  提示用户打开窗口登录或切回 Pollinations / API 服务商。
+- 每个站点一个**当前窗口内的不激活标签页**（永不新开窗口、不抢焦点），缓存于
+  `chrome.storage.session`（`bc:webChatTabs`），跨 turn 复用；同一站点的请求串行，避免两次
+  发送写进同一对话。浏览器在同一 profile 内共享 cookie/localStorage，所以已有的登录态
+  直接作用于这个新标签页，不需要先手动打开站点。
+- 新建标签页后先等 tab 的 URL 变为 http(s) 再注入；否则 driver 会看到 `chrome://newtab`
+  并报“没有可操作的网页标签页”。标签页丢失/不可注入统一转成 `window-unavailable` 错误，
+  提示用户打开标签页登录或切回 Pollinations / API 服务商。
 - 网页版 provider 是 **opt-in**：新增它不会自动接管 active；只有显式“使用这个”才切过去。
   ChatTab 在 active 是 web provider 时显示常驻提示，说明如何切回插件内聊天。
 - 站点适配器集中在 `src/background/web-chat/adapters.ts`：composer / send / newChat /
@@ -196,7 +198,8 @@ pnpm bench:debug
 ### 人工浏览器验收（拿不到就标 BLOCKED）
 
 1. `pnpm build`，Chrome 加载 `dist/` unpacked。
-2. Settings → Models → “启用 DeepSeek 网页版” → 后台窗口打开 `chat.deepseek.com`，不抢焦点。
+2. Settings → Models → 选中 DeepSeek 网页版并点“使用这个” → 当前窗口出现一个不激活的后台
+   标签页（`chat.deepseek.com`），不抢焦点、不新开窗口。
 3. 未登录时在该窗口登录，插件里点“测试” → 返回模型回复。
 4. 模式切 **Chat**，选 DeepSeek 网页版，在插件对话提问 → 回复流式出现在插件里。
 5. 模式切 **Semi** 再提问 → 明确提示网页版不支持工具调用。
@@ -212,8 +215,8 @@ pnpm bench:debug
 
 - **选择器失效**：站点改版是最大风险；多候选 + Diagnose 是维护入口。
 - **登录/验证码**：只提示用户手动完成，不绕过。
-- **后台窗口**：不抢焦点但任务栏可见；被最小化/关闭会暂停，需重建。若站点在后台暂停生成，
-  验收时确认，必要时置前（不做隐藏窗口的绕过）。
+- **后台标签页**：不抢焦点但在标签栏可见；被关闭会暂停，需重建。若站点在后台暂停生成，
+  验收时确认，必要时把它置前（不做隐藏标签页的绕过）。
 - **无工具调用**：网页版永远 `toolCalls: []`；非 chat 模式明确拒绝。
 - **无 token 统计**：web 调用 `usage: null`，仪表盘不计费。
 - **附件**：v1 不支持上传图片/文件。
