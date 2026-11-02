@@ -145,7 +145,8 @@
 指示；用户已明确要求「每次修改一个功能都自动提交推送到 main 分支」。`[纪律]`
 
 - 8.1 **时机**：收尾自检（§收尾自检 ①–⑩）全绿之后立刻 `git commit` + `git push origin main`，
-  并在回复里贴出 commit hash。门禁没绿不提交。`[纪律]`
+  并在回复里贴出 commit hash。门禁没绿不提交；其中 **`pnpm build` 是每次代码改动都必须跑的硬门禁**，
+  不能用 `pnpm test`、`pnpm typecheck` 或“只改了逻辑/文案”代替。`[纪律]`
 - 8.2 **粒度**：一个功能一次提交；不把无关改动、无关主题的他人改动混进同一次提交
   （共享工作树里先 `git status` 确认，只 `git add` 自己这次动的文件）。`[纪律]`
 - 8.3 **提交信息**按 §1（英文 Conventional Commits）。`[纪律]`
@@ -167,7 +168,8 @@
 每次改完逐条回答，任一不过不得声称完成：
 
 - ① 扩展侧门禁全绿并贴实际命令与输出：`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm format:check`；
-  改动涉及 UI、manifest 或构建配置时额外 `pnpm build`（或对应变体，如 `pnpm build:no-ocr`）。`[机检]`
+  **每次修改代码都必须 `pnpm build`**（或对应变体，如 `pnpm build:no-ocr`）——不再只限于 UI / manifest /
+  构建配置改动；只有纯文档/注释改动可以豁免。`[机检]`
 - ② Runner 侧改动：`pnpm server:typecheck`、`pnpm server:test`。`[机检]`
 - ③ 改动涉及 `src/lib/workflow/ai-takeover.ts` 或 `src/background/workflow-engine/**`：跑
   `pnpm bench:debug` 取 before/after，并按 `CONTRIBUTING.md` 在 PR 里报告成功率变化（基线
