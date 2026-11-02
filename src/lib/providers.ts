@@ -167,6 +167,72 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     docsUrl: 'https://chutes.ai/',
   },
   {
+    id: 'huggingface',
+    label: 'Hugging Face',
+    baseUrl: 'https://router.huggingface.co/v1',
+    suggestedModel: 'Qwen/Qwen2.5-72B-Instruct',
+    free: true,
+    tools: 'varies',
+    hint: 'Free monthly inference credits via a Hugging Face token.',
+    hintKey: 'presetHuggingFaceHint',
+    docsUrl: 'https://huggingface.co/settings/tokens',
+  },
+  {
+    id: 'modelscope',
+    label: 'ModelScope 魔搭',
+    baseUrl: 'https://api-inference.modelscope.cn/v1',
+    suggestedModel: 'Qwen/Qwen2.5-72B-Instruct',
+    free: true,
+    tools: 'varies',
+    hint: 'Free quota via a ModelScope token.',
+    hintKey: 'presetModelScopeHint',
+    docsUrl: 'https://modelscope.cn/my/myaccesstoken',
+  },
+  {
+    id: 'together',
+    label: 'Together AI',
+    baseUrl: 'https://api.together.xyz/v1',
+    suggestedModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free',
+    free: true,
+    tools: 'varies',
+    hint: 'Free models end in -Free. The free catalog rotates.',
+    hintKey: 'presetTogetherHint',
+    docsUrl: 'https://api.together.xyz/settings/api-keys',
+  },
+  {
+    id: 'novita',
+    label: 'Novita AI',
+    baseUrl: 'https://api.novita.ai/v3/openai',
+    suggestedModel: 'deepseek/deepseek-v3',
+    free: true,
+    tools: 'varies',
+    hint: 'Free starting credits via a Novita key.',
+    hintKey: 'presetNovitaHint',
+    docsUrl: 'https://novita.ai/settings/key-management',
+  },
+  {
+    id: 'nebius',
+    label: 'Nebius AI Studio',
+    baseUrl: 'https://api.studio.nebius.com/v1',
+    suggestedModel: 'deepseek-ai/DeepSeek-V3',
+    free: true,
+    tools: 'varies',
+    hint: 'Free starting credits via a Nebius AI Studio key.',
+    hintKey: 'presetNebiusHint',
+    docsUrl: 'https://studio.nebius.com/settings/api-keys',
+  },
+  {
+    id: 'fireworks',
+    label: 'Fireworks AI',
+    baseUrl: 'https://api.fireworks.ai/inference/v1',
+    suggestedModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct',
+    free: true,
+    tools: 'varies',
+    hint: 'Free starting credits via a Fireworks key.',
+    hintKey: 'presetFireworksHint',
+    docsUrl: 'https://fireworks.ai/account/api-keys',
+  },
+  {
     id: 'deepseek',
     label: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com/v1',
@@ -493,6 +559,28 @@ export function findPresetByBaseUrl(baseUrl: string): ProviderPreset | undefined
   return PROVIDER_PRESETS.find(
     (preset) => preset.baseUrl.length > 0 && normalizeBaseUrl(preset.baseUrl) === normalized,
   )
+}
+
+/**
+ * True when the given model is covered by the provider's free offering.
+ *
+ * Provider-level free tiers tag every model; aggregators with mixed catalogs
+ * (OpenRouter, Together) and vendors with one free model (Zhipu) only tag the
+ * free family, so a paid model never carries the badge.
+ */
+export function isFreeModel(profile: ProviderProfile, model: string): boolean {
+  const preset = findPreset(profile.presetId) ?? findPresetByBaseUrl(profile.baseUrl)
+  if (!preset?.free) return false
+  switch (preset.id) {
+    case 'openrouter':
+      return /:free$/i.test(model)
+    case 'together':
+      return /(?:-|_)free$/i.test(model)
+    case 'zhipu':
+      return /glm-4.*flash/i.test(model)
+    default:
+      return true
+  }
 }
 
 /**

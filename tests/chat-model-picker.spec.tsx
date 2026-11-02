@@ -46,6 +46,7 @@ beforeAll(() => {
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Command } from '../src/lib/messages'
+import { messagesFor } from '../src/lib/i18n'
 import ChatTab from '../src/sidepanel/ChatTab'
 
 function profile(id: string, label: string, model: string, models?: string[]) {
@@ -206,7 +207,7 @@ async function openPicker(scope: ParentNode): Promise<HTMLButtonElement> {
 }
 
 const pickModel = async (scope: ParentNode, model: string): Promise<void> => {
-  const option = modelOptions(scope).find((entry) => entry.textContent?.trim() === model)
+  const option = modelOptions(scope).find((entry) => entry.dataset.model === model)
   expect(option).toBeDefined()
   await act(async () => {
     option?.click()
@@ -272,6 +273,47 @@ describe('chat model picker', () => {
     settingsReply = { mode: 'chat', activeProviderId: '', providers: [] }
     const mounted = await mountChat()
     expect(pickerButton(mounted)).toBeNull()
+  })
+
+  it('marks free models with a Free tag and leaves paid ones untagged', async () => {
+    settingsReply = {
+      mode: 'chat',
+      activeProviderId: 'free',
+      providers: [
+        {
+          id: 'free',
+          label: 'Pollinations',
+          presetId: 'pollinations',
+          baseUrl: 'https://text.pollinations.ai/openai',
+          apiKey: '',
+          model: 'openai-fast',
+          models: ['openai-fast'],
+        },
+        {
+          id: 'or',
+          label: 'OpenRouter',
+          presetId: 'openrouter',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          apiKey: 'k',
+          model: 'deepseek/deepseek-chat:free',
+          models: ['deepseek/deepseek-chat:free', 'deepseek/deepseek-chat'],
+        },
+      ],
+    } as SettingsLike
+
+    const mounted = await mountChat()
+    await openPicker(mounted)
+    const freeTag = messagesFor('en').settingsFreeBadge
+    const options = modelOptions(mounted)
+    const freeOption = options.find((option) => option.dataset.model === 'openai-fast')!
+    const openrouterFree = options.find(
+      (option) => option.dataset.model === 'deepseek/deepseek-chat:free',
+    )!
+    const paid = options.find((option) => option.dataset.model === 'deepseek/deepseek-chat')!
+
+    expect(freeOption.textContent).toContain(freeTag)
+    expect(openrouterFree.textContent).toContain(freeTag)
+    expect(paid.textContent).not.toContain(freeTag)
   })
 })
 

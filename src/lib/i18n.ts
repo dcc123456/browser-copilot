@@ -1070,6 +1070,12 @@ export interface Messages {
   presetCerebrasHint: string
   presetSambaNovaHint: string
   presetChutesHint: string
+  presetHuggingFaceHint: string
+  presetModelScopeHint: string
+  presetTogetherHint: string
+  presetNovitaHint: string
+  presetNebiusHint: string
+  presetFireworksHint: string
   presetOpenRouterHint: string
   settingsNoProvider: string
   settingsAddProvider: string
@@ -2737,6 +2743,16 @@ const en: Messages = {
   presetCerebrasHint: 'Free tier via a Cerebras Cloud key.',
   presetSambaNovaHint: 'Free tier via a SambaNova Cloud key.',
   presetChutesHint: 'Free tier via a Chutes key. Often hosts DeepSeek models; tool support varies.',
+  presetHuggingFaceHint:
+    'Free monthly inference credits via a Hugging Face token. Model IDs are namespaced, e.g. Qwen/Qwen2.5-72B-Instruct.',
+  presetModelScopeHint:
+    'Free quota via a ModelScope token. The OpenAI-compatible endpoint hosts Qwen, DeepSeek and GLM models.',
+  presetTogetherHint:
+    'Free models end in -Free. The free catalog rotates; create a key at api.together.xyz.',
+  presetNovitaHint:
+    'Free starting credits via a Novita key. Model IDs are namespaced, e.g. deepseek/deepseek-v3.',
+  presetNebiusHint: 'Free starting credits via a Nebius AI Studio key.',
+  presetFireworksHint: 'Free starting credits via a Fireworks key.',
   presetOpenRouterHint:
     'Free models end in “:free”. Model IDs are namespaced, e.g. deepseek/deepseek-chat. The free catalog rotates.',
   settingsNoProvider: 'No provider yet. Add one to enable the agent.',
@@ -4406,6 +4422,15 @@ const zhCN: Messages = {
   presetCerebrasHint: '通过 Cerebras Cloud 的密钥使用免费额度。',
   presetSambaNovaHint: '通过 SambaNova Cloud 的密钥使用免费额度。',
   presetChutesHint: '通过 Chutes 的密钥使用免费额度。常有 DeepSeek 模型；工具支持因模型而异。',
+  presetHuggingFaceHint:
+    '通过 Hugging Face token 使用每月免费推理额度。模型 ID 带命名空间，例如 Qwen/Qwen2.5-72B-Instruct。',
+  presetModelScopeHint:
+    '通过 ModelScope token 使用免费额度；这个 OpenAI 兼容端点提供 Qwen、DeepSeek、GLM 等模型。',
+  presetTogetherHint: '免费模型以 -Free 结尾；免费目录会轮换。在 api.together.xyz 创建 key。',
+  presetNovitaHint:
+    '通过 Novita key 使用免费起始额度。模型 ID 带命名空间，例如 deepseek/deepseek-v3。',
+  presetNebiusHint: '通过 Nebius AI Studio key 使用免费起始额度。',
+  presetFireworksHint: '通过 Fireworks key 使用免费起始额度。',
   presetOpenRouterHint:
     '免费模型以“:free”结尾。模型 ID 带命名空间，例如 deepseek/deepseek-chat；免费目录会轮换。',
   settingsNoProvider: '尚未配置服务。添加一个后才能使用 agent。',

@@ -7,8 +7,9 @@
 用户希望在自己的插件对话里免费使用模型。最终采用**免费 API** 路线：
 
 - Pollinations（免密钥，默认启用）；
-- Gemini / Groq / Cerebras / SambaNova / Chutes / OpenRouter `:free` /
-  GitHub Models / 智谱 GLM-4-Flash 等官方免费额度。
+- Gemini / Groq / Cerebras / SambaNova / Chutes / Hugging Face / ModelScope /
+  Together / Novita / Nebius / Fireworks / OpenRouter `:free` / GitHub Models /
+  智谱 GLM-4-Flash 等官方免费额度或免费模型。
 
 DeepSeek Web / ChatGPT Web 两个“驱动网页聊天”的 provider 已被**删除**：用户要求“零标签页 +
 直接调用网页版私有接口”，而这在技术上不可靠、也不合规（见 §2.1）。
@@ -89,6 +90,8 @@ DeepSeek Web / ChatGPT Web 两个“驱动网页聊天”的 provider 已被**�
 
 - Models 页预设下拉分「免费可用 / 全部服务」两组，`custom` 最后；
   免费卡片有 `Free` 徽标；keyless 显示“无需密钥”。
+- ChatTab 的模型选择下拉对免费模型显示 **Free** 标签；混合目录只标免费系列
+  （OpenRouter `:free`、Together `-Free`、智谱 `glm-4-flash`），付费模型不标。
 - 不再有「免费网页聊天」分组、网页版卡片、Test/Open/Diagnose 按钮或 ChatTab 提示。
 - 所有文案均在 `src/lib/i18n.ts` 的封闭 `Messages` 中提供 en + zh-CN。
 
@@ -101,6 +104,12 @@ DeepSeek Web / ChatGPT Web 两个“驱动网页聊天”的 provider 已被**�
 | `cerebras`                                                   | `https://api.cerebras.ai/v1`                              | `llama-3.3-70b`                | free, tools:true          | 未实测                          |
 | `sambanova`                                                  | `https://api.sambanova.ai/v1`                             | `Meta-Llama-3.3-70B-Instruct`  | free, tools:true          | 未实测                          |
 | `chutes`                                                     | `https://llm.chutes.ai/v1`                                | `deepseek-ai/DeepSeek-V3-0324` | free, tools:'varies'      | 未实测                          |
+| `huggingface`                                                | `https://router.huggingface.co/v1`                        | `Qwen/Qwen2.5-72B-Instruct`    | free, tools:'varies'      | 未实测（每月额度）              |
+| `modelscope`                                                 | `https://api-inference.modelscope.cn/v1`                  | `Qwen/Qwen2.5-72B-Instruct`    | free, tools:'varies'      | 未实测（免费额度）              |
+| `together`                                                   | `https://api.together.xyz/v1`                             | `…-Free`                       | free, tools:'varies'      | 未实测（免费模型）              |
+| `novita`                                                     | `https://api.novita.ai/v3/openai`                         | `deepseek/deepseek-v3`         | free, tools:'varies'      | 未实测（起始额度）              |
+| `nebius`                                                     | `https://api.studio.nebius.com/v1`                        | `deepseek-ai/DeepSeek-V3`      | free, tools:'varies'      | 未实测（起始额度）              |
+| `fireworks`                                                  | `https://api.fireworks.ai/inference/v1`                   | `…/llama-v3p3-70b-instruct`    | free, tools:'varies'      | 未实测（起始额度）              |
 | `groq` / `openrouter` / `zhipu` / `mistral` / `githubmodels` | 既有                                                      | 既有                           | `free:true`               | 官方免费档位                    |
 
 DeepSeek 官方 API 保持收费、不打免费标；免费 DeepSeek 走 Chutes / OpenRouter `:free`。

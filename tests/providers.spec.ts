@@ -4,6 +4,7 @@ import {
   PROVIDER_PRESETS,
   findPreset,
   findPresetByBaseUrl,
+  isFreeModel,
   isKeylessEndpoint,
   isLocalEndpoint,
   normalizeBaseUrl,
@@ -174,6 +175,40 @@ describe('free providers', () => {
     expect(isKeylessEndpoint('https://text.pollinations.ai.evil.com/openai')).toBe(false)
     expect(isKeylessEndpoint('https://api.deepseek.com/v1')).toBe(false)
     expect(isKeylessEndpoint('not a url')).toBe(false)
+  })
+
+  it('ships the new free providers with hints', () => {
+    for (const id of ['huggingface', 'modelscope', 'together', 'novita', 'nebius', 'fireworks']) {
+      const preset = findPreset(id)
+      expect(preset?.free).toBe(true)
+      expect(preset?.hintKey).toBeTruthy()
+    }
+  })
+
+  it('tags only the free models of mixed catalogs', () => {
+    const openrouter = profile({
+      presetId: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+    })
+    expect(isFreeModel(openrouter, 'deepseek/deepseek-chat:free')).toBe(true)
+    expect(isFreeModel(openrouter, 'deepseek/deepseek-chat')).toBe(false)
+
+    const together = profile({ presetId: 'together', baseUrl: 'https://api.together.xyz/v1' })
+    expect(isFreeModel(together, 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free')).toBe(true)
+    expect(isFreeModel(together, 'meta-llama/Llama-3.3-70B-Instruct-Turbo')).toBe(false)
+
+    const zhipu = profile({
+      presetId: 'zhipu',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    })
+    expect(isFreeModel(zhipu, 'glm-4-flash')).toBe(true)
+    expect(isFreeModel(zhipu, 'glm-4-plus')).toBe(false)
+
+    const groq = profile({ presetId: 'groq', baseUrl: 'https://api.groq.com/openai/v1' })
+    expect(isFreeModel(groq, 'llama-3.3-70b-versatile')).toBe(true)
+
+    const deepseek = profile({ presetId: 'deepseek', baseUrl: 'https://api.deepseek.com/v1' })
+    expect(isFreeModel(deepseek, 'deepseek-chat')).toBe(false)
   })
 
   it('accepts an empty key for the keyless endpoint only', () => {

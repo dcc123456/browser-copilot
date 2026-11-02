@@ -358,8 +358,16 @@ list to add it. Pollinations is keyless; the others need a free account key.
 | Pollinations                | `https://text.pollinations.ai/openai`                     | No key; anonymous tier, rate-limited, tool calls supported |
 | Google AI Studio (Gemini)   | `https://generativelanguage.googleapis.com/v1beta/openai` | Free tier with an AI Studio key                            |
 | Groq / Cerebras / SambaNova | vendor endpoints                                          | Free tiers with a key; tool support varies                 |
+| Hugging Face                | `https://router.huggingface.co/v1`                        | Free monthly inference credits with an HF token            |
+| ModelScope 魔搭             | `https://api-inference.modelscope.cn/v1`                  | Free quota with a ModelScope token                         |
+| Together AI                 | `https://api.together.xyz/v1`                             | Free models end in `-Free`                                 |
+| Novita / Nebius / Fireworks | vendor endpoints                                          | Free starting credits with a key                           |
 | OpenRouter                  | `https://openrouter.ai/api/v1`                            | Free models end in `:free`; the catalog rotates            |
 | GitHub Models               | `https://models.github.ai/inference`                      | Free GPT models with a GitHub PAT                          |
+
+The composer's model picker marks free models with a **Free** tag. Mixed
+catalogs only tag their free family (OpenRouter `:free`, Together `-Free`,
+Zhipu `glm-4-flash`), so a paid model never carries the badge.
 
 The official DeepSeek and OpenAI API endpoints are paid. Free DeepSeek/GPT
 access comes through the free tiers above.

@@ -33,6 +33,7 @@ import {
   providerModels,
   type AiPrefillStep,
 } from '../lib/storage'
+import { isFreeModel } from '../lib/providers'
 import { isTriggerNode } from '../lib/workflow/migrate'
 import { generateWorkflowName } from '../lib/workflow/generation-goal'
 import {
@@ -2761,11 +2762,15 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
   const modelGroups = useMemo(
     () =>
       providers
-        .map((profile) => ({
-          providerId: profile.id,
-          label: profile.label,
-          models: providerModels(profile),
-        }))
+        .map((profile) => {
+          const models = providerModels(profile)
+          return {
+            providerId: profile.id,
+            label: profile.label,
+            models,
+            freeModels: new Set(models.filter((model) => isFreeModel(profile, model))),
+          }
+        })
         .filter((group) => group.models.length > 0),
     [providers],
   )
@@ -4653,9 +4658,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                           return (
                             <button
                               aria-selected={isSelected}
-                              className={`block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-hover ${
+                              className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-xs hover:bg-hover ${
                                 isSelected ? 'bg-accent-soft text-ink' : 'text-ink'
                               }`}
+                              data-model={model}
                               key={choice}
                               onClick={() => {
                                 setModelMenuOpen(false)
@@ -4664,7 +4670,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                               role="option"
                               type="button"
                             >
-                              {model}
+                              <span className="min-w-0 truncate">{model}</span>
+                              {group.freeModels.has(model) && (
+                                <span className="shrink-0 rounded border border-ok/30 bg-ok-surface px-1 py-0.5 text-[10px] font-medium text-ok">
+                                  {t.settingsFreeBadge}
+                                </span>
+                              )}
                             </button>
                           )
                         })}
