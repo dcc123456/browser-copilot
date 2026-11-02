@@ -4675,17 +4675,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                             >
                               <span className="min-w-0 truncate">{model}</span>
                               {freeAccess && (
-                                <span
-                                  className={[
-                                    'shrink-0 rounded border px-1 py-0.5 text-[10px] font-medium',
-                                    freeAccess === 'direct'
-                                      ? 'border-ok/30 bg-ok-surface text-ok'
-                                      : 'border-accent/30 bg-accent-soft text-accent',
-                                  ].join(' ')}
-                                >
-                                  {freeAccess === 'direct'
-                                    ? t.settingsFreeBadge
-                                    : t.settingsQuotaBadge}
+                                <span className="shrink-0 rounded border border-ok/30 bg-ok-surface px-1 py-0.5 text-[10px] font-medium text-ok">
+                                  {t.settingsFreeBadge}
                                 </span>
                               )}
                             </button>

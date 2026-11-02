@@ -351,8 +351,8 @@ configuration, not a code path — unlisted endpoints work too.
 
 **Free options.** A fresh install already has Pollinations active. Settings →
 Models keeps only providers usable directly for free (no key) under **Free to
-try**; providers with a free quota or daily credits stay in **All providers**
-and carry a **Free quota** tag.
+try**; providers with a free quota or daily credits stay in **All providers**.
+Their free models still show **Free**.
 
 | Free preset                 | Base URL                                                  | Notes                                                        |
 | --------------------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
@@ -366,10 +366,9 @@ and carry a **Free quota** tag.
 | OpenRouter                  | `https://openrouter.ai/api/v1`                            | Free models end in `:free` (free quota); the catalog rotates |
 | GitHub Models               | `https://models.github.ai/inference`                      | Free quota with a GitHub PAT                                 |
 
-In the composer's model picker, directly free models show **Free** and
-quota-based models show **Free quota**. Mixed catalogs only tag their free
-family (OpenRouter `:free`, Together `-Free`, Zhipu `glm-4-flash`), so a paid
-model never carries a badge.
+In the composer's model picker, free models show **Free**. Mixed catalogs only
+tag their free family (OpenRouter `:free`, Together `-Free`, Zhipu
+`glm-4-flash`), so a paid model never carries a badge.
 
 The official DeepSeek and OpenAI API endpoints are paid. Free DeepSeek/GPT
 access comes through the free tiers above.

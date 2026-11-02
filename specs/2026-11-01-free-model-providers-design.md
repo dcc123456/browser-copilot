@@ -41,7 +41,13 @@ DeepSeek Web / ChatGPT Web 两个“驱动网页聊天”的 provider 已被**�
 | 匿名档当前模型                                              | `openai-fast`（别名 `openai`，GPT-OSS 20B，tools:true，无视觉）                 |
 | OpenRouter `/models`                                        | 公开可读；当前 14 个 `:free` 模型，多数支持 tools；目录会轮换                   |
 | Groq / Cerebras / SambaNova / Chutes                        | 域名可达（无 key 返回 401/403/公开列表），本机无法做真实补全                    |
-| Gemini / Mistral / HF Router                                | 本机 egress 超时，**无法实测**                                                  |
+| Gemini / Mistral                                            | 本机 egress 超时，**无法实测**                                                  |
+| ModelScope `/v1/chat/completions`                           | 400 JSON `Invalid model id` → 端点存在且为 OpenAI 兼容                          |
+| Novita `/v3/openai/chat/completions`                        | 403 JSON `INVALID_API_KEY` → OpenAI 兼容                                        |
+| Nebius `/v1/chat/completions`                               | 401 JSON OpenAI 形状错误 → OpenAI 兼容                                          |
+| Fireworks `/inference/v1/chat/completions`                  | 404 JSON `Model not found` → OpenAI 兼容                                        |
+| Together `/v1/chat/completions`                             | 403 HTML（WAF）→ 官方 OpenAI 兼容，未本机实测                                   |
+| Hugging Face `/v1/chat/completions`                         | 本机超时 → 官方 OpenAI 兼容，未本机实测                                         |
 | `models.github.ai`                                          | 本机为 captive-portal 假 200 `text/plain OK`，**不可用**                        |
 
 ### 2.3 免密钥判定
@@ -93,11 +99,10 @@ DeepSeek Web / ChatGPT Web 两个“驱动网页聊天”的 provider 已被**�
 ### 3.4 UI 与 i18n
 
 - 「免费可用」分组只放 `free === 'direct'` 的 provider（当前为 Pollinations，免密钥）。
-- `free === 'quota'` 的 provider 留在「全部服务」，名称后追加 **免费额度** 标签；
-  卡片上显示 `免费额度` 徽标。
-- ChatTab 模型选择下拉：`direct` 显示 **Free**，`quota` 显示 **免费额度**；
-  混合目录只标免费系列（OpenRouter `:free`、Together `-Free`、智谱 `glm-4-flash`），
-  付费模型不标。
+- `free === 'quota'` 的 provider 留在「全部服务」；卡片与聊天模型下拉里的免费模型统一显示
+  **Free**，不再有单独的“免费额度”标签。
+- ChatTab 模型选择下拉：免费模型（`direct` 或 `quota`）显示 **Free**；混合目录只标免费系列
+  （OpenRouter `:free`、Together `-Free`、智谱 `glm-4-flash`），付费模型不标。
 - 不再有「免费网页聊天」分组、网页版卡片、Test/Open/Diagnose 按钮或 ChatTab 提示。
 - 所有文案均在 `src/lib/i18n.ts` 的封闭 `Messages` 中提供 en + zh-CN。
 

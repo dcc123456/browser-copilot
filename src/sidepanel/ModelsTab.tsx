@@ -496,15 +496,8 @@ export default function ModelsTab() {
               <div className="card-head">
                 <span className="card-title">{profile.label}</span>
                 {cardFreeAccess && (
-                  <span
-                    className={[
-                      'rounded border px-1.5 py-0.5 text-[11px]',
-                      cardFreeAccess === 'direct'
-                        ? 'border-ok/30 bg-ok-surface text-ok'
-                        : 'border-accent/30 bg-accent-soft text-accent',
-                    ].join(' ')}
-                  >
-                    {cardFreeAccess === 'direct' ? t.settingsFreeBadge : t.settingsQuotaBadge}
+                  <span className="rounded border border-ok/30 bg-ok-surface px-1.5 py-0.5 text-[11px] text-ok">
+                    {t.settingsFreeBadge}
                   </span>
                 )}
                 {isActive ? (
@@ -612,9 +605,7 @@ export default function ModelsTab() {
             <optgroup label={t.settingsOtherProviders}>
               {otherPresets.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {option.free === 'quota'
-                    ? `${option.label} · ${t.settingsQuotaBadge}`
-                    : option.label}
+                  {option.label}
                 </option>
               ))}
             </optgroup>

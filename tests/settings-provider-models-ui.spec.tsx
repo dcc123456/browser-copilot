@@ -291,7 +291,7 @@ describe('free providers', () => {
     expect(groups).toContain(en.settingsFreeProviders)
   })
 
-  it('tags quota-based providers with the quota badge', async () => {
+  it('shows the Free badge without a quota suffix', async () => {
     const container = await openProviderEditor(
       settingsWith({
         label: 'Groq',
@@ -304,14 +304,14 @@ describe('free providers', () => {
     )
     const en = messagesFor('en')
 
-    const quotaBadge = [...container.querySelectorAll('span')].find(
-      (candidate) => candidate.textContent?.trim() === en.settingsQuotaBadge,
+    const freeBadge = [...container.querySelectorAll('span')].find(
+      (candidate) => candidate.textContent?.trim() === en.settingsFreeBadge,
     )
-    expect(quotaBadge).toBeDefined()
+    expect(freeBadge).toBeDefined()
 
     const groqOption = [...container.querySelectorAll('option')].find((option) =>
       option.textContent?.includes('Groq'),
     )
-    expect(groqOption?.textContent).toContain(en.settingsQuotaBadge)
+    expect(groqOption?.textContent?.trim()).toBe('Groq')
   })
 })
