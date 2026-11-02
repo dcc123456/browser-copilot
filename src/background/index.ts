@@ -17,9 +17,6 @@ import { rejectionMessage, sanitizeAttachments, toAttachmentSummaries } from '..
 import { getUserDisplayText, toRestoreMessages } from './restore'
 import { workerMessages } from './worker-messages'
 import { streamModel } from './model-transport'
-import { streamWebChat } from './web-chat/transport'
-import { openWebChatWindow } from './web-chat/window'
-import { diagnoseWebChat } from './web-chat/diagnose'
 import {
   answerAskUser,
   answerConfirmation,
@@ -114,7 +111,7 @@ import {
   isWorkflowTriggerAlarm,
   handleWorkflowTriggerAlarm,
 } from './workflow-triggers'
-import { validateProfile, webSiteOf } from '../lib/providers'
+import { validateProfile } from '../lib/providers'
 import type { ElementPickerFormat } from '../lib/types'
 import { normalizeSkill, validateSkill, wrapSkillDirective } from '../lib/skills'
 import { normalizeAgent, validateAgent } from '../lib/agents'
@@ -213,7 +210,6 @@ import {
   debugRunLabel,
   takeoverAutoRunBudget,
   takeoverMaxAttempts,
-  repairProviderOf,
   takeoverProviderOf,
   type TakeoverReasonKind,
 } from '../lib/workflow/ai-takeover'
@@ -1553,17 +1549,6 @@ async function handleCommand(
       if (problems.length > 0) {
         throw new Error(problems.map((problem) => problem.message).join(' '))
       }
-      if (command.profile.transport === 'web') {
-        try {
-          await streamWebChat(command.profile, {
-            messages: [{ role: 'user', content: 'ping' }],
-            providerLabel: command.profile.label,
-          })
-        } catch (error) {
-          throw await localizeLlmFailure(error)
-        }
-        return { type: 'provider.test' }
-      }
       try {
         await testConnection({
           apiKey: command.profile.apiKey,
@@ -1584,34 +1569,12 @@ async function handleCommand(
     }
 
     case 'provider.models': {
-      if (command.profile.transport === 'web') {
-        const models = command.profile.models?.length
-          ? command.profile.models
-          : [command.profile.model]
-        return {
-          type: 'provider.models',
-          models: models.filter((model) => model.length > 0),
-        }
-      }
       const models = await listModels({
         apiKey: command.profile.apiKey,
         baseUrl: command.profile.baseUrl,
         ...(command.profile.headers ? { headers: command.profile.headers } : {}),
       })
       return { type: 'provider.models', models }
-    }
-
-    case 'provider.openWeb': {
-      const site = webSiteOf(command.profile.baseUrl)
-      if (!site) throw new Error('This provider is not a supported web chat.')
-      await openWebChatWindow(site)
-      return { type: 'provider.openWeb' }
-    }
-
-    case 'provider.diagnoseWeb': {
-      const site = webSiteOf(command.profile.baseUrl)
-      if (!site) throw new Error('This provider is not a supported web chat.')
-      return { type: 'provider.diagnoseWeb', diagnosis: await diagnoseWebChat(site) }
     }
 
     case 'page.read':
@@ -2132,7 +2095,7 @@ async function handleCommand(
       const repairStarted =
         r.outcome === 'failed' && generatedRun && !takeover && !!r.trace && settings.autoRepairOnRun
       if (repairStarted) {
-        const repairModelConfig = repairProviderOf(settings)
+        const repairModelConfig = takeoverProviderOf(settings)
         void startBackgroundAutoRepair({
           workflow,
           runId: r.runId,
@@ -2689,7 +2652,7 @@ async function handleCommand(
         ...(command.windowId !== undefined ? { scopeWindowId: command.windowId } : {}),
       })
       const settings = await getSettings()
-      const modelConfig = repairProviderOf(settings)
+      const modelConfig = takeoverProviderOf(settings)
       const proposer = modelConfig
         ? createAiRepairProposer({
             apiKey: modelConfig.apiKey,
@@ -3118,7 +3081,7 @@ async function handleCommand(
       // Engine dependencies (same construction as workflows.repair).
       const recoveryRunner = createBackgroundRunner({ executeWorkflow })
       const recoverySettings = await getSettings()
-      const recoveryModel = repairProviderOf(recoverySettings)
+      const recoveryModel = takeoverProviderOf(recoverySettings)
       const recoveryProposer = recoveryModel
         ? createAiRepairProposer({
             apiKey: recoveryModel.apiKey,
@@ -3373,7 +3336,7 @@ async function handleCommand(
       const target = await getWorkflow(command.id)
       if (!target) throw new Error('Workflow not found.')
       const settings = await getSettings()
-      const modelConfig = repairProviderOf(settings)
+      const modelConfig = takeoverProviderOf(settings)
       retain()
       try {
         const outcome = await startBackgroundAutoRepair({

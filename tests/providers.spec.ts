@@ -9,11 +9,9 @@ import {
   normalizeBaseUrl,
   normalizeSettingsPayload,
   profileFromPreset,
-  providerCanCallTools,
   providerHasCredentials,
   providerNeedsKey,
   validateProfile,
-  webSiteOf,
   type ProviderProfile,
 } from '../src/lib/providers'
 import {
@@ -22,7 +20,7 @@ import {
   normalizeStoredSettings,
 } from '../src/lib/storage'
 import { DEFAULT_FREE_PROVIDER_ID } from '../src/lib/free-provider-default'
-import { RUN_WINDOW_LIMITS, normalizeProviderTransport } from '../src/lib/types'
+import { RUN_WINDOW_LIMITS } from '../src/lib/types'
 
 const en = messagesFor('en')
 const zh = messagesFor('zh-CN')
@@ -178,28 +176,13 @@ describe('free providers', () => {
     expect(isKeylessEndpoint('not a url')).toBe(false)
   })
 
-  it('maps the two supported web-chat sites by exact hostname', () => {
-    expect(webSiteOf('https://chat.deepseek.com/')).toBe('deepseek')
-    expect(webSiteOf('https://chatgpt.com/')).toBe('chatgpt')
-    expect(webSiteOf('https://chatgpt.com.evil.com/')).toBeUndefined()
-    expect(webSiteOf('https://api.deepseek.com/v1')).toBeUndefined()
-  })
-
-  it('accepts an empty key for keyless and web profiles only', () => {
+  it('accepts an empty key for the keyless endpoint only', () => {
     const pollinations = profile({
       baseUrl: 'https://text.pollinations.ai/openai',
       apiKey: '',
       model: 'openai-fast',
     })
     expect(validateProfile(pollinations, en)).toEqual([])
-
-    const web = profile({
-      transport: 'web',
-      baseUrl: 'https://chat.deepseek.com/',
-      apiKey: '',
-      model: 'deepseek-web',
-    })
-    expect(validateProfile(web, en)).toEqual([])
 
     const paid = profile({
       baseUrl: 'https://api.deepseek.com/v1',
@@ -209,17 +192,7 @@ describe('free providers', () => {
     expect(validateProfile(paid, en).map((problem) => problem.field)).toEqual(['apiKey'])
   })
 
-  it('rejects a web profile whose site has no adapter', () => {
-    const unknown = profile({
-      transport: 'web',
-      baseUrl: 'https://chat.example.com/',
-      apiKey: '',
-      model: 'x',
-    })
-    expect(validateProfile(unknown, en).map((problem) => problem.field)).toEqual(['baseUrl'])
-  })
-
-  it('prefills a usable model only for keyless and web presets', () => {
+  it('prefills a usable model only for the keyless preset', () => {
     const pollinations = profileFromPreset(findPreset('pollinations')!, 'p')
     expect(pollinations).toMatchObject({
       apiKey: '',
@@ -227,20 +200,12 @@ describe('free providers', () => {
       models: ['openai-fast'],
     })
 
-    const web = profileFromPreset(findPreset('deepseek-web')!, 'w')
-    expect(web).toMatchObject({
-      transport: 'web',
-      apiKey: '',
-      model: 'deepseek-web',
-      models: ['deepseek-web'],
-    })
-
     const ark = profileFromPreset(findPreset('ark')!, 'a')
     expect(ark.model).toBe('')
     expect(ark.models).toEqual([])
   })
 
-  it('reports credentials and tool capability per transport', () => {
+  it('reports credentials from the keyless host', () => {
     expect(providerNeedsKey(profile({ apiKey: '' }))).toBe(true)
     expect(
       providerNeedsKey(profile({ apiKey: '', baseUrl: 'https://text.pollinations.ai/openai' })),
@@ -251,13 +216,6 @@ describe('free providers', () => {
         profile({ apiKey: '', baseUrl: 'https://text.pollinations.ai/openai' }),
       ),
     ).toBe(true)
-    expect(
-      providerHasCredentials(
-        profile({ apiKey: '', transport: 'web', baseUrl: 'https://chatgpt.com/' }),
-      ),
-    ).toBe(true)
-    expect(providerCanCallTools(profile())).toBe(true)
-    expect(providerCanCallTools(profile({ transport: 'web' }))).toBe(false)
   })
 
   it('localizes every preset hint in both locales', () => {
@@ -270,19 +228,8 @@ describe('free providers', () => {
 
   it('finds a free preset from its base URL after a custom edit', () => {
     expect(findPresetByBaseUrl('https://text.pollinations.ai/openai')?.id).toBe('pollinations')
-    expect(findPresetByBaseUrl('https://chat.deepseek.com/')?.id).toBe('deepseek-web')
     expect(findPresetByBaseUrl('https://api.deepseek.com/v1')?.id).toBe('deepseek')
     expect(findPresetByBaseUrl('https://example.com/v1')).toBeUndefined()
-  })
-
-  it('normalizes an unknown transport back to the legacy HTTP path', () => {
-    expect(normalizeProviderTransport({ transport: 'web' as const })).toEqual({
-      transport: 'web',
-    })
-    expect(normalizeProviderTransport({ id: 'x', transport: 'ftp' as never })).toEqual({
-      id: 'x',
-    })
-    expect(normalizeProviderTransport({ id: 'x' })).toEqual({ id: 'x' })
   })
 })
 
@@ -317,6 +264,29 @@ describe('normalizeStoredSettings', () => {
     const settings = normalizeStoredSettings({ providers: [], activeProviderId: '' })
     expect(settings.providers).toEqual([])
     expect(settings.activeProviderId).toBe('')
+  })
+
+  it('drops the removed web-chat profiles and repairs the pointer', () => {
+    const legacyWeb = {
+      ...profile({ id: 'web', presetId: 'deepseek-web', apiKey: '' }),
+      transport: 'web',
+    }
+    const legacyByPreset = profile({ id: 'web2', presetId: 'chatgpt-web', apiKey: '' })
+    const settings = normalizeStoredSettings({
+      providers: [legacyWeb, legacyByPreset, profile({ id: 'p2', presetId: 'deepseek' })],
+      activeProviderId: 'web',
+    })
+
+    expect(settings.providers.map((entry) => entry.id)).toEqual(['p2'])
+    expect(settings.activeProviderId).toBe('p2')
+  })
+
+  it('leaves no providers when every stored provider was a removed web profile', () => {
+    const legacyWeb = {
+      ...profile({ id: 'web', presetId: 'deepseek-web', apiKey: '' }),
+      transport: 'web',
+    }
+    expect(normalizeStoredSettings({ providers: [legacyWeb] }).providers).toEqual([])
   })
 
   it('passes a valid record through unchanged', () => {

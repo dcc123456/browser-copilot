@@ -17,8 +17,7 @@
  * @module background/workflow-engine/ai-takeover
  */
 import { getSettings } from '../../lib/storage'
-import { providerCanCallTools, providerHasCredentials } from '../../lib/providers'
-import { workerMessages } from '../worker-messages'
+import { providerHasCredentials } from '../../lib/providers'
 import { interpolate } from '../../lib/workflow/interpolate'
 import {
   HOPELESS_REASON_KINDS,
@@ -194,9 +193,6 @@ export function createAiTakeover(deps: AiTakeoverDeps = {}): AiTakeoverHook {
       deps.provider ?? settings.providers.find((p) => p.id === settings.activeProviderId)
     if (!provider || !providerHasCredentials(provider)) {
       return fail('未配置模型 provider / API Key，AI 接管不可用', 0)
-    }
-    if (!providerCanCallTools(provider)) {
-      return fail((await workerMessages()).settingsWebChatNoTools, 0)
     }
 
     // M3-17: optional read-only Observer preflight. When enabled, inspect the

@@ -34,7 +34,6 @@ import {
   type WireToolCall,
 } from '../lib/llm'
 import { streamModel } from './model-transport'
-import { providerCanCallTools } from '../lib/providers'
 import {
   compactHistory,
   compactThresholdFor,
@@ -4978,7 +4977,6 @@ interface SummarizerConfig {
   baseUrl: string
   model: string
   headers?: Record<string, string>
-  transport?: ProviderProfile['transport']
   label: string
   attribution?: TokenAttribution
 }
@@ -4992,7 +4990,6 @@ async function summarizeTranscript(config: SummarizerConfig, transcript: string)
     apiKey: config.apiKey,
     model: config.model,
     ...(config.headers ? { headers: config.headers } : {}),
-    ...(config.transport ? { transport: config.transport } : {}),
   }
   const result = await streamModel(
     profile,
@@ -5020,17 +5017,13 @@ async function summarizeTranscript(config: SummarizerConfig, transcript: string)
  * `background/token-accounting`).
  */
 function summarizerConfigFor(
-  provider: Pick<
-    ProviderProfile,
-    'apiKey' | 'baseUrl' | 'model' | 'headers' | 'transport' | 'label'
-  >,
+  provider: Pick<ProviderProfile, 'apiKey' | 'baseUrl' | 'model' | 'headers' | 'label'>,
   attribution: TokenAttribution,
 ) {
   return {
     apiKey: provider.apiKey,
     baseUrl: provider.baseUrl,
     model: provider.model,
-    transport: provider.transport,
     label: provider.label,
     ...(provider.headers ? { headers: provider.headers } : {}),
     attribution: { ...attribution, consumer: 'context-compaction' as const },
@@ -5163,13 +5156,6 @@ export async function runAgentTurn(
         ? visibleSkills.filter((skill) => skill.id !== modeSkill.id)
         : visibleSkills
   const messages: Messages = messagesFor(effectiveLocale(settings.locale, navigator.language))
-
-  // A web-chat provider cannot receive tool schemas. Refuse the tool-driven
-  // modes rather than silently running a crippled agent; chat mode is fine.
-  if (!providerCanCallTools(provider) && initialMode !== 'chat') {
-    deps.send({ type: 'status', text: messages.settingsWebChatNoTools })
-    return null
-  }
 
   // --- Specialist sub-agent turn -------------------------------------------
   // A delegated run gets the agent's identity prompt + linked skills, a

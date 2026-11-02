@@ -47,10 +47,10 @@ import type {
 import {
   DEFAULT_LOCAL_AGENT_URL,
   RUN_WINDOW_LIMITS,
+  isRemovedWebProvider,
   normalizeElementPickerFormat,
   normalizeLocalAgentUrl,
   normalizeProviderModels,
-  normalizeProviderTransport,
   normalizeRunWindowLimit,
   entryFields,
 } from './types'
@@ -98,8 +98,11 @@ const KEY_CONVERSATIONS_META = 'conversations'
  *   in the slash menu).
  * - v8: an install with no providers starts on the keyless Pollinations
  *   provider, so the plugin is usable before any model setup.
+ * - v9: drop the removed DeepSeek/ChatGPT web-chat provider profiles; if the
+ *   active pointer named one, it falls back to the first remaining provider
+ *   (or Pollinations when none remain).
  */
-export const SCHEMA_VERSION = 8
+export const SCHEMA_VERSION = 9
 
 export const DEFAULT_SETTINGS: Settings = {
   providers: [defaultFreeProvider()],
@@ -203,9 +206,9 @@ export function normalizeStoredSettings(raw: unknown): Settings {
           (profile): profile is ProviderProfile =>
             !!profile && typeof profile === 'object' && typeof profile.id === 'string',
         )
+        .filter((profile) => !isRemovedWebProvider(profile))
         .map(normalizeThinkingProfile)
         .map(normalizeProviderModels)
-        .map(normalizeProviderTransport)
     : // A missing field is a fresh/legacy install: start on the free provider.
       // An explicit empty array is a user choice and stays empty.
       value.providers === undefined
@@ -540,17 +543,16 @@ export async function saveProvider(profile: ProviderProfile): Promise<Settings> 
     if (index === -1) providers.push(profile)
     else providers[index] = profile
     // A first user profile becomes active automatically. The seeded free
-    // provider is the only profile on a fresh install, so adding a real HTTP
-    // provider must still take over. A web-chat provider stays opt-in: adding
-    // it must not silently replace the in-panel chat with a background window.
+    // provider is the only profile on a fresh install, so adding a real
+    // provider must still take over — otherwise it would sit beside the
+    // default while the default kept answering.
     const onlySeededDefault =
       settings.providers.length === 1 &&
       settings.providers[0]?.id === DEFAULT_FREE_PROVIDER_ID &&
       profile.id !== DEFAULT_FREE_PROVIDER_ID
-    const activeProviderId =
-      onlySeededDefault && profile.transport !== 'web'
-        ? profile.id
-        : settings.activeProviderId || profile.id
+    const activeProviderId = onlySeededDefault
+      ? profile.id
+      : settings.activeProviderId || profile.id
     return setSettingsLocked({ providers, activeProviderId })
   })
 }

@@ -567,17 +567,6 @@ export function takeoverProviderOf(settings: Settings): ProviderProfile | undefi
   )
 }
 
-/**
- * The repair provider when it can drive the HTTP repair pipeline.
- *
- * A web-chat profile has no HTTP endpoint and cannot call tools, so it must
- * not be handed to the auto-repair/repair proposers.
- */
-export function repairProviderOf(settings: Settings): ProviderProfile | undefined {
-  const provider = takeoverProviderOf(settings)
-  return provider && provider.transport !== 'web' ? provider : undefined
-}
-
 /** Applies {@link TAKEOVER_TEMPERATURE} unless the profile already sets one. */
 function withLowTemperature(profile: ProviderProfile): ProviderProfile {
   return typeof profile.temperature === 'number'

@@ -15,8 +15,7 @@
   OpenRouter、Moonshot、百炼、硅基流动，或本地 Ollama/LM Studio，自带密钥即可。
 - 🆓 **默认就能免费使用。** 全新安装默认启用 Pollinations（免密钥、无需配置）。
   Gemini、Groq、Cerebras、SambaNova、Chutes、OpenRouter、GitHub Models、智谱
-  GLM-4-Flash 提供免费额度；也可以让扩展在当前窗口的不激活标签页中驱动你已登录的 DeepSeek/ChatGPT
-  网页聊天（仅聊天/纯文本——网页版不能调用工具）。
+  GLM-4-Flash 提供免费额度。
 - 🎚️ **自主程度由你决定。** 五种模式，从纯聊天到全自动，另有把一次执行沉淀成工作流的
   工作流生成模式；半自动只对有风险的动作（付款、密码、删除、发送）先问，读页面和滚动直接执行。
 - 💸 **只发这一步需要的工具。** 专项页面工具（滚动、按键、表单控件、视觉、脚本）按组
@@ -287,21 +286,16 @@ JavaScript 代码块会在页面里执行任意代码——只用在你信任的
 
 **免费选项**：全新安装默认已启用 Pollinations。设置 → 模型服务 里有一个**免费可用**
 分组；从预设列表里选择即可添加。Pollinations 完全不需要密钥；其余需要免费注册拿 key。
-两个网页版预设会在当前窗口的不激活标签页中驱动免费网页聊天，只用于聊天和纯文本步骤——网页无法接收工具
-schema，需要操作页面时仍要选 API 服务商。
 
-| 免费预设                         | 接口地址                                                  | 说明                                                            |
-| -------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------- |
-| Pollinations                     | `https://text.pollinations.ai/openai`                     | 无需密钥；匿名档有限流，支持工具调用                            |
-| Google AI Studio (Gemini)        | `https://generativelanguage.googleapis.com/v1beta/openai` | 用 AI Studio key 的免费额度                                     |
-| Groq / Cerebras / SambaNova      | 各自端点                                                  | 用 key 的免费额度；工具支持因模型而异                           |
-| OpenRouter                       | `https://openrouter.ai/api/v1`                            | 免费模型以 `:free` 结尾；目录会轮换                             |
-| GitHub Models                    | `https://models.github.ai/inference`                      | 用 GitHub PAT 免费使用 GPT 模型                                 |
-| DeepSeek 网页版 / ChatGPT 网页版 | `https://chat.deepseek.com/` / `https://chatgpt.com/`     | 当前窗口的不激活标签页驱动你已登录的免费网页聊天；仅聊天/纯文本 |
+| 免费预设                    | 接口地址                                                  | 说明                                  |
+| --------------------------- | --------------------------------------------------------- | ------------------------------------- |
+| Pollinations                | `https://text.pollinations.ai/openai`                     | 无需密钥；匿名档有限流，支持工具调用  |
+| Google AI Studio (Gemini)   | `https://generativelanguage.googleapis.com/v1beta/openai` | 用 AI Studio key 的免费额度           |
+| Groq / Cerebras / SambaNova | 各自端点                                                  | 用 key 的免费额度；工具支持因模型而异 |
+| OpenRouter                  | `https://openrouter.ai/api/v1`                            | 免费模型以 `:free` 结尾；目录会轮换   |
+| GitHub Models               | `https://models.github.ai/inference`                      | 用 GitHub PAT 免费使用 GPT 模型       |
 
-DeepSeek 与 OpenAI 的官方 API 是收费的；免费 DeepSeek/GPT 访问来自上面的免费额度和网页版。
-添加网页版预设不会自动切换当前模型；需要时点「使用这个」。若只想在插件里聊天，保持
-Pollinations 或某个 API 服务商为当前模型即可。
+DeepSeek 与 OpenAI 的官方 API 是收费的；免费 DeepSeek/GPT 访问来自上面的免费额度。
 
 **怎么选**：要让它自主读页面/动手，必须选支持工具调用的模型。日常用便宜快的
 （`deepseek-chat`、`gpt-4o-mini`、`qwen-plus`），难任务用推理模型，敏感内容用本地模型。

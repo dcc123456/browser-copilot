@@ -17,9 +17,7 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
   or a local Ollama/LM Studio. Bring your own key.
 - 🆓 **Free by default.** A fresh install starts on the keyless Pollinations
   provider — no key, no setup. Gemini, Groq, Cerebras, SambaNova, Chutes,
-  OpenRouter, GitHub Models and Zhipu GLM-4-Flash have free tiers; or let the
-  extension drive your logged-in DeepSeek/ChatGPT web chat in an inactive tab in
-  your current window (chat/text only — web chat cannot call tools).
+  OpenRouter, GitHub Models and Zhipu GLM-4-Flash have free tiers.
 - 🎚️ **You choose how autonomous it is.** Five modes from plain chat to full
   auto, plus a workflow-generate mode that turns a run into a reusable
   workflow; semi-auto asks only before risky actions — payments, passwords,
@@ -353,24 +351,18 @@ configuration, not a code path — unlisted endpoints work too.
 
 **Free options.** A fresh install already has Pollinations active. Settings →
 Models groups free providers under **Free to try**; pick one from the preset
-list to add it. Pollinations is keyless; the others need a free account key. The two web-chat presets drive the
-free site in an inactive tab in your current window and are deliberately limited to chat and
-text-only steps — a web page cannot receive tool schemas, so page automation
-must use an API provider.
+list to add it. Pollinations is keyless; the others need a free account key.
 
-| Free preset                 | Base URL                                                  | Notes                                                                                        |
-| --------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Pollinations                | `https://text.pollinations.ai/openai`                     | No key; anonymous tier, rate-limited, tool calls supported                                   |
-| Google AI Studio (Gemini)   | `https://generativelanguage.googleapis.com/v1beta/openai` | Free tier with an AI Studio key                                                              |
-| Groq / Cerebras / SambaNova | vendor endpoints                                          | Free tiers with a key; tool support varies                                                   |
-| OpenRouter                  | `https://openrouter.ai/api/v1`                            | Free models end in `:free`; the catalog rotates                                              |
-| GitHub Models               | `https://models.github.ai/inference`                      | Free GPT models with a GitHub PAT                                                            |
-| DeepSeek Web / ChatGPT Web  | `https://chat.deepseek.com/` / `https://chatgpt.com/`     | Drives your logged-in free web chat in an inactive tab in the current window; chat/text only |
+| Free preset                 | Base URL                                                  | Notes                                                      |
+| --------------------------- | --------------------------------------------------------- | ---------------------------------------------------------- |
+| Pollinations                | `https://text.pollinations.ai/openai`                     | No key; anonymous tier, rate-limited, tool calls supported |
+| Google AI Studio (Gemini)   | `https://generativelanguage.googleapis.com/v1beta/openai` | Free tier with an AI Studio key                            |
+| Groq / Cerebras / SambaNova | vendor endpoints                                          | Free tiers with a key; tool support varies                 |
+| OpenRouter                  | `https://openrouter.ai/api/v1`                            | Free models end in `:free`; the catalog rotates            |
+| GitHub Models               | `https://models.github.ai/inference`                      | Free GPT models with a GitHub PAT                          |
 
 The official DeepSeek and OpenAI API endpoints are paid. Free DeepSeek/GPT
-access comes through the free tiers and web chats above. Adding a web-chat
-preset does not switch the active model; choose **Use this** when you want it.
-To chat only inside the panel, keep Pollinations or an API provider active.
+access comes through the free tiers above.
 
 **Choosing one:** function calling is required for autonomous read/act. Use a
 cheap fast model (`deepseek-chat`, `gpt-4o-mini`, `qwen-plus`) for daily work, a

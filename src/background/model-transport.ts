@@ -1,8 +1,8 @@
 /**
- * One entry point for a model completion, routed by the profile's transport.
+ * One entry point for a model completion over a provider profile.
  *
- * `lib/llm.ts` stays HTTP-only so the Runner can keep importing it; web-chat
- * profiles branch to the background DOM transport instead.
+ * Keeps the profile→request field mapping (key, base URL, model, headers) in
+ * one place; `lib/llm.ts` stays HTTP-only so the Runner can keep importing it.
  *
  * @module background/model-transport
  */
@@ -13,7 +13,6 @@ import {
   type StreamResult,
 } from '../lib/llm'
 import type { ProviderProfile } from '../lib/providers'
-import { streamWebChat } from './web-chat/transport'
 
 export type ModelCall = Omit<StreamRequest, 'apiKey' | 'baseUrl' | 'model' | 'headers'>
 
@@ -22,9 +21,6 @@ export async function streamModel(
   call: ModelCall,
   handlers: StreamHandlers = {},
 ): Promise<StreamResult> {
-  if (profile.transport === 'web') {
-    return streamWebChat(profile, call, handlers)
-  }
   return streamCompletion(
     {
       ...call,

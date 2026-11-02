@@ -2770,11 +2770,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
     [providers],
   )
 
-  const activeProviderId = modelSelection.includes('\u001f')
-    ? modelSelection.slice(0, modelSelection.indexOf('\u001f'))
-    : ''
-  const activeProvider = providers.find((profile) => profile.id === activeProviderId)
-
   /** The model name on the picker button; the provider is implied by its group. */
   const modelSeparator = modelSelection.indexOf('\u001f')
   const selectedModelName = modelSeparator < 0 ? '' : modelSelection.slice(modelSeparator + 1)
@@ -4419,16 +4414,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
       >
         <span className="composer-resize-grip" />
       </div>
-
-      {activeProvider?.transport === 'web' && (
-        <div
-          className="mx-3 mb-2 rounded-lg border border-warn/30 bg-warn-surface px-3 py-2 text-[12px] leading-relaxed text-warn"
-          role="status"
-        >
-          <p>{t.chatWebChatProviderHint}</p>
-          {mode !== 'chat' && <p className="mt-1">{t.chatWebChatModeWarning}</p>}
-        </div>
-      )}
 
       <div className="composer" style={{ minHeight: composerHeight }}>
         {/*

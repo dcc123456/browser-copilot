@@ -10,7 +10,7 @@
  * @module lib/messages
  */
 
-import type { ProviderProfile, WebChatDiagnosis } from './providers'
+import type { ProviderProfile } from './providers'
 import type { ElementPickerFormat } from './types'
 import type {
   Agent,
@@ -160,8 +160,6 @@ export type Command =
   | { type: 'provider.activate'; id: string; model?: string }
   | { type: 'provider.test'; profile: ProviderProfile }
   | { type: 'provider.models'; profile: ProviderProfile }
-  | { type: 'provider.openWeb'; profile: ProviderProfile }
-  | { type: 'provider.diagnoseWeb'; profile: ProviderProfile }
   | { type: 'page.read'; maxChars?: number }
   /**
    * Reports whether the active tab can be read at all.
@@ -607,8 +605,6 @@ export type CommandResult =
   | { type: 'agents.reset'; agent: Agent }
   | { type: 'provider.test' }
   | { type: 'provider.models'; models: string[] }
-  | { type: 'provider.openWeb' }
-  | { type: 'provider.diagnoseWeb'; diagnosis: WebChatDiagnosis }
   | { type: 'page.read'; page: PageContext }
   | {
       type: 'page.check'

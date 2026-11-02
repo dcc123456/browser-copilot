@@ -24,18 +24,13 @@ import { LOCALES, type LocaleSetting, type Messages } from './i18n'
 import { normalizeLocalAgentBindings } from './storage'
 import { normalizeThinkingProfile, type ThinkingLevel } from './thinking'
 import {
+  isRemovedWebProvider,
   normalizeElementPickerFormat,
   normalizeLocalAgentUrl,
   normalizeProviderModels,
-  normalizeProviderTransport,
   normalizeRunWindowLimit,
 } from './types'
-import type {
-  AgentMode,
-  ElementPickerFormat,
-  ProviderTransport,
-  UnattendedWindowPolicy,
-} from './types'
+import type { AgentMode, ElementPickerFormat, UnattendedWindowPolicy } from './types'
 
 /** Keys whose message value is a plain string (not an interpolation function). */
 export type TextKey = {
@@ -49,11 +44,6 @@ export interface ProviderProfile {
   label: string
   /** Which preset this was created from; `'custom'` once freely edited. */
   presetId: string
-  /**
-   * How requests reach the model. Omitted means `'http'`; `'web'` routes to the
-   * background tab transport that drives a logged-in free web chat.
-   */
-  transport?: ProviderTransport
   /** Endpoint base. `/chat/completions` is appended. */
   baseUrl: string
   apiKey: string
@@ -98,8 +88,6 @@ export interface ProviderPreset {
   hintKey?: TextKey
   /** Docs URL for keys/models. */
   docsUrl?: string
-  /** `'web'` presets drive a free logged-in web chat instead of an API. */
-  transport?: ProviderTransport
   /** Vendor offers a standing no-cost tier. */
   free?: boolean
   /** No credential at all is needed. */
@@ -177,30 +165,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     hint: 'Free tier via a Chutes key. Often hosts DeepSeek models; tool support varies by model.',
     hintKey: 'presetChutesHint',
     docsUrl: 'https://chutes.ai/',
-  },
-  {
-    id: 'deepseek-web',
-    label: 'DeepSeek Web',
-    baseUrl: 'https://chat.deepseek.com/',
-    suggestedModel: 'deepseek-web',
-    transport: 'web',
-    free: true,
-    keyless: true,
-    tools: false,
-    hint: 'Drives your logged-in free DeepSeek web chat in a background window. Chat/text only; no tool calling.',
-    hintKey: 'presetDeepSeekWebHint',
-  },
-  {
-    id: 'chatgpt-web',
-    label: 'ChatGPT Web',
-    baseUrl: 'https://chatgpt.com/',
-    suggestedModel: 'chatgpt-web',
-    transport: 'web',
-    free: true,
-    keyless: true,
-    tools: false,
-    hint: 'Drives your logged-in free ChatGPT web chat in a background window. Chat/text only; no tool calling.',
-    hintKey: 'presetChatGPTWebHint',
   },
   {
     id: 'deepseek',
@@ -455,10 +419,6 @@ export function validateProfile(profile: ProviderProfile, t: Messages): ProfileP
     }
   }
 
-  if (profile.transport === 'web' && !webSiteOf(profile.baseUrl)) {
-    // A web profile with an unknown site has no adapter to drive.
-    problems.push({ field: 'baseUrl', message: t.errorProviderBaseUrlInvalid })
-  }
   if (providerNeedsKey(profile) && !profile.apiKey.trim()) {
     problems.push({ field: 'apiKey', message: t.errorProviderApiKey })
   }
@@ -472,15 +432,14 @@ export function validateProfile(profile: ProviderProfile, t: Messages): ProfileP
 
 /** Builds a profile from a preset, ready to be edited. */
 export function profileFromPreset(preset: ProviderPreset, id: string): ProviderProfile {
-  // Keyless and web profiles have exactly one sensible model and no key, so
-  // they are usable as-is. Every other preset keeps the empty-model contract:
-  // a prefilled model would filter fetched-model suggestions down to it.
-  const usableAsIs = preset.keyless === true || preset.transport === 'web'
+  // Keyless profiles have exactly one sensible model and no key, so they are
+  // usable as-is. Every other preset keeps the empty-model contract: a
+  // prefilled model would filter fetched-model suggestions down to it.
+  const usableAsIs = preset.keyless === true
   return {
     id,
     label: preset.label,
     presetId: preset.id,
-    ...(preset.transport === 'web' ? { transport: 'web' as const } : {}),
     baseUrl: preset.baseUrl,
     apiKey: '',
     model: usableAsIs ? preset.suggestedModel : '',
@@ -503,44 +462,6 @@ export function isLocalEndpoint(baseUrl: string): boolean {
   }
 }
 
-/** Free web chats this extension can drive in a background tab. */
-export type WebChatSiteId = 'deepseek' | 'chatgpt'
-
-/** One selector candidate's result on the live page. */
-export interface WebChatSelectorCheck {
-  candidate: string
-  found: boolean
-  matched?: number
-  usedSpec?: string
-}
-
-/** What the Diagnose action reports for a web-chat site. */
-export interface WebChatDiagnosis {
-  site: WebChatSiteId
-  url: string
-  title: string
-  windowId: number
-  tabId: number
-  selectors: Record<
-    'composer' | 'send' | 'reply' | 'stop' | 'login' | 'newChat',
-    WebChatSelectorCheck[]
-  >
-}
-
-const WEB_CHAT_HOSTS: Record<string, WebChatSiteId> = {
-  'chat.deepseek.com': 'deepseek',
-  'chatgpt.com': 'chatgpt',
-}
-
-/** Which web-chat adapter (if any) a base URL points at. */
-export function webSiteOf(baseUrl: string): WebChatSiteId | undefined {
-  try {
-    return WEB_CHAT_HOSTS[new URL(normalizeBaseUrl(baseUrl)).hostname]
-  } catch {
-    return undefined
-  }
-}
-
 /** Hosts that serve completions with no credential at all. */
 const KEYLESS_HOSTS = new Set(['text.pollinations.ai'])
 
@@ -558,17 +479,12 @@ export function isKeylessEndpoint(baseUrl: string): boolean {
 
 /** True when this profile cannot work without an API key. */
 export function providerNeedsKey(profile: ProviderProfile): boolean {
-  return profile.transport !== 'web' && !isKeylessEndpoint(profile.baseUrl)
+  return !isKeylessEndpoint(profile.baseUrl)
 }
 
 /** True when a request can be attempted at all. */
 export function providerHasCredentials(profile: ProviderProfile): boolean {
   return !providerNeedsKey(profile) || profile.apiKey.trim().length > 0
-}
-
-/** Web-chat profiles never receive the `tools` field. */
-export function providerCanCallTools(profile: ProviderProfile): boolean {
-  return profile.transport !== 'web'
 }
 
 /** Finds the preset whose endpoint matches, including after a custom edit. */
@@ -631,9 +547,9 @@ export function normalizeSettingsPayload(raw: unknown): {
             typeof profile === 'object' &&
             typeof (profile as ProviderProfile).id === 'string',
         )
+        .filter((profile) => !isRemovedWebProvider(profile))
         .map(normalizeThinkingProfile)
         .map(normalizeProviderModels)
-        .map(normalizeProviderTransport)
     : []
   const activeRaw = value.activeProviderId
   const activeProviderId = typeof activeRaw === 'string' ? activeRaw : ''

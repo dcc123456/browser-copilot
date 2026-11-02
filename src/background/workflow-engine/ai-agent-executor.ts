@@ -32,8 +32,7 @@
  */
 
 import { getSettings } from '../../lib/storage'
-import { providerCanCallTools, providerHasCredentials } from '../../lib/providers'
-import { workerMessages } from '../worker-messages'
+import { providerHasCredentials } from '../../lib/providers'
 import { AI_AGENT_FORBIDDEN_TOOLS } from '../../lib/tool-catalog'
 import { interpolate } from '../../lib/workflow/interpolate'
 import { sanitizeModelAnswer } from '../../lib/model-output'
@@ -290,9 +289,6 @@ export const aiAgent: BlockExecutor = async (data, ctx) => {
   const provider = settings.providers.find((p) => p.id === settings.activeProviderId)
   if (!provider || !providerHasCredentials(provider)) {
     return fail('AI 智能体: 未配置模型 provider / API Key')
-  }
-  if (!providerCanCallTools(provider)) {
-    return fail((await workerMessages()).settingsWebChatNoTools)
   }
 
   let elementText = ''

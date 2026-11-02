@@ -319,19 +319,20 @@ export function normalizeProviderModels<T extends { model?: string; models?: unk
   return { ...profile, model: models.includes(active) ? active : (models[0] ?? ''), models }
 }
 
-/** How a provider's requests are delivered: HTTP API or a driven web chat. */
-export type ProviderTransport = 'http' | 'web'
+const REMOVED_WEB_PRESETS = new Set(['deepseek-web', 'chatgpt-web'])
 
 /**
- * Keeps only the known transport value; anything else (including absence)
- * means the legacy HTTP path, so old records and hand-edits stay usable.
+ * True for a profile created by the removed DeepSeek/ChatGPT web-chat presets.
+ *
+ * `transport` is no longer part of the profile type, but old stored records and
+ * stale workers can still carry it, so both the field and the preset id are
+ * checked.
  */
-export function normalizeProviderTransport<T extends object>(profile: T): T {
-  const transport = (profile as { transport?: unknown }).transport
-  if (transport === 'web' || transport === undefined) return profile
-  const rest = { ...profile }
-  delete (rest as { transport?: unknown }).transport
-  return rest
+export function isRemovedWebProvider(profile: {
+  presetId?: unknown
+  transport?: unknown
+}): boolean {
+  return profile.transport === 'web' || REMOVED_WEB_PRESETS.has(String(profile.presetId ?? ''))
 }
 
 /** 本地 Agent 接入默认连接地址。 */
