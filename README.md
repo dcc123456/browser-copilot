@@ -351,10 +351,9 @@ configuration, not a code path — unlisted endpoints work too.
 | Ollama (local)       | `http://localhost:11434/v1`                         | `qwen3:8b`                           |
 | LM Studio (local)    | `http://localhost:1234/v1`                          | `local-model`                        |
 
-**Free options.** A fresh install already has Pollinations active; the one-click
-**Enable a free model (no key)** button adds it back or switches to it. Settings
-→ Models groups free providers under **Free to try**. Pollinations is keyless;
-the others need a free account key. The two web-chat presets drive the
+**Free options.** A fresh install already has Pollinations active. Settings →
+Models groups free providers under **Free to try**; pick one from the preset
+list to add it. Pollinations is keyless; the others need a free account key. The two web-chat presets drive the
 free site in a background window and are deliberately limited to chat and
 text-only steps — a web page cannot receive tool schemas, so page automation
 must use an API provider.

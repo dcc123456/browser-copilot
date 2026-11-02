@@ -21,7 +21,6 @@ import {
   normalizeBaseUrl,
   profileFromPreset,
   validateProfile,
-  webSiteOf,
   type ProviderProfile,
 } from '../lib/providers'
 import { providerModels } from '../lib/storage'
@@ -148,7 +147,6 @@ export default function ModelsTab() {
   const [pending, setPending] = useState<'test' | 'models' | null>(null)
   const [revealKey, setRevealKey] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [freeBusy, setFreeBusy] = useState(false)
   const [webBusy, setWebBusy] = useState<string | null>(null)
   /** Outcome line of the last provider-dialog action (test ok / save error). */
   const [providerNotice, setProviderNotice] = useState<{
@@ -221,60 +219,6 @@ export default function ModelsTab() {
     setShowAdvanced(false)
     setProviderNotice(null)
     setOpenDialog('provider')
-  }
-
-  /** One click: reuse a keyless free provider or create and activate one. */
-  const enableFreeApi = async (): Promise<void> => {
-    const pollinations = findPreset('pollinations')
-    if (!pollinations) return
-    setFreeBusy(true)
-    try {
-      const existing = settings.providers.find(
-        (profile) => profile.transport !== 'web' && isKeylessEndpoint(profile.baseUrl),
-      )
-      if (existing) {
-        await mutate({ type: 'provider.activate', id: existing.id })
-        setNotice({ kind: 'ok', text: t.settingsSaved({ name: existing.label }) })
-        return
-      }
-      const profile = profileFromPreset(pollinations, newLocalId())
-      const saved = await mutate({ type: 'provider.save', profile })
-      if (!saved) return
-      await mutate({ type: 'provider.activate', id: profile.id, model: profile.model })
-      setNotice({ kind: 'ok', text: t.settingsSaved({ name: profile.label }) })
-    } finally {
-      setFreeBusy(false)
-    }
-  }
-
-  /** Creates/activates a free web-chat provider and opens its login window. */
-  const enableWebChat = async (presetId: 'deepseek-web' | 'chatgpt-web'): Promise<void> => {
-    const preset = findPreset(presetId)
-    if (!preset) return
-    setWebBusy(presetId)
-    try {
-      const site = webSiteOf(preset.baseUrl)
-      const existing = settings.providers.find(
-        (profile) => profile.transport === 'web' && webSiteOf(profile.baseUrl) === site,
-      )
-      const profile = existing ?? profileFromPreset(preset, newLocalId())
-      if (!existing) {
-        const saved = await mutate({ type: 'provider.save', profile })
-        if (!saved) return
-      }
-      const activated = await mutate({
-        type: 'provider.activate',
-        id: profile.id,
-        model: profile.model,
-      })
-      if (!activated) return
-      await sendCommand({ type: 'provider.openWeb', profile })
-      setNotice({ kind: 'ok', text: t.settingsWebChatEnabled({ name: profile.label }) })
-    } catch (error) {
-      setNotice({ kind: 'error', text: (error as Error).message })
-    } finally {
-      setWebBusy(null)
-    }
   }
 
   const testWebProfile = async (profile: ProviderProfile): Promise<void> => {
@@ -710,33 +654,6 @@ export default function ModelsTab() {
             </div>
           )
         })}
-
-        <div className="mb-3 flex flex-wrap gap-2">
-          <button
-            className="primary"
-            disabled={freeBusy}
-            onClick={() => void enableFreeApi()}
-            type="button"
-          >
-            {freeBusy ? t.settingsSaving : t.settingsEnableFreeModel}
-          </button>
-          <button
-            className="primary"
-            disabled={webBusy !== null}
-            onClick={() => void enableWebChat('deepseek-web')}
-            type="button"
-          >
-            {webBusy === 'deepseek-web' ? t.settingsSaving : t.settingsEnableDeepSeekWeb}
-          </button>
-          <button
-            className="primary"
-            disabled={webBusy !== null}
-            onClick={() => void enableWebChat('chatgpt-web')}
-            type="button"
-          >
-            {webBusy === 'chatgpt-web' ? t.settingsSaving : t.settingsEnableChatGPTWeb}
-          </button>
-        </div>
 
         <div className="field">
           <label htmlFor="add-preset">{t.settingsAddProvider}</label>

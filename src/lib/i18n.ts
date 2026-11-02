@@ -1066,7 +1066,6 @@ export interface Messages {
   settingsKeyNotRequired: string
   settingsNoKeyNeeded: string
   settingsFreeToolsWarning: string
-  settingsEnableFreeModel: string
   settingsWebChatBadge: string
   settingsWebChatNoTools: string
   settingsWebChatLoginHint: string
@@ -1080,9 +1079,6 @@ export interface Messages {
   settingsWebChatAttachmentsUnsupported: string
   settingsWebChatModelNote: string
   settingsWebChatToS: string
-  settingsEnableDeepSeekWeb: string
-  settingsEnableChatGPTWeb: string
-  settingsWebChatEnabled: (params: { name: string }) => string
   settingsWebChatDiagnoseReport: (params: { report: string }) => string
   chatWebChatModeWarning: string
   presetPollinationsHint: string
@@ -2753,7 +2749,6 @@ const en: Messages = {
   settingsNoKeyNeeded: 'no key needed',
   settingsFreeToolsWarning:
     'Tool calling on free models varies. If the agent cannot act on the page, test the model or use one known to support function calling.',
-  settingsEnableFreeModel: 'Enable a free model (no key)',
   settingsWebChatBadge: 'Web · free',
   settingsWebChatNoTools:
     'Web-chat providers cannot call tools. Use chat mode (or a text-only workflow step); switch to an API provider for page automation.',
@@ -2773,10 +2768,6 @@ const en: Messages = {
     'The model is whatever is selected on the provider page; this label is for display only.',
   settingsWebChatToS:
     'Automating a web chat may violate the provider’s terms. The extension only operates the page like a user, never bypasses captchas, and keeps the session in your browser.',
-  settingsEnableDeepSeekWeb: 'Enable DeepSeek Web (free)',
-  settingsEnableChatGPTWeb: 'Enable ChatGPT Web (free)',
-  settingsWebChatEnabled: ({ name }) =>
-    `${name} is ready. Log in in the background window if asked.`,
   settingsWebChatDiagnoseReport: ({ report }) => `Diagnostic: ${report}`,
   chatWebChatModeWarning:
     'The active web-chat provider cannot call tools. Switch the mode to Chat, or choose an API provider for page automation.',
@@ -4455,7 +4446,6 @@ const zhCN: Messages = {
   settingsNoKeyNeeded: '无需密钥',
   settingsFreeToolsWarning:
     '免费模型的工具调用支持不一致。若 agent 无法操作页面，请先测试模型，或改用支持函数调用的模型。',
-  settingsEnableFreeModel: '一键启用免费模型（无需密钥）',
   settingsWebChatBadge: '网页版 · 免费',
   settingsWebChatNoTools:
     '网页版模型不支持工具调用。请使用 Chat 模式（或纯文本工作流步骤）；需要操作页面时请切换到 API 服务商。',
@@ -4473,9 +4463,6 @@ const zhCN: Messages = {
   settingsWebChatModelNote: '实际模型是网页上当前选中的模型；这里的名称仅用于显示。',
   settingsWebChatToS:
     '自动化网页聊天可能违反服务商条款。扩展只像用户一样操作页面，不绕过验证码，会话保留在你的浏览器中。',
-  settingsEnableDeepSeekWeb: '启用 DeepSeek 网页版（免费）',
-  settingsEnableChatGPTWeb: '启用 ChatGPT 网页版（免费）',
-  settingsWebChatEnabled: ({ name }) => `${name} 已就绪。如提示登录，请在后台窗口完成登录。`,
   settingsWebChatDiagnoseReport: ({ report }) => `诊断结果：${report}`,
   chatWebChatModeWarning:
     '当前网页版服务不支持工具调用。请把模式切到 Chat，或改用 API 服务商来操作页面。',

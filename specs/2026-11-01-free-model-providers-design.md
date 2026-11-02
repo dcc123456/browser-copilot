@@ -128,7 +128,8 @@
 
 - Models 页：预设下拉分「免费可用 / 免费网页聊天 / 全部服务」三组，`custom` 最后；
   免费卡片有 `Free` / `Web · free` 徽标；keyless 显示“无需密钥”。
-- 一键启用：Pollinations（无 key）+ DeepSeek 网页版 + ChatGPT 网页版。
+- 默认启用 Pollinations；免费 API 与网页版仍可从预设下拉的「免费可用 / 免费网页聊天」
+  分组添加（不再提供额外的快捷按钮）。
 - 网页版卡片提供 Test / Open window / Diagnose；编辑弹窗隐藏 key、模型抓取、thinking 与高级项。
 - ChatTab 在“active provider 是 web 且 mode ≠ chat”时显示常驻警告。
 - 所有新增文案均在 `src/lib/i18n.ts` 的封闭 `Messages` 中提供 en + zh-CN。
@@ -196,7 +197,7 @@ pnpm bench:debug
 5. 模式切 **Semi** 再提问 → 明确提示网页版不支持工具调用。
 6. ChatGPT 重复 2–5。
 7. “诊断” → 列出每个选择器候选的命中情况。
-8. 一键启用 Pollinations → 不填 key，Chat 提问 → 流式回复。
+8. 默认设置（新安装）下 Pollinations 已激活 → 不填 key，Chat 提问 → 流式回复。
 9. 图像识别模型选择器 → 不出现 web provider。
 
 > 线上站点需要登录且可能限流，**选择器与真实回复无法离线自动化验证**；未实测项必须
