@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+_To be released._
+
+## [0.6.17] - 2026-11-02
+
+### Added — Free model providers, enabled by default
+
+Pollinations is now the default provider on a fresh install (keyless, no setup),
+and Settings → Models groups free API providers: Gemini, Groq, Cerebras,
+SambaNova, Chutes, Hugging Face, ModelScope, Together, Novita, Nebius,
+Fireworks, OpenRouter `:free`, GitHub Models and Zhipu GLM-4-Flash. The new
+providers were checked for an OpenAI-compatible `/chat/completions` endpoint;
+the four reachable ones returned OpenAI-shaped JSON errors, while the other two
+are documented as compatible. Pollinations and the free-tier presets are pure
+HTTP calls — no web-chat tab or browser window is involved.
+
+### Added — Free labels in the composer model picker
+
+Free models now carry a **Free** tag in the composer's model picker and on the
+provider cards. Mixed catalogs only tag their free family (OpenRouter `:free`,
+Together `-Free`, Zhipu `glm-4-flash`), so a paid model never carries the badge.
+The **Free to try** group holds only directly usable, keyless providers
+(Pollinations); quota-based providers stay in **All providers**.
+
 ### Fixed — Applying a listing reads `meta.json` again
 
 A marketplace card comes from a catalog snapshot that can be hours old, while
