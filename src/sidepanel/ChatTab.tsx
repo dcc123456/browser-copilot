@@ -33,7 +33,7 @@ import {
   providerModels,
   type AiPrefillStep,
 } from '../lib/storage'
-import { isFreeModel } from '../lib/providers'
+import { freeAccessOf } from '../lib/providers'
 import { isTriggerNode } from '../lib/workflow/migrate'
 import { generateWorkflowName } from '../lib/workflow/generation-goal'
 import {
@@ -2768,7 +2768,9 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
             providerId: profile.id,
             label: profile.label,
             models,
-            freeModels: new Set(models.filter((model) => isFreeModel(profile, model))),
+            freeAccess: new Map(
+              models.map((model) => [model, freeAccessOf(profile, model)] as const),
+            ),
           }
         })
         .filter((group) => group.models.length > 0),
@@ -4655,6 +4657,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                         {group.models.map((model) => {
                           const choice = modelChoiceValue(group.providerId, model)
                           const isSelected = choice === modelSelection
+                          const freeAccess = group.freeAccess.get(model)
                           return (
                             <button
                               aria-selected={isSelected}
@@ -4671,9 +4674,18 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                               type="button"
                             >
                               <span className="min-w-0 truncate">{model}</span>
-                              {group.freeModels.has(model) && (
-                                <span className="shrink-0 rounded border border-ok/30 bg-ok-surface px-1 py-0.5 text-[10px] font-medium text-ok">
-                                  {t.settingsFreeBadge}
+                              {freeAccess && (
+                                <span
+                                  className={[
+                                    'shrink-0 rounded border px-1 py-0.5 text-[10px] font-medium',
+                                    freeAccess === 'direct'
+                                      ? 'border-ok/30 bg-ok-surface text-ok'
+                                      : 'border-accent/30 bg-accent-soft text-accent',
+                                  ].join(' ')}
+                                >
+                                  {freeAccess === 'direct'
+                                    ? t.settingsFreeBadge
+                                    : t.settingsQuotaBadge}
                                 </span>
                               )}
                             </button>

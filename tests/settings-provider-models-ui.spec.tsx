@@ -290,4 +290,28 @@ describe('free providers', () => {
     )
     expect(groups).toContain(en.settingsFreeProviders)
   })
+
+  it('tags quota-based providers with the quota badge', async () => {
+    const container = await openProviderEditor(
+      settingsWith({
+        label: 'Groq',
+        presetId: 'groq',
+        baseUrl: 'https://api.groq.com/openai/v1',
+        apiKey: 'k',
+        model: 'llama-3.3-70b-versatile',
+        models: ['llama-3.3-70b-versatile'],
+      }),
+    )
+    const en = messagesFor('en')
+
+    const quotaBadge = [...container.querySelectorAll('span')].find(
+      (candidate) => candidate.textContent?.trim() === en.settingsQuotaBadge,
+    )
+    expect(quotaBadge).toBeDefined()
+
+    const groqOption = [...container.querySelectorAll('option')].find((option) =>
+      option.textContent?.includes('Groq'),
+    )
+    expect(groqOption?.textContent).toContain(en.settingsQuotaBadge)
+  })
 })

@@ -176,8 +176,12 @@ export default function ModelsTab() {
   const localEndpoint = draft ? isLocalEndpoint(draft.baseUrl) : false
   const keyOptional = draft ? isKeylessEndpoint(draft.baseUrl) : false
   const hintText = preset?.hintKey ? t[preset.hintKey] : preset?.hint
-  const freePresets = PROVIDER_PRESETS.filter((option) => option.free && option.id !== 'custom')
-  const otherPresets = PROVIDER_PRESETS.filter((option) => !option.free && option.id !== 'custom')
+  const directPresets = PROVIDER_PRESETS.filter(
+    (option) => option.free === 'direct' && option.id !== 'custom',
+  )
+  const otherPresets = PROVIDER_PRESETS.filter(
+    (option) => option.free !== 'direct' && option.id !== 'custom',
+  )
   const customPreset = PROVIDER_PRESETS.find((option) => option.id === 'custom')
   const presetEndpoints = preset?.endpoints ?? []
   // The endpoint picker is controlled and reflects whichever preset endpoint
@@ -486,13 +490,21 @@ export default function ModelsTab() {
 
         {settings.providers.map((profile) => {
           const isActive = profile.id === settings.activeProviderId
+          const cardFreeAccess = findPresetByBaseUrl(profile.baseUrl)?.free
           return (
             <div className="card provider-card" key={profile.id} style={{ marginBottom: 8 }}>
               <div className="card-head">
                 <span className="card-title">{profile.label}</span>
-                {findPresetByBaseUrl(profile.baseUrl)?.free && (
-                  <span className="rounded border border-ok/30 bg-ok-surface px-1.5 py-0.5 text-[11px] text-ok">
-                    {t.settingsFreeBadge}
+                {cardFreeAccess && (
+                  <span
+                    className={[
+                      'rounded border px-1.5 py-0.5 text-[11px]',
+                      cardFreeAccess === 'direct'
+                        ? 'border-ok/30 bg-ok-surface text-ok'
+                        : 'border-accent/30 bg-accent-soft text-accent',
+                    ].join(' ')}
+                  >
+                    {cardFreeAccess === 'direct' ? t.settingsFreeBadge : t.settingsQuotaBadge}
                   </span>
                 )}
                 {isActive ? (
@@ -588,9 +600,9 @@ export default function ModelsTab() {
             <option disabled value="">
               {t.settingsChoosePreset}
             </option>
-            {freePresets.length > 0 && (
+            {directPresets.length > 0 && (
               <optgroup label={t.settingsFreeProviders}>
-                {freePresets.map((option) => (
+                {directPresets.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
                   </option>
@@ -600,7 +612,9 @@ export default function ModelsTab() {
             <optgroup label={t.settingsOtherProviders}>
               {otherPresets.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {option.label}
+                  {option.free === 'quota'
+                    ? `${option.label} · ${t.settingsQuotaBadge}`
+                    : option.label}
                 </option>
               ))}
             </optgroup>

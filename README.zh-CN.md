@@ -284,23 +284,25 @@ JavaScript 代码块会在页面里执行任意代码——只用在你信任的
 | Ollama（本地）       | `http://localhost:11434/v1`                         | `qwen3:8b`                           |
 | LM Studio（本地）    | `http://localhost:1234/v1`                          | `local-model`                        |
 
-**免费选项**：全新安装默认已启用 Pollinations。设置 → 模型服务 里有一个**免费可用**
-分组；从预设列表里选择即可添加。Pollinations 完全不需要密钥；其余需要免费注册拿 key。
+**免费选项**：全新安装默认已启用 Pollinations。设置 → 模型服务 里只有**直接免费用**
+（无需密钥）的提供商会进入**免费可用**分组；有免费额度/每日赠送的提供商留在**全部服务**，
+并在名称后显示**免费额度**标签。
 
-| 免费预设                    | 接口地址                                                  | 说明                                  |
-| --------------------------- | --------------------------------------------------------- | ------------------------------------- |
-| Pollinations                | `https://text.pollinations.ai/openai`                     | 无需密钥；匿名档有限流，支持工具调用  |
-| Google AI Studio (Gemini)   | `https://generativelanguage.googleapis.com/v1beta/openai` | 用 AI Studio key 的免费额度           |
-| Groq / Cerebras / SambaNova | 各自端点                                                  | 用 key 的免费额度；工具支持因模型而异 |
-| Hugging Face                | `https://router.huggingface.co/v1`                        | 用 HF token 的每月免费推理额度        |
-| ModelScope 魔搭             | `https://api-inference.modelscope.cn/v1`                  | 用 ModelScope token 的免费额度        |
-| Together AI                 | `https://api.together.xyz/v1`                             | 免费模型以 `-Free` 结尾               |
-| Novita / Nebius / Fireworks | 各自端点                                                  | 用 key 的免费起始额度                 |
-| OpenRouter                  | `https://openrouter.ai/api/v1`                            | 免费模型以 `:free` 结尾；目录会轮换   |
-| GitHub Models               | `https://models.github.ai/inference`                      | 用 GitHub PAT 免费使用 GPT 模型       |
+| 免费预设                    | 接口地址                                                  | 说明                                       |
+| --------------------------- | --------------------------------------------------------- | ------------------------------------------ |
+| Pollinations                | `https://text.pollinations.ai/openai`                     | 直接免费——无需密钥；匿名档有限流，支持工具 |
+| Google AI Studio (Gemini)   | `https://generativelanguage.googleapis.com/v1beta/openai` | 用 AI Studio key 的免费额度                |
+| Groq / Cerebras / SambaNova | 各自端点                                                  | 用 key 的免费额度；工具支持因模型而异      |
+| Hugging Face                | `https://router.huggingface.co/v1`                        | 用 HF token 的每月免费额度                 |
+| ModelScope 魔搭             | `https://api-inference.modelscope.cn/v1`                  | 用 ModelScope token 的免费额度             |
+| Together AI                 | `https://api.together.xyz/v1`                             | 免费模型以 `-Free` 结尾（免费额度）        |
+| Novita / Nebius / Fireworks | 各自端点                                                  | 用 key 的免费起始额度                      |
+| OpenRouter                  | `https://openrouter.ai/api/v1`                            | 免费模型以 `:free` 结尾（免费额度）        |
+| GitHub Models               | `https://models.github.ai/inference`                      | 用 GitHub PAT 的免费额度                   |
 
-聊天输入框的模型选择器会用 **Free** 标签标出免费模型；混合目录只标免费系列
-（OpenRouter `:free`、Together `-Free`、智谱 `glm-4-flash`），付费模型不标。
+聊天输入框的模型选择器里，直接免费的模型显示 **Free**，免费额度模型显示 **免费额度**；
+混合目录只标免费系列（OpenRouter `:free`、Together `-Free`、智谱 `glm-4-flash`），
+付费模型不标。
 
 DeepSeek 与 OpenAI 的官方 API 是收费的；免费 DeepSeek/GPT 访问来自上面的免费额度。
 

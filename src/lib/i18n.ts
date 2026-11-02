@@ -1061,6 +1061,7 @@ export interface Messages {
   settingsFreeProviders: string
   settingsOtherProviders: string
   settingsFreeBadge: string
+  settingsQuotaBadge: string
   settingsKeyOptional: string
   settingsKeyNotRequired: string
   settingsNoKeyNeeded: string
@@ -2730,6 +2731,7 @@ const en: Messages = {
   settingsFreeProviders: 'Free to try',
   settingsOtherProviders: 'All providers',
   settingsFreeBadge: 'Free',
+  settingsQuotaBadge: 'Free quota',
   settingsKeyOptional: 'Optional — no key needed',
   settingsKeyNotRequired:
     'This provider needs no API key; requests go directly from this extension to the service.',
@@ -4411,6 +4413,7 @@ const zhCN: Messages = {
   settingsFreeProviders: '免费可用',
   settingsOtherProviders: '全部服务',
   settingsFreeBadge: '免费',
+  settingsQuotaBadge: '免费额度',
   settingsKeyOptional: '可选 —— 无需密钥',
   settingsKeyNotRequired: '该服务无需 API 密钥，请求由本扩展直接发往服务商。',
   settingsNoKeyNeeded: '无需密钥',

@@ -304,6 +304,7 @@ describe('chat model picker', () => {
     const mounted = await mountChat()
     await openPicker(mounted)
     const freeTag = messagesFor('en').settingsFreeBadge
+    const quotaTag = messagesFor('en').settingsQuotaBadge
     const options = modelOptions(mounted)
     const freeOption = options.find((option) => option.dataset.model === 'openai-fast')!
     const openrouterFree = options.find(
@@ -312,8 +313,9 @@ describe('chat model picker', () => {
     const paid = options.find((option) => option.dataset.model === 'deepseek/deepseek-chat')!
 
     expect(freeOption.textContent).toContain(freeTag)
-    expect(openrouterFree.textContent).toContain(freeTag)
+    expect(openrouterFree.textContent).toContain(quotaTag)
     expect(paid.textContent).not.toContain(freeTag)
+    expect(paid.textContent).not.toContain(quotaTag)
   })
 })
 

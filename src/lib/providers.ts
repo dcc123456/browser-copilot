@@ -37,6 +37,9 @@ export type TextKey = {
   [K in keyof Messages]: Messages[K] extends string ? K : never
 }[keyof Messages]
 
+/** `direct` = usable without a key; `quota` = free quota / daily credits. */
+export type FreeAccess = 'direct' | 'quota'
+
 /** A configured endpoint the agent can talk to. */
 export interface ProviderProfile {
   id: string
@@ -88,8 +91,8 @@ export interface ProviderPreset {
   hintKey?: TextKey
   /** Docs URL for keys/models. */
   docsUrl?: string
-  /** Vendor offers a standing no-cost tier. */
-  free?: boolean
+  /** How the vendor's free offering works; see {@link FreeAccess}. */
+  free?: FreeAccess
   /** No credential at all is needed. */
   keyless?: boolean
   /** Whether the suggested model can call tools on the free tier. */
@@ -116,7 +119,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     baseUrl: DEFAULT_FREE_PROVIDER_BASE_URL,
     suggestedModel: DEFAULT_FREE_PROVIDER_MODEL,
     keyless: true,
-    free: true,
+    free: 'direct',
     tools: true,
     hint: 'Free and anonymous; no key required. Requests go directly from this extension to Pollinations.',
     hintKey: 'presetPollinationsHint',
@@ -127,7 +130,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Google AI Studio (Gemini)',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     suggestedModel: 'gemini-2.5-flash',
-    free: true,
+    free: 'quota',
     tools: true,
     hint: 'Free tier via a Google AI Studio key. Uses the OpenAI-compatible endpoint.',
     hintKey: 'presetGeminiHint',
@@ -138,7 +141,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Cerebras',
     baseUrl: 'https://api.cerebras.ai/v1',
     suggestedModel: 'llama-3.3-70b',
-    free: true,
+    free: 'quota',
     tools: true,
     hint: 'Free tier via a Cerebras Cloud key.',
     hintKey: 'presetCerebrasHint',
@@ -149,7 +152,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'SambaNova',
     baseUrl: 'https://api.sambanova.ai/v1',
     suggestedModel: 'Meta-Llama-3.3-70B-Instruct',
-    free: true,
+    free: 'quota',
     tools: true,
     hint: 'Free tier via a SambaNova Cloud key.',
     hintKey: 'presetSambaNovaHint',
@@ -160,7 +163,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Chutes',
     baseUrl: 'https://llm.chutes.ai/v1',
     suggestedModel: 'deepseek-ai/DeepSeek-V3-0324',
-    free: true,
+    free: 'quota',
     tools: 'varies',
     hint: 'Free tier via a Chutes key. Often hosts DeepSeek models; tool support varies by model.',
     hintKey: 'presetChutesHint',
@@ -171,7 +174,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Hugging Face',
     baseUrl: 'https://router.huggingface.co/v1',
     suggestedModel: 'Qwen/Qwen2.5-72B-Instruct',
-    free: true,
+    free: 'quota',
     tools: 'varies',
     hint: 'Free monthly inference credits via a Hugging Face token.',
     hintKey: 'presetHuggingFaceHint',
@@ -182,7 +185,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'ModelScope 魔搭',
     baseUrl: 'https://api-inference.modelscope.cn/v1',
     suggestedModel: 'Qwen/Qwen2.5-72B-Instruct',
-    free: true,
+    free: 'quota',
     tools: 'varies',
     hint: 'Free quota via a ModelScope token.',
     hintKey: 'presetModelScopeHint',
@@ -193,7 +196,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Together AI',
     baseUrl: 'https://api.together.xyz/v1',
     suggestedModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo-Free',
-    free: true,
+    free: 'quota',
     tools: 'varies',
     hint: 'Free models end in -Free. The free catalog rotates.',
     hintKey: 'presetTogetherHint',
@@ -204,7 +207,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Novita AI',
     baseUrl: 'https://api.novita.ai/v3/openai',
     suggestedModel: 'deepseek/deepseek-v3',
-    free: true,
+    free: 'quota',
     tools: 'varies',
     hint: 'Free starting credits via a Novita key.',
     hintKey: 'presetNovitaHint',
@@ -215,7 +218,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Nebius AI Studio',
     baseUrl: 'https://api.studio.nebius.com/v1',
     suggestedModel: 'deepseek-ai/DeepSeek-V3',
-    free: true,
+    free: 'quota',
     tools: 'varies',
     hint: 'Free starting credits via a Nebius AI Studio key.',
     hintKey: 'presetNebiusHint',
@@ -226,7 +229,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Fireworks AI',
     baseUrl: 'https://api.fireworks.ai/inference/v1',
     suggestedModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct',
-    free: true,
+    free: 'quota',
     tools: 'varies',
     hint: 'Free starting credits via a Fireworks key.',
     hintKey: 'presetFireworksHint',
@@ -273,7 +276,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     suggestedModel: 'deepseek/deepseek-chat',
-    free: true,
+    free: 'quota',
     tools: 'varies',
     hint: 'One key for many vendors. Model IDs are namespaced, e.g. deepseek/deepseek-chat.',
     hintKey: 'presetOpenRouterHint',
@@ -343,7 +346,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: '智谱 GLM',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     suggestedModel: 'glm-4-flash',
-    free: true,
+    free: 'quota',
     hint: 'Create a key at open.bigmodel.cn. Models such as glm-4-flash, glm-4-plus.',
     docsUrl: 'https://open.bigmodel.cn/',
     endpoints: [
@@ -393,7 +396,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'GitHub Models',
     baseUrl: 'https://models.github.ai/inference',
     suggestedModel: 'gpt-4.1',
-    free: true,
+    free: 'quota',
     hint: 'Free models via your GitHub account. Models such as gpt-4.1.',
     docsUrl: 'https://github.com/marketplace/models',
   },
@@ -402,7 +405,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Groq',
     baseUrl: 'https://api.groq.com/openai/v1',
     suggestedModel: 'llama-3.3-70b-versatile',
-    free: true,
+    free: 'quota',
     hint: 'Create a key at console.groq.com. Models such as llama-3.3-70b-versatile.',
     docsUrl: 'https://console.groq.com/keys',
   },
@@ -411,7 +414,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     label: 'Mistral',
     baseUrl: 'https://api.mistral.ai/v1',
     suggestedModel: 'mistral-small-latest',
-    free: true,
+    free: 'quota',
     hint: 'Create a key at console.mistral.ai. Models such as mistral-small-latest.',
     docsUrl: 'https://www.mistral.ai/',
   },
@@ -562,24 +565,25 @@ export function findPresetByBaseUrl(baseUrl: string): ProviderPreset | undefined
 }
 
 /**
- * True when the given model is covered by the provider's free offering.
+ * How the given model is free, if at all.
  *
- * Provider-level free tiers tag every model; aggregators with mixed catalogs
- * (OpenRouter, Together) and vendors with one free model (Zhipu) only tag the
- * free family, so a paid model never carries the badge.
+ * `direct` means usable without a key (Pollinations); `quota` means covered by
+ * a free tier / starting credits. Mixed catalogs (OpenRouter, Together) and
+ * vendors with one free model (Zhipu) only tag the free family; `undefined`
+ * means the model is paid.
  */
-export function isFreeModel(profile: ProviderProfile, model: string): boolean {
+export function freeAccessOf(profile: ProviderProfile, model: string): FreeAccess | undefined {
   const preset = findPreset(profile.presetId) ?? findPresetByBaseUrl(profile.baseUrl)
-  if (!preset?.free) return false
+  if (!preset?.free) return undefined
   switch (preset.id) {
     case 'openrouter':
-      return /:free$/i.test(model)
+      return /:free$/i.test(model) ? 'quota' : undefined
     case 'together':
-      return /(?:-|_)free$/i.test(model)
+      return /(?:-|_)free$/i.test(model) ? 'quota' : undefined
     case 'zhipu':
-      return /glm-4.*flash/i.test(model)
+      return /glm-4.*flash/i.test(model) ? 'quota' : undefined
     default:
-      return true
+      return preset.free
   }
 }
 
