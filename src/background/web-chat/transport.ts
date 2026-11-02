@@ -26,7 +26,12 @@ import {
 } from './window'
 
 export type WebChatErrorCode =
-  'attachments' | 'empty-reply' | 'login-required' | 'selector-missing' | 'timeout'
+  | 'attachments'
+  | 'empty-reply'
+  | 'login-required'
+  | 'selector-missing'
+  | 'timeout'
+  | 'window-unavailable'
 
 export class WebChatError extends Error {
   readonly code: WebChatErrorCode
@@ -80,7 +85,21 @@ export async function streamWebChat(
     )
   }
   const deps: WebChatDeps = { ...DEFAULT_DEPS, ...overrides }
-  return withWebChatLock(site, () => run(site, call, handlers, deps))
+  return withWebChatLock(site, async () => {
+    try {
+      return await run(site, call, handlers, deps)
+    } catch (error) {
+      if (error instanceof WebChatError || (error as Error)?.name === 'AbortError') throw error
+      // The driver's "no operable page" wording is about browser tabs; in this
+      // context it means the background chat window is gone or not injectable.
+      const t = await deps.messages().catch(() => undefined)
+      throw new WebChatError(
+        'window-unavailable',
+        t?.settingsWebChatWindowUnavailable ??
+          'The web-chat window is unavailable. Switch to an API provider to chat inside the panel.',
+      )
+    }
+  })
 }
 
 async function run(

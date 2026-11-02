@@ -300,6 +300,8 @@ schema，需要操作页面时仍要选 API 服务商。
 | DeepSeek 网页版 / ChatGPT 网页版 | `https://chat.deepseek.com/` / `https://chatgpt.com/`     | 后台窗口驱动你已登录的免费网页聊天；仅聊天/纯文本 |
 
 DeepSeek 与 OpenAI 的官方 API 是收费的；免费 DeepSeek/GPT 访问来自上面的免费额度和网页版。
+添加网页版预设不会自动切换当前模型；需要时点「使用这个」。若只想在插件里聊天，保持
+Pollinations 或某个 API 服务商为当前模型即可。
 
 **怎么选**：要让它自主读页面/动手，必须选支持工具调用的模型。日常用便宜快的
 （`deepseek-chat`、`gpt-4o-mini`、`qwen-plus`），难任务用推理模型，敏感内容用本地模型。

@@ -368,7 +368,9 @@ must use an API provider.
 | DeepSeek Web / ChatGPT Web  | `https://chat.deepseek.com/` / `https://chatgpt.com/`     | Drives your logged-in free web chat in a background window; chat/text only |
 
 The official DeepSeek and OpenAI API endpoints are paid. Free DeepSeek/GPT
-access comes through the free tiers and web chats above.
+access comes through the free tiers and web chats above. Adding a web-chat
+preset does not switch the active model; choose **Use this** when you want it.
+To chat only inside the panel, keep Pollinations or an API provider active.
 
 **Choosing one:** function calling is required for autonomous read/act. Use a
 cheap fast model (`deepseek-chat`, `gpt-4o-mini`, `qwen-plus`) for daily work, a

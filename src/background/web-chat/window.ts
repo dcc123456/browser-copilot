@@ -9,6 +9,7 @@
  * @module background/web-chat/window
  */
 import type { WebChatSiteId } from '../../lib/providers'
+import { sleepWithSignal } from '../../lib/sleep'
 import { normalScopeFromWindowId, type ScopeWindow } from '../automation-scope'
 import { WEB_CHAT_ADAPTERS } from './adapters'
 
@@ -86,6 +87,21 @@ async function refOf(windowId: number, tabId: number): Promise<WebChatWindowRef>
   return { windowId, tabId, scope: await normalScopeFromWindowId(windowId) }
 }
 
+/**
+ * The tab is created before its first navigation commits, so an immediate
+ * `executeScript` sees `chrome://newtab` and the driver reports "no operable
+ * page". Wait until the tab has an http(s) URL before handing it over.
+ */
+async function waitForInjectableTab(tabId: number, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const tab = await chrome.tabs.get(tabId).catch(() => undefined)
+    if (tab?.url && /^https?:\/\//i.test(tab.url)) return
+    await sleepWithSignal(250)
+  }
+  throw new Error('The web-chat tab did not finish opening.')
+}
+
 export async function ensureWebChatWindow(site: WebChatSiteId): Promise<WebChatWindowRef> {
   await loadCache()
   const existing = cache[site]
@@ -93,6 +109,9 @@ export async function ensureWebChatWindow(site: WebChatSiteId): Promise<WebChatW
     const window = await chrome.windows.get(existing.windowId).catch(() => undefined)
     const tab = await chrome.tabs.get(existing.tabId).catch(() => undefined)
     if (window && tab && tab.windowId === existing.windowId) {
+      if (!tab.url || !/^https?:\/\//i.test(tab.url)) {
+        await waitForInjectableTab(existing.tabId)
+      }
       return refOf(existing.windowId, existing.tabId)
     }
     delete cache[site]
@@ -116,6 +135,7 @@ export async function ensureWebChatWindow(site: WebChatSiteId): Promise<WebChatW
   }
   cache[site] = { windowId: created.id, tabId }
   await persist()
+  await waitForInjectableTab(tabId)
   return refOf(created.id, tabId)
 }
 

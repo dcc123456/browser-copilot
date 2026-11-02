@@ -93,6 +93,11 @@
 
 - 每个站点一个独立、不抢焦点的窗口，缓存于 `chrome.storage.session`（`bc:webChatTabs`），
   跨 turn 复用；同一站点的请求串行，避免两次发送写进同一对话。
+- 新建窗口后先等 tab 的 URL 变为 http(s) 再注入；否则 driver 会看到 `chrome://newtab`
+  并报“没有可操作的网页标签页”。窗口丢失/不可注入统一转成 `window-unavailable` 错误，
+  提示用户打开窗口登录或切回 Pollinations / API 服务商。
+- 网页版 provider 是 **opt-in**：新增它不会自动接管 active；只有显式“使用这个”才切过去。
+  ChatTab 在 active 是 web provider 时显示常驻提示，说明如何切回插件内聊天。
 - 站点适配器集中在 `src/background/web-chat/adapters.ts`：composer / send / newChat /
   reply / stop / login 全部是**候选数组**，转成 kernel 的 `Target` 主选择器 + fallbacks。
 - 初次使用若未登录：检测 login 元素 → 把窗口置前，提示用户登录后重试；不读 token、不自动登录。
@@ -186,7 +191,7 @@ pnpm bench:debug
 - UI：免费/网页版预设分组、keyless 可选 key、网页版隐藏 key 与模型抓取、卡片动作。
 - `storage-activate-provider` / `settings-legacy-adopt` / `workflow-review-ai` 已适配默认 provider：
   “未配置”现在是显式空列表；未知 active id 回退到 `providers[0]`（默认 provider）；目录不可读时
-  读路径返回默认 provider 但绝不写回。
+  读路径返回默认 provider 但绝不写回；新增 web provider 不会自动接管 active。
 
 ### 人工浏览器验收（拿不到就标 BLOCKED）
 

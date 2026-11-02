@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProviderProfile } from '../src/lib/providers'
 import { activateProvider, getSettings, saveProvider } from '../src/lib/storage'
+import { DEFAULT_FREE_PROVIDER_ID } from '../src/lib/free-provider-default'
 
 const data = new Map<string, unknown>()
 
@@ -97,5 +98,17 @@ describe('activateProvider', () => {
     // An unknown id is repaired to the first profile; the seeded free provider
     // is first on a fresh install.
     expect(settings.activeProviderId).toBe(settings.providers[0]!.id)
+  })
+
+  it('does not auto-activate a newly added web-chat provider', async () => {
+    const settings = await saveProvider({
+      ...profile('web', 'DeepSeek Web', 'deepseek-web'),
+      presetId: 'deepseek-web',
+      transport: 'web',
+      baseUrl: 'https://chat.deepseek.com/',
+      apiKey: '',
+    })
+
+    expect(settings.activeProviderId).toBe(DEFAULT_FREE_PROVIDER_ID)
   })
 })

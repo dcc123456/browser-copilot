@@ -1076,6 +1076,8 @@ export interface Messages {
   settingsWebChatSelectorMissing: string
   settingsWebChatTimeout: string
   settingsWebChatEmptyReply: string
+  settingsWebChatWindowUnavailable: string
+  chatWebChatProviderHint: string
   settingsWebChatAttachmentsUnsupported: string
   settingsWebChatModelNote: string
   settingsWebChatToS: string
@@ -2762,6 +2764,10 @@ const en: Messages = {
     'The provider page structure changed; the expected input or reply element was not found. Run Diagnose and update the selectors.',
   settingsWebChatTimeout: 'The web chat did not finish answering in time.',
   settingsWebChatEmptyReply: 'The web chat returned an empty reply.',
+  settingsWebChatWindowUnavailable:
+    'The web-chat window is unavailable. Open it and log in, or switch to Pollinations / an API provider to chat inside the panel.',
+  chatWebChatProviderHint:
+    'This model drives a background web-chat window. To chat only inside the panel, switch to Pollinations or an API provider.',
   settingsWebChatAttachmentsUnsupported:
     'Web-chat providers do not support image or file attachments yet.',
   settingsWebChatModelNote:
@@ -4459,6 +4465,10 @@ const zhCN: Messages = {
     '服务网页结构可能已更新：没有找到预期的输入框或回复元素。请运行“诊断”并更新选择器。',
   settingsWebChatTimeout: '网页聊天在限定时间内没有完成回复。',
   settingsWebChatEmptyReply: '网页聊天返回了空回复。',
+  settingsWebChatWindowUnavailable:
+    '网页聊天窗口不可用。请打开窗口并登录，或切换到 Pollinations / API 服务商，直接在插件里聊天。',
+  chatWebChatProviderHint:
+    '该模型会驱动一个后台网页聊天窗口。若只想在插件里聊天，请切换到 Pollinations 或 API 服务商。',
   settingsWebChatAttachmentsUnsupported: '网页版暂不支持图片或文件附件。',
   settingsWebChatModelNote: '实际模型是网页上当前选中的模型；这里的名称仅用于显示。',
   settingsWebChatToS:

@@ -4420,12 +4420,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
         <span className="composer-resize-grip" />
       </div>
 
-      {activeProvider?.transport === 'web' && mode !== 'chat' && (
+      {activeProvider?.transport === 'web' && (
         <div
           className="mx-3 mb-2 rounded-lg border border-warn/30 bg-warn-surface px-3 py-2 text-[12px] leading-relaxed text-warn"
           role="status"
         >
-          {t.chatWebChatModeWarning}
+          <p>{t.chatWebChatProviderHint}</p>
+          {mode !== 'chat' && <p className="mt-1">{t.chatWebChatModeWarning}</p>}
         </div>
       )}
 

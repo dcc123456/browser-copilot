@@ -540,16 +540,17 @@ export async function saveProvider(profile: ProviderProfile): Promise<Settings> 
     if (index === -1) providers.push(profile)
     else providers[index] = profile
     // A first user profile becomes active automatically. The seeded free
-    // provider is the only profile on a fresh install, so adding a real
-    // provider must still take over — otherwise the new profile would sit
-    // beside the default while the default kept answering.
+    // provider is the only profile on a fresh install, so adding a real HTTP
+    // provider must still take over. A web-chat provider stays opt-in: adding
+    // it must not silently replace the in-panel chat with a background window.
     const onlySeededDefault =
       settings.providers.length === 1 &&
       settings.providers[0]?.id === DEFAULT_FREE_PROVIDER_ID &&
       profile.id !== DEFAULT_FREE_PROVIDER_ID
-    const activeProviderId = onlySeededDefault
-      ? profile.id
-      : settings.activeProviderId || profile.id
+    const activeProviderId =
+      onlySeededDefault && profile.transport !== 'web'
+        ? profile.id
+        : settings.activeProviderId || profile.id
     return setSettingsLocked({ providers, activeProviderId })
   })
 }
