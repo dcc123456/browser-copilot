@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format is based on
 
 _To be released._
 
+## [0.6.18] - 2026-11-05
+
+### Fixed — Missed click targets no longer pay a dormant 5-second wait
+
+A click node saved with "wait for element" off still carries the catalog's
+`waitSelectorTimeout: 5000`. Every run force-arms the wait, and it reused that
+dormant value, so a click whose selector did not match polled for 5 seconds;
+the actionability pre-check then stacked another 1.2 seconds (a real recorded
+run measured 6440 ms before failing).
+
+The forced wait now writes the 2-second runtime default, the wait persisted at
+save time matches it, and the pre-check returns at once when the probe reports
+a missing target while the kernel is already polling it. A node that explicitly
+enabled the wait keeps its own timeout. Clicks whose element is already present
+are unaffected; a page that needs 3–5 seconds to render now needs the wait
+enabled on that node (or a higher workflow `defaultWaitMs`).
+
 ## [0.6.17] - 2026-11-02
 
 ### Added — Free model providers, enabled by default
