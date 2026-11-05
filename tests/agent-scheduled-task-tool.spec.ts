@@ -490,7 +490,9 @@ describe('create_scheduled_task execution', () => {
 
   describe('one-shot and chained tasks', () => {
     it('creates a one-shot task and arms it at the requested instant', async () => {
-      const at = new Date(2026, 10, 2, 20, 30).getTime()
+      // Deterministic and still in the future: a one-shot whose instant is gone
+      // is deliberately left unarmed, so a hardcoded near date rots into failure.
+      const at = new Date(2030, 10, 2, 20, 30).getTime()
       const output = await executeTool(
         'create_scheduled_task',
         {
