@@ -147,6 +147,23 @@ describe('applyDefaultWaits', () => {
     expect(wf.drawflow.nodes.find((n) => n.id === 'c')?.data['waitForSelector']).toBeUndefined()
   })
 
+  it('replaces a dormant timeout when the wait was off', () => {
+    // Catalog default: `waitForSelector: false` with a stored 5000. That
+    // timeout never applied; forcing the wait must not activate it.
+    const wf = makeWorkflow([
+      node('c', 'event-click', {
+        selector: '.a',
+        waitForSelector: false,
+        waitSelectorTimeout: 5000,
+      }),
+    ])
+    const out = applyDefaultWaits(wf, DEFAULT_WAIT_MS)
+    expect(out.drawflow.nodes.find((n) => n.id === 'c')?.data).toMatchObject({
+      waitForSelector: true,
+      waitSelectorTimeout: DEFAULT_WAIT_MS,
+    })
+  })
+
   it('is a no-op when the window is 0 or negative (workflow opt-out)', () => {
     const wf = makeWorkflow([node('c', 'event-click', { selector: '.a' })])
     expect(applyDefaultWaits(wf, 0)).toBe(wf)

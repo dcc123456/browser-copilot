@@ -40,8 +40,13 @@ const WAIT_BLOCK_IDS: readonly string[] = [
 /** Blocks that establish WHICH page the graph works on by opening one. */
 const NAVIGATION_BLOCK_IDS: readonly string[] = ['new-tab', 'new-window']
 
-/** Window persisted on a block that had none — matches the run-time default. */
-export const PERSISTED_WAIT_MS = 5000
+/**
+ * Window persisted on a block that had none. It must match the run-time
+ * default (`DEFAULT_WAIT_MS` in the workflow engine): a saved 5000 here turned
+ * every miss into a 5 s stall even though the runtime forces only 2 s on nodes
+ * that never opted in.
+ */
+export const PERSISTED_WAIT_MS = 2000
 
 /** Deterministic id: a graph that already has one is already anchored. */
 const ANCHOR_NODE_ID = 'page-anchor'

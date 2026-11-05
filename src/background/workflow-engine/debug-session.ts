@@ -87,6 +87,12 @@ export const DEFAULT_WAIT_MS = 2000
  * `waitForSelector` keep the user's own timeout. `ms <= 0` disables the
  * rewrite entirely (returns the input unchanged).
  *
+ * A node whose wait was OFF carries a DORMANT `waitSelectorTimeout` (the catalog
+ * seeds 5000). Reusing it here silently turned the short runtime window into a
+ * 5 s one, so a miss paid 5 s (plus the driver pre-check) instead of `ms`.
+ * Forcing the wait therefore always writes `ms`; only a node that had already
+ * opted in keeps a custom timeout.
+ *
  * The single cheapest success-rate lever: a "not found" caused by a slow render
  * never reaches the AI takeover at all.
  */
@@ -99,8 +105,7 @@ export function applyDefaultWaits(workflow: Workflow, ms: number): Workflow {
     if (!blockId || !(WAIT_BLOCKS as readonly string[]).includes(blockId)) continue
     if (node.data['waitForSelector'] === true) continue
     node.data['waitForSelector'] = true
-    const existing = node.data['waitSelectorTimeout']
-    if (!(typeof existing === 'number' && existing > 0)) node.data['waitSelectorTimeout'] = ms
+    node.data['waitSelectorTimeout'] = ms
   }
   return clone
 }

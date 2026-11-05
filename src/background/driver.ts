@@ -421,12 +421,19 @@ const PRECHECK_OPS = new Set(['click', 'fill', 'press_key', 'select_option', 'se
  * animation is still running and a click would land in the void. Fail-open:
  * on probe failure or budget exhaustion the real op runs anyway and reports
  * its own error.
+ *
+ * A target the probe reports as `missing` while the op carries its own kernel
+ * wait (`op.waitFor`, armed by `waitForSelector`) is NOT waited for here: the
+ * kernel polls the same target for that whole window, and stacking this
+ * pre-check's 1.2s budget on top only delays the failure (a real run measured
+ * 6440ms for a click that never matched: 1200ms pre-check + 5000ms kernel).
  */
 async function waitForActionable(
   tabId: number,
   target: Target,
   signal?: AbortSignal,
   resolvePolicy?: Op['resolvePolicy'],
+  kernelWaitMs?: number,
 ): Promise<void> {
   const deadline = Date.now() + 1200
   let prevRect: string | null = null
@@ -449,6 +456,11 @@ async function waitForActionable(
     // the real op will report whatever is actually wrong.
     if (!data?.state) return
     if (data.state !== 'ready') {
+      // Missing with a kernel wait armed: that wait is the page's chance to
+      // render the element. Polling here first would only add this budget to it.
+      if (data.state === 'missing' && typeof kernelWaitMs === 'number' && kernelWaitMs > 0) {
+        return
+      }
       // Not rendered yet, hidden, disabled or occluded: give the page time.
       prevRect = null
       await sleep(120, signal).catch(() => {})
@@ -552,7 +564,7 @@ export async function execOnActiveTab(
   // targets are included: their probe is answered over CDP below, so the wait
   // sees the real rendered state instead of the kernel's empty answer.
   if (typeof tab.id === 'number' && PRECHECK_OPS.has(op.action) && op.target) {
-    await waitForActionable(tab.id, op.target, signal, op.resolvePolicy)
+    await waitForActionable(tab.id, op.target, signal, op.resolvePolicy, op.waitFor)
   }
 
   if (typeof tab.id === 'number' && targetIsClosedShadow(op.target)) {

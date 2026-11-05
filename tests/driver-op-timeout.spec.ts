@@ -100,3 +100,33 @@ describe('execOnActiveTab injection timeout', () => {
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
   })
 })
+
+describe('execOnActiveTab actionability pre-check', () => {
+  it('does not spend its budget on a missing target that has a kernel wait', async () => {
+    // A real run paid 1200ms pre-check + 5000ms kernel wait for one click that
+    // never matched. The kernel wait IS the page's chance to render the target;
+    // the pre-check must not stack its own budget in front of it.
+    executeScript.mockImplementation(async (details: unknown) => {
+      const op = (details as { args?: { action?: string }[] }).args?.[0]
+      if (op?.action === 'actionability') {
+        return [
+          { result: { ok: true, found: false, isTopFrame: true, data: { state: 'missing' } } },
+        ]
+      }
+      return [{ result: { ok: true, found: true, isTopFrame: true } }]
+    })
+    const pending = execOnActiveTab(
+      { action: 'click', target: cssTarget('#go'), waitFor: 5000 },
+      undefined,
+      TAB.id,
+    )
+    // A pre-check that still waited would be asleep at this point.
+    await vi.advanceTimersByTimeAsync(0)
+    const result = await pending
+    expect(result.ok).toBe(true)
+    const probes = executeScript.mock.calls.filter(
+      (call) => (call[0] as { args?: { action?: string }[] }).args?.[0]?.action === 'actionability',
+    )
+    expect(probes).toHaveLength(1)
+  })
+})

@@ -21,6 +21,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ensureNavigationAnchor,
+  PERSISTED_WAIT_MS,
   persistDefaultRetries,
   persistDefaultWaits,
   unanchoredElementStart,
@@ -69,7 +70,7 @@ describe('persistDefaultWaits', () => {
 
     const click = out.drawflow.nodes.find((n) => n.data['blockId'] === 'event-click')!
     expect(click.data['waitForSelector']).toBe(true)
-    expect(click.data['waitSelectorTimeout']).toBe(5000)
+    expect(click.data['waitSelectorTimeout']).toBe(PERSISTED_WAIT_MS)
     // Navigation and read blocks are untouched.
     const tab = out.drawflow.nodes.find((n) => n.data['blockId'] === 'new-tab')!
     expect(tab.data['waitForSelector']).toBeUndefined()
