@@ -387,9 +387,13 @@ export function useFieldSlashMenu({ inputRef, onChange, disabled }: FieldMenuOpt
   const node =
     host && query && anchor
       ? createPortal(
+          // Stacks above .wf-modal-backdrop (z-index 10000): several block forms
+          // open their fields inside a PopupField dialog, and both surfaces
+          // portal to <body>, so a lower z would hide the menu behind the very
+          // dialog that owns the field.
           <div
             ref={listBoxRef}
-            className="fixed z-[9000] overflow-y-auto rounded-lg border border-border bg-panel py-1 text-xs shadow-lg"
+            className="fixed z-[10100] overflow-y-auto rounded-lg border border-border bg-panel py-1 text-xs shadow-lg"
             role="listbox"
             aria-label={t('varMenuVariables')}
             style={{

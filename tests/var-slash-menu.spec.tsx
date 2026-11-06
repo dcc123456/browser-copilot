@@ -19,6 +19,8 @@
  *    `get-secret` variable name the field then references.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const mocks = vi.hoisted(() => ({ listPasswords: vi.fn() }))
 
@@ -415,5 +417,28 @@ describe('the code editor variable list', () => {
     expect(names.join(' ')).not.toContain('GitHub PAT')
     expect(names).not.toContain('secret_pat_token')
     expect(document.body.textContent ?? '').not.toContain('SUPER-SECRET')
+  })
+})
+
+/**
+ * PopupField dialogs (insert-data, get-text, data-mapping…) host these fields
+ * inside a `Modal`, and both the dialog and the menu portal to <body>. The menu
+ * originally sat at z-9000, under the dialog's 10000 backdrop, so a `/` opened
+ * a list the dialog covered — visible only dimly through the overlay and
+ * impossible to click. Pin the relationship against the real stylesheet so
+ * neither side can move silently.
+ */
+describe('the menu stacks above the dialog that owns the field', () => {
+  it('renders above the modal backdrop', async () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/workflow-editor/editor.css'), 'utf8')
+    const backdropZ = /\.wf-modal-backdrop\s*\{[^}]*z-index:\s*(\d+)/.exec(css)?.[1]
+    expect(backdropZ, '.wf-modal-backdrop z-index').toBeDefined()
+
+    const { el, menu } = await mount()
+    type(el, '/')
+    expect(menu()).not.toBeNull()
+    const menuZ = /z-\[(\d+)\]/.exec(menu()?.className ?? '')?.[1]
+    expect(menuZ, 'slash menu z-index class').toBeDefined()
+    expect(Number(menuZ)).toBeGreaterThan(Number(backdropZ))
   })
 })
