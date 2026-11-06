@@ -10,8 +10,12 @@
  * producer genuinely ran.
  */
 import { describe, it, expect } from 'vitest'
-import { getByPath, interpolate, parseReference } from '../src/lib/workflow/interpolate'
-
+import {
+  getByPath,
+  interpolate,
+  parseReference,
+  resolveExactReference,
+} from '../src/lib/workflow/interpolate'
 describe('a dotted path into a JSON string', () => {
   const doc = '{"title":"AI 超能力","body":"装上就能自动干活"}'
 
@@ -94,5 +98,36 @@ describe('bracket access into arrays and objects', () => {
     expect(parseReference('obj["a.b"]')).toEqual({ name: 'obj', path: ['a.b'] })
     expect(parseReference('rows')).toEqual({ name: 'rows', path: [] })
     expect(parseReference('a..b')).toBeUndefined()
+  })
+})
+
+describe('resolveExactReference keeps the typed value', () => {
+  it('returns the object itself, not "[object Object]"', () => {
+    const article = { title: 'T', meta: { a1: 7 } }
+    expect(resolveExactReference('{{article}}', { article })).toEqual({
+      found: true,
+      value: article,
+    })
+    // The executor stores this and a later `{{copy.meta.a1}}` reads a field.
+    expect(resolveExactReference('{{ copy }}', { copy: article }).value).toEqual(article)
+  })
+
+  it('returns a typed field for a dotted whole-token reference', () => {
+    expect(resolveExactReference('{{rows[0].n}}', { rows: [{ n: 7 }] })).toEqual({
+      found: true,
+      value: 7,
+    })
+  })
+
+  it('stays out of the way for embedded, missing, or malformed tokens', () => {
+    expect(resolveExactReference('id-{{x}}', { x: 'a' })).toEqual({
+      found: false,
+      value: undefined,
+    })
+    expect(resolveExactReference('{{x}}', {})).toEqual({ found: false, value: undefined })
+    expect(resolveExactReference('{{x.y}}', { x: {} })).toEqual({
+      found: false,
+      value: undefined,
+    })
   })
 })

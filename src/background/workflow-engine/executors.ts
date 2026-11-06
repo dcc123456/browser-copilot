@@ -45,7 +45,11 @@ import { getFeishuConfig } from '../../lib/task-store'
 import { sendWebhookText } from '../../lib/feishu'
 import { entryFields, findField, type PasswordEntry } from '../../lib/types'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
-import { interpolate, EMPTY_INTERP_KEY } from '../../lib/workflow/interpolate'
+import {
+  interpolate,
+  resolveExactReference,
+  EMPTY_INTERP_KEY,
+} from '../../lib/workflow/interpolate'
 import { secretRequestsOf } from '../../lib/workflow/secret-params'
 import {
   conditionGroupsMatch,
@@ -1453,11 +1457,18 @@ const setVariable: BlockExecutor = async (data, ctx) => {
   // Ascending order matters: a later row may reference a variable an earlier
   // row just wrote (`{{token}}` set on row 1, `Bearer {{token}}` on row 2).
   for (const assignment of assignments) {
-    ctx.variables[assignment.name] = interpolate(
-      String(assignment.value ?? ''),
-      ctx.variables,
-      ctx.refData,
-    )
+    // A value row can carry (or reference) an OBJECT — a generated graph may
+    // hand one over directly, and `{{a}}` used to be rendered as the text
+    // `[object Object]`. Keep the typed value so a downstream `{{copy.a1}}`
+    // still reads a field; plain prose keeps the ordinary interpolation path.
+    if (typeof assignment.value !== 'string') {
+      ctx.variables[assignment.name] = assignment.value
+      continue
+    }
+    const exact = resolveExactReference(assignment.value, ctx.variables, ctx.refData)
+    ctx.variables[assignment.name] = exact.found
+      ? exact.value
+      : interpolate(assignment.value, ctx.variables, ctx.refData)
   }
   const names = assignments.map((assignment) => assignment.name).join(', ')
   ctx.emit('result', `已设置 ${assignments.length} 个变量：${names}`)

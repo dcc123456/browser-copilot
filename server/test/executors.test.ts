@@ -120,6 +120,24 @@ describe('server executors', () => {
     expect(ctx.variables['authHeader']).toBe('Bearer abc')
   })
 
+  it('set-variable keeps an object whole so later dotted reads still work', async () => {
+    // A whole-value reference used to go through `String(...)`, storing
+    // "[object Object]" and losing every field of the object it copied.
+    const registry = createExecutors(makeDeps(makeDriverStub()))
+    const ctx = makeCtx({ article: { title: 'T', meta: { a1: 7 } } })
+    await registry['set-variable']!(
+      {
+        variables: [
+          { name: 'copy', value: '{{article}}' },
+          { name: 'title', value: '{{copy.meta.a1}}' },
+        ],
+      },
+      ctx,
+    )
+    expect(ctx.variables['copy']).toEqual({ title: 'T', meta: { a1: 7 } })
+    expect(ctx.variables['title']).toBe(7)
+  })
+
   it('set-variable fails a node with no variable name', async () => {
     const registry = createExecutors(makeDeps(makeDriverStub()))
     const ctx = makeCtx()

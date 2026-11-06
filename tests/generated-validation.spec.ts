@@ -163,6 +163,26 @@ describe('layer B — data flow', () => {
     )
   })
 
+  it('set-variable rows are producers, including for dotted references', () => {
+    // The editor saves each assignment as a `variables[]` row and clears the
+    // flat `variableName`; reading only the flat field made every row-written
+    // variable look like nothing writes it, so `{{article.title}}` was flagged
+    // on a graph whose upstream set-variable genuinely defined `article`.
+    const wf = linearWorkflow(
+      triggerNode(),
+      makeNode('set-variable', {
+        variableName: '',
+        value: '',
+        variables: [{ name: 'article', value: '{"title":"T","meta":{"a1":7}}' }],
+      }),
+      makeNode('forms', { action: 'fill', selector: '#t', value: '{{article.title}}' }),
+      makeNode('forms', { action: 'fill', selector: '#m', value: '{{article.meta.a1}}' }),
+    )
+    expect(codes(validateGeneratedWorkflow(wf)).filter((c) => c.startsWith('DATA_'))).toHaveLength(
+      0,
+    )
+  })
+
   it('an ai-agent node writes the variable it names', () => {
     // The generated cover-image graph wrote its title and body in two ai-agent
     // nodes, and the save was flagged as reading variables nothing writes: the

@@ -24,7 +24,7 @@ import { LoopBreakpointError } from '../../src/background/workflow-engine/loop-b
 import { sanitizeModelAnswer } from '../../src/lib/model-output'
 import { streamCompletion, type WireMessage } from '../../src/lib/llm'
 import { preprocessImage } from '../../src/lib/vision'
-import { interpolate } from '../../src/lib/workflow/interpolate'
+import { interpolate, resolveExactReference } from '../../src/lib/workflow/interpolate'
 import { sendWebhookText } from '../../src/lib/feishu'
 import { conditionGroupsMatch } from '../../src/lib/workflow/condition-tree'
 import {
@@ -919,11 +919,16 @@ export function createExecutors(deps: ExecutorDeps): Record<string, BlockExecuto
       throw new Error('set-variable: 没有填写变量名，未设置任何变量')
     }
     for (const assignment of assignments) {
-      ctx.variables[assignment.name] = interpolate(
-        String(assignment.value ?? ''),
-        ctx.variables,
-        ctx.refData,
-      )
+      // Mirror of the extension executor: a whole-value object reference keeps
+      // its type so `{{copy.a1}}` can read a field after the assignment.
+      if (typeof assignment.value !== 'string') {
+        ctx.variables[assignment.name] = assignment.value
+        continue
+      }
+      const exact = resolveExactReference(assignment.value, ctx.variables, ctx.refData)
+      ctx.variables[assignment.name] = exact.found
+        ? exact.value
+        : interpolate(assignment.value, ctx.variables, ctx.refData)
     }
     const names = assignments.map((assignment) => assignment.name).join(', ')
     ctx.emit('result', `已设置 ${assignments.length} 个变量：${names}`)

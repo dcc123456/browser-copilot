@@ -27,9 +27,9 @@ import {
   type NodeReliabilitySpec,
 } from './reliability'
 import { deriveGoalSpecFromNodes } from './goal'
-import { VARIABLE_PRODUCER_FIELD } from './producer-completeness'
+import { producedVariableNames } from './producer-completeness'
 import { referenceRoot } from './dynamic-data'
-import { SECRET_PRODUCER_BLOCK, secretVariableNamesOf } from './secret-params'
+import { SECRET_PRODUCER_BLOCK } from './secret-params'
 import { nodeGoalContractOf } from './node-goal-contract'
 import { resolveNodeGoalContract } from './node-goal-instantiation'
 import { richTargetFromAny, selectorFromTarget } from './target-to-selector'
@@ -70,27 +70,6 @@ export const ELEMENT_OP_BLOCKS: ReadonlySet<string> = new Set<string>([
   'set-checkbox',
   'select-option',
   'element-scroll',
-])
-
-/** Blocks that write variables or table cells (data layer B). */
-const VARIABLE_WRITER_BLOCKS = new Set<string>([
-  'set-variable',
-  'webhook',
-  'get-text',
-  'attribute-value',
-  'read-page',
-  'element-exists',
-  'counter',
-  'date-now',
-  'random-number',
-  'get-secret',
-  'prompt-text',
-  'while-loop',
-  'loop-data',
-  'loop-elements',
-  'repeat-task',
-  'increment-variable',
-  'forms',
 ])
 
 /** Unsafe (non-idempotent) interaction verbs — the §5 classification. */
@@ -217,28 +196,16 @@ function validateGraph(workflow: Workflow, ctx: ValidateCtx): GeneratedValidatio
 }
 
 /** Variables a single node WRITES (its definite definitions). This replaces the
- * old process-wide `written` Set with a per-node view for the CFG analysis. */
+ * old process-wide `written` Set with a per-node view for the CFG analysis.
+ * `producedVariableNames` is the single source of producer knowledge, so a
+ * `set-variable` node writing one variable PER ROW is counted here; reading
+ * only the flat `variableName` missed it (the editor clears that field when it
+ * saves rows), which reported every row-written object as never written. */
 function variableWritesOf(node: WorkflowNode): Set<string> {
-  const written = new Set<string>()
-  const blockId = blockIdOf(node)
-  const p = paramsOf(node)
-  // The producer map is the authoritative "which field of which block holds the
-  // variable it writes"; VARIABLE_WRITER_BLOCKS below only knows `variableName`
-  // and predates the map, so consult the map for EVERY block first. Without it
-  // an ai-agent node writing `noteTitle` was reported as a variable nothing
-  // writes, and webhook (which publishes `responseVariable`) was missed too.
-  const producerField = VARIABLE_PRODUCER_FIELD[blockId]
-  const produced = producerField ? p[producerField] : undefined
-  if (typeof produced === 'string' && produced) written.add(produced)
-  // A multi-credential `get-secret` node writes one variable PER ROW, and its
-  // flat `variableName` only mirrors the first one.
-  if (blockId === SECRET_PRODUCER_BLOCK) {
-    for (const name of secretVariableNamesOf(p)) written.add(name)
-  }
-  if (!VARIABLE_WRITER_BLOCKS.has(blockId)) return written
-  if (typeof p['variableName'] === 'string' && p['variableName']) written.add(p['variableName'])
+  const written = new Set(producedVariableNames(node))
   // forms fill writes its declared field variables at run time.
-  if (blockId === 'forms' && Array.isArray(p['fields'])) {
+  const p = paramsOf(node)
+  if (blockIdOf(node) === 'forms' && Array.isArray(p['fields'])) {
     for (const field of p['fields'] as Array<Record<string, unknown>>) {
       if (typeof field?.['variableName'] === 'string') written.add(field['variableName'])
     }

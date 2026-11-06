@@ -578,6 +578,38 @@ describe('workflow executors (automa-aligned browser actions)', () => {
   })
 })
 
+describe('set-variable keeps typed values', () => {
+  it('copies an object whole and reads its fields afterwards', async () => {
+    // A whole-value reference used to be rendered as text, storing
+    // "[object Object]" and losing every field of the object it copied.
+    const { ctx } = makeCtx()
+    ctx.variables['article'] = { title: 'T', meta: { a1: 7 } }
+
+    await EXECUTORS['set-variable']!({ variables: [{ name: 'copy', value: '{{article}}' }] }, ctx)
+    expect(ctx.variables['copy']).toEqual({ title: 'T', meta: { a1: 7 } })
+
+    await EXECUTORS['set-variable']!(
+      { variables: [{ name: 'a1', value: '{{copy.meta.a1}}' }] },
+      ctx,
+    )
+    expect(ctx.variables['a1']).toBe(7)
+  })
+
+  it('keeps a non-string row value instead of stringifying it', async () => {
+    const { ctx } = makeCtx()
+    const config = { a1: 1 }
+    await EXECUTORS['set-variable']!({ variables: [{ name: 'cfg', value: config }] }, ctx)
+    expect(ctx.variables['cfg']).toBe(config)
+  })
+
+  it('resolves a dotted reference into a JSON string variable', async () => {
+    const { ctx } = makeCtx()
+    ctx.variables['articleData'] = '{"a1":"ok"}'
+    await EXECUTORS['set-variable']!({ variableName: 'a1', value: '{{articleData.a1}}' }, ctx)
+    expect(ctx.variables['a1']).toBe('ok')
+  })
+})
+
 describe('workflow ocr block', () => {
   let chromeRefs: ReturnType<typeof makeChromeMock>['refs']
   let driverMock: ReturnType<typeof vi.fn>

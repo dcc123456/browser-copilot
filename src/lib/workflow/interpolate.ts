@@ -260,6 +260,36 @@ export function escapeForJsLiteral(value: string): string {
     .replace(/\u2029/g, '\\u2029')
 }
 
+/** A `{{expr}}` filling the WHOLE string — the shape that can keep its type. */
+const EXACT_TOKEN = /^\{\{\s*([^{}]+?)\s*\}\}$/
+
+/**
+ * Resolve a string that is EXACTLY one `{{reference}}` to its raw value.
+ *
+ * {@link interpolate} always renders TEXT, which is right for prose parameters
+ * but lossy for a value slot: assigning `{{config}}` to another variable used
+ * to write `[object Object]` into the bag, so the copy could no longer be read
+ * as `{{copy.field}}`. A caller that stores values (rather than composing a
+ * sentence) uses this to keep the object / array / number intact, falling back
+ * to plain interpolation when the text is anything more than one token.
+ *
+ * `found: false` covers both "not a single token" and "the token did not
+ * resolve", so the caller keeps the existing unresolved-token behaviour.
+ */
+export function resolveExactReference(
+  text: string,
+  vars: Record<string, unknown>,
+  refData?: unknown,
+): { found: boolean; value: unknown } {
+  const match = EXACT_TOKEN.exec(text.trim())
+  if (!match) return { found: false, value: undefined }
+  const reference = parseReference(match[1]!)
+  if (!reference) return { found: false, value: undefined }
+  const root = reference.name === 'refData' ? refData : vars[reference.name]
+  const value = walkPath(root, reference.path)
+  return value === undefined ? { found: false, value: undefined } : { found: true, value }
+}
+
 /**
  * Replace every `{{name}}` / `{{name.key}}` / `{{name[0]}}` token in `text`.
  *
