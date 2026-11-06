@@ -257,6 +257,11 @@ export interface OperatorAdviseResult {
   rejected: string[]
   /** The page the parameters were grounded in; `null` when none could be read. */
   page?: OperatorPageRef | null
+  /** The last run the answer was grounded in, when the user turned that switch
+   *  on — so the editor can say WHICH log was read, not just that it was. */
+  lastRun?: { outcome: string; finishedAt?: number }
+  /** The switch was on but this workflow has no recorded finished run. */
+  lastRunMissing?: boolean
   /** Set only when a step still lacked a page parameter and a screenshot was
    *  tried for it — the user must be told the screen went out. */
   screenshot?: OperatorScreenshotReport
@@ -872,6 +877,68 @@ export function adviseCandidates(stepIntent: string, workflowGoal?: string): Ope
   return offered
 }
 
+/** One recorded line of a finished run, as the run board keeps it. */
+export interface OperatorLastRunStep {
+  kind: string
+  text: string
+  /** Resolved block label, for block-bound lines. */
+  label?: string
+}
+
+/**
+ * The last finished run of the workflow, as the editor's Logs panel shows it.
+ * Declared here (not imported from `background/running-tasks`) so `src/lib`
+ * stays free of `src/background`; the background maps its record onto this.
+ */
+export interface OperatorLastRun {
+  outcome: string
+  startedAt?: number
+  finishedAt?: number
+  summary?: string
+  error?: string
+  steps: readonly OperatorLastRunStep[]
+}
+
+/** How much of a run log reaches the assistant prompt. It is re-sent on every
+ *  turn of the chat, and the failing lines are at the END of a run, so the cap
+ *  keeps the tail and says the earlier lines were dropped. */
+export const OPERATOR_LAST_RUN_CAP = 6000
+
+/** Cap on one step line: a read-page result can be a whole article. */
+const OPERATOR_LAST_RUN_STEP_CAP = 600
+const OPERATOR_LAST_RUN_SUMMARY_CAP = 600
+const OPERATOR_LAST_RUN_ERROR_CAP = 1200
+
+/**
+ * The run log as the model reads it: what the run was, how it ended, and the
+ * steps in order. Values are NOT rewritten — the failing line is exactly the
+ * evidence the user wants fixed — only capped so one long read cannot crowd out
+ * the conversation.
+ */
+export function formatLastRunForModel(run: OperatorLastRun): string {
+  const ended =
+    typeof run.finishedAt === 'number'
+      ? ` — finished ${new Date(run.finishedAt).toISOString()}`
+      : ''
+  const lines = [`outcome: ${run.outcome}${ended}`]
+  if (run.summary?.trim())
+    lines.push(`summary: ${run.summary.trim().slice(0, OPERATOR_LAST_RUN_SUMMARY_CAP)}`)
+  if (run.error?.trim())
+    lines.push(`error: ${run.error.trim().slice(0, OPERATOR_LAST_RUN_ERROR_CAP)}`)
+  lines.push('steps:')
+  for (const step of run.steps) {
+    const label = step.label ? `${step.label} — ` : ''
+    const text =
+      step.text.length > OPERATOR_LAST_RUN_STEP_CAP
+        ? `${step.text.slice(0, OPERATOR_LAST_RUN_STEP_CAP)}…`
+        : step.text
+    lines.push(`[${step.kind}] ${label}${text}`)
+  }
+  const body = lines.join('\n')
+  if (body.length <= OPERATOR_LAST_RUN_CAP) return body
+  return `… (earlier lines omitted)\n${body.slice(body.length - OPERATOR_LAST_RUN_CAP)}`
+}
+
 /** Inputs to the prompt builder. */
 export interface OperatorAdvisePromptInput {
   /** The conversation so far, oldest first; the last row is what to answer. */
@@ -879,6 +946,14 @@ export interface OperatorAdvisePromptInput {
   /** Text description of the current canvas, from {@link operatorDigestOf}. */
   graphDigest: string
   candidates: OperatorCandidate[]
+  /** The last finished run's log, when the user turned "read the last run log"
+   *  on. This is the same log the editor's Logs panel shows — evidence of what
+   *  actually happened, which is what a parameter fix should be based on. */
+  lastRun?: OperatorLastRun
+  /** The toggle was on but this workflow has no recorded finished run. Kept
+   *  apart from {@link lastRun} so the model can say so instead of inventing a
+   *  log, and so "not asked" stays different from "asked, nothing there". */
+  lastRunMissing?: boolean
   /** The step the user selected, with every current parameter, from
    *  {@link selectedOperatorSpecOf}. Empty or absent when nothing is selected. */
   selectedSpec?: string
@@ -968,6 +1043,24 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
           'text from its forms. Never invent a selector that is not shown here; leave a parameter out',
           'rather than guessing it.',
         ]),
+    ...(input.lastRun !== undefined
+      ? [
+          '',
+          '## The last run of this workflow (its recorded log — the user turned this on)',
+          formatLastRunForModel(input.lastRun),
+          'This is EVIDENCE of what actually happened, not a description of what should happen: use it',
+          'to find the step whose parameter caused the failure or the wrong value, and return that',
+          'corrected step. Do not restate the log, and do not change steps it does not blame. The run',
+          'may predate the latest canvas edits, so apply the diagnosis, not its old values verbatim.',
+        ]
+      : input.lastRunMissing
+        ? [
+            '',
+            '## The last run log was requested but there is none',
+            'The user asked you to read the last run log, but no finished run of this workflow is',
+            'recorded. Say so in "reply"; do not invent a log or claim to have read one.',
+          ]
+        : []),
     ...(picked.length === 0
       ? []
       : [
@@ -1033,6 +1126,7 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     '- "blockId" is the operator id exactly as listed (e.g. "data-mapping"), not an instance id with a number on the end ("data-mapping-1"); two steps of the same operator are two rows with that same id.',
     '- Fill every value the user stated (URLs, text, selectors) and omit the rest — the catalog default is applied for you.',
     '- A value the form only draws once its flag is on is inert alone: return the flag with it (an output variable needs assignVariable: true, a saved table column needs saveData: true, a variable source needs dataSource: "variable").',
+    '- When the last run log is present, fix the step it blames — a step the log shows working is not the failing one. Quote the log\'s own evidence in "rationale".',
     '- Where a value should come from an earlier step, reference it as {{variableName}} using a name the digest shows that step produces.',
     '- Prefer stable locators (#id, [data-testid], [name]) over generated classes or nth-child chains.',
     `- At most ${maxOperators} operators (one for "edit"/"replace"). Return an empty "proposals" array when nothing on the list fits or the user is only asking a question — then "reply" must say why.`,

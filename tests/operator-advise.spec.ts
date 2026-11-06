@@ -8,12 +8,14 @@ import {
   buildOperatorAdvisePrompt,
   chainOrderOf,
   edgesAfterBatchRemoved,
+  formatLastRunForModel,
   isObservableBlock,
   operatorBatchOf,
   operatorDataOfProposal,
   operatorDigestOf,
   operatorScreenshotRoute,
   OPERATOR_ADVISE_MAX_OPERATORS,
+  OPERATOR_LAST_RUN_CAP,
   OPERATOR_SCREENSHOT_NOTE_CAP,
   OPERATOR_SCREENSHOT_QUESTION,
   parseOperatorAdviseReply,
@@ -24,6 +26,7 @@ import {
   tailNodeOf,
   type OperatorAdviseMessage,
   type OperatorCandidate,
+  type OperatorLastRun,
   type OperatorPageRead,
   type OperatorProposal,
 } from '../src/lib/workflow/operator-advise'
@@ -190,6 +193,66 @@ describe('buildOperatorAdvisePrompt', () => {
     const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
     expect(prompt).toContain('assignVariable: true')
     expect(prompt).toContain('dataSource: "variable"')
+  })
+
+  it('reads the last run log as evidence when the user turned it on', () => {
+    const lastRun: OperatorLastRun = {
+      outcome: 'failed',
+      finishedAt: Date.UTC(2026, 10, 6, 8, 0, 0),
+      summary: 'Stopped at Data mapping',
+      error: 'jobsData is not an array',
+      steps: [
+        { kind: 'tool', text: 'opened https://example.com', label: 'New tab' },
+        { kind: 'error', text: 'jobsData is not an array', label: 'Data mapping' },
+      ],
+    }
+    const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates, lastRun })
+    expect(prompt).toContain('## The last run of this workflow')
+    expect(prompt).toContain('outcome: failed — finished 2026-11-06T08:00:00.000Z')
+    expect(prompt).toContain('[error] Data mapping — jobsData is not an array')
+    expect(prompt).toContain('EVIDENCE of what actually happened')
+    expect(prompt).toContain('fix the step it blames')
+    // Evidence sits before the offer, next to the page read it competes with.
+    expect(prompt.indexOf('## The last run')).toBeLessThan(
+      prompt.indexOf('## Operators you may use'),
+    )
+
+    // Off by default: a turn that did not ask for the log gets no log section.
+    const without = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
+    expect(without).not.toContain('## The last run of this workflow')
+  })
+
+  it('says a requested run log does not exist instead of letting the model invent one', () => {
+    const prompt = buildOperatorAdvisePrompt({
+      history,
+      graphDigest: '',
+      candidates,
+      lastRunMissing: true,
+    })
+    expect(prompt).toContain('## The last run log was requested but there is none')
+    expect(prompt).toContain('do not invent a log')
+    expect(prompt).not.toContain('outcome:')
+  })
+
+  it('caps the run log to its tail so the failing lines survive', () => {
+    const steps = Array.from({ length: 200 }, (_value, index) => ({
+      kind: 'tool',
+      text: `step ${index} ${'x'.repeat(200)}`,
+    }))
+    const digest = formatLastRunForModel({ outcome: 'failed', steps })
+    const marker = '… (earlier lines omitted)\n'
+    expect(digest.length).toBeLessThanOrEqual(OPERATOR_LAST_RUN_CAP + marker.length)
+    expect(digest.startsWith(marker)).toBe(true)
+    // The end of a run is where the failure is, so the head is what gets dropped.
+    expect(digest).toContain('step 199')
+    expect(digest).not.toContain('step 0 ')
+
+    const oneLongRead = formatLastRunForModel({
+      outcome: 'ok',
+      steps: [{ kind: 'result', text: 'y'.repeat(5000) }],
+    })
+    expect(oneLongRead).toContain('…')
+    expect(oneLongRead.length).toBeLessThan(1000)
   })
 
   it('forbids the instance ids an exported workflow uses', () => {

@@ -377,6 +377,61 @@ describe('V-operator-dock: the floating assistant', () => {
     expect(container.textContent).toContain('operatorAiPageNone')
   })
 
+  it('asks for the last run log only after the user turns that switch on', async () => {
+    await render()
+    await act(async () => {
+      buttonByText('operatorAiFabLabel')?.click()
+    })
+    await typeInto('修一下上次失败的步骤')
+    await send()
+    expect(adviseCommands()[0]!.includeLastRunLog).toBeUndefined()
+
+    await act(async () => {
+      buttonByText('operatorAiRunLogToggleOff')?.click()
+    })
+    expect(buttonByText('operatorAiRunLogToggleOn')).toBeDefined()
+    await typeInto('再修一次')
+    await send()
+
+    expect(adviseCommands()[1]!.includeLastRunLog).toBe(true)
+  })
+
+  it('says which run log grounded the answer, or that there was none', async () => {
+    reply = {
+      type: 'workflows.operatorAdvise',
+      data: {
+        ok: true,
+        reply: '已按日志修正',
+        action: 'append',
+        proposals: [{ blockId: 'new-tab', data: { url: 'https://b' }, rationale: '' }],
+        rejected: [],
+        lastRun: { outcome: 'failed', finishedAt: 1_760_000_000_000 },
+      },
+    }
+    await render()
+    await act(async () => {
+      buttonByText('operatorAiFabLabel')?.click()
+    })
+    await typeInto('修一下上次失败的步骤')
+    await send()
+    expect(container.textContent).toContain('operatorAiRunLogUsed')
+
+    reply = {
+      type: 'workflows.operatorAdvise',
+      data: {
+        ok: true,
+        reply: '没有日志可读',
+        action: 'append',
+        proposals: [],
+        rejected: [],
+        lastRunMissing: true,
+      },
+    }
+    await typeInto('再看一次')
+    await send()
+    expect(container.textContent).toContain('operatorAiRunLogNone')
+  })
+
   describe('a batch whose locator only the page can supply', () => {
     it('holds it instead of landing a guessed locator', async () => {
       reply = groundedReply([{ blockId: 'event-click', data: {}, rationale: '' }])

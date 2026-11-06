@@ -235,6 +235,7 @@ import { runOperatorAdvise, runOperatorObserve } from './operator-advise-engine'
 import {
   OPERATOR_ADVISE_STREAM_FLUSH_MS,
   type OperatorAdviseDelta,
+  type OperatorLastRun,
 } from '../lib/workflow/operator-advise'
 import type { RecoveryPhaseState, RecoveryProtocolStatus } from '../lib/workflow/recovery-protocol'
 import {
@@ -1317,6 +1318,53 @@ function runningBoardsView(workflowIdFilter?: string): {
         ...(r.debug ? { debug: r.debug } : {}),
       })),
     finished: listFinished().filter(matches).map(mapFinished),
+  }
+}
+
+/**
+ * The newest finished run of one workflow, in the shape the assistant prompt
+ * takes. The in-memory board is what the Logs panel polls, so the log sent to
+ * the model is the record the user can see; a worker restart hydrates that board
+ * from the durable run log, and a run pushed out of its 30-entry window is still
+ * read from storage rather than letting the toggle silently find nothing.
+ *
+ * A RUNNING run is not "the last run": only a settled one carries the outcome
+ * and the failing line that a parameter fix should be based on.
+ */
+async function lastRunForAdvise(
+  workflowId: string | undefined,
+): Promise<OperatorLastRun | undefined> {
+  if (!workflowId) return undefined
+  const inMemory = listFinished().find((run) => run.workflowId === workflowId)
+  if (inMemory) {
+    return {
+      outcome: inMemory.outcome,
+      ...(inMemory.startedAt !== undefined ? { startedAt: inMemory.startedAt } : {}),
+      finishedAt: inMemory.finishedAt,
+      ...(inMemory.summary ? { summary: inMemory.summary } : {}),
+      ...(inMemory.error ? { error: inMemory.error } : {}),
+      steps: inMemory.steps.map((step) => ({
+        kind: step.kind,
+        text: step.text,
+        ...(step.label ? { label: step.label } : {}),
+      })),
+    }
+  }
+  const persisted = (await listRuns().catch(() => [])).find(
+    (run) => run.workflowId === workflowId && run.outcome !== undefined,
+  )
+  if (!persisted) return undefined
+  return {
+    outcome: persisted.outcome ?? 'unknown',
+    ...(persisted.startedAt !== undefined ? { startedAt: persisted.startedAt } : {}),
+    finishedAt: persisted.finishedAt ?? persisted.at,
+    ...(persisted.summary ? { summary: persisted.summary } : {}),
+    ...(persisted.error ? { error: persisted.error } : {}),
+    steps: (persisted.steps ?? []).map((step) => ({
+      kind: step.kind,
+      text: step.text,
+      ...(step.label ? { label: step.label } : {}),
+    })),
   }
 }
 
@@ -2832,6 +2880,11 @@ async function handleCommand(
       assistantAborts.set(command.sessionId, controller)
       const adviseStream = adviseStreamToPages(command.sessionId)
       try {
+        // The log is resolved here, from the same run board the Logs panel reads,
+        // only when the user turned the switch on. Off means nothing is read.
+        const lastRun = command.includeLastRunLog
+          ? await lastRunForAdvise(command.workflowId)
+          : undefined
         const data = await runOperatorAdvise(
           {
             sessionId: command.sessionId,
@@ -2844,6 +2897,8 @@ async function handleCommand(
             ...(command.pickedElements?.length ? { pickedElements: command.pickedElements } : {}),
             ...(command.workflowGoal ? { workflowGoal: command.workflowGoal } : {}),
             ...(command.workflowId ? { workflowId: command.workflowId } : {}),
+            ...(lastRun ? { lastRun } : {}),
+            ...(command.includeLastRunLog && !lastRun ? { lastRunMissing: true } : {}),
           },
           { signal: controller.signal, stream: adviseStream.push },
         )

@@ -84,6 +84,39 @@ describe('runOperatorAdvise', () => {
     expect(prompts[0]).toContain('"destinations"')
   })
 
+  it('relays the last run log, or its absence, into the prompt', async () => {
+    const prompts: string[] = []
+    const deps = {
+      signal: new AbortController().signal,
+      callModel: async (prompt: string) => {
+        prompts.push(prompt)
+        return '{"reply":"已改好","action":"edit","proposals":[{"blockId":"new-tab","data":{"url":"https://a"}}]}'
+      },
+    }
+
+    await runOperatorAdvise(
+      input({
+        lastRun: {
+          outcome: 'failed',
+          steps: [{ kind: 'error', text: 'no such element: #city' }],
+        },
+      }),
+      deps,
+    )
+    expect(prompts[0]).toContain('## The last run of this workflow')
+    expect(prompts[0]).toContain('no such element: #city')
+
+    // Turned on, but nothing recorded: the model must be told, not left to guess.
+    prompts.length = 0
+    await runOperatorAdvise(input({ lastRunMissing: true }), deps)
+    expect(prompts[0]).toContain('## The last run log was requested but there is none')
+
+    // Off: the prompt carries no run-log section at all.
+    prompts.length = 0
+    await runOperatorAdvise(input(), deps)
+    expect(prompts[0]).not.toContain('## The last run')
+  })
+
   it('refuses to call the model when there is no utterance to answer', async () => {
     let called = 0
     const result = await runOperatorAdvise(

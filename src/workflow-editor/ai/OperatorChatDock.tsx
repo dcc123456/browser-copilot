@@ -27,6 +27,7 @@ import {
   EyeOff,
   Focus,
   GripHorizontal,
+  History,
   Loader2,
   MousePointerClick,
   RotateCcw,
@@ -143,6 +144,10 @@ interface Turn {
   thinkingSkippedModel?: string
   /** The page this answer's parameters were read from; `null` when none was. */
   page?: OperatorPageRef | null
+  /** The last run log this answer was grounded in, when the switch was on. */
+  lastRun?: { outcome: string; finishedAt?: number }
+  /** The switch was on but the workflow has no recorded finished run. */
+  lastRunMissing?: boolean
   /** An assistant row that reports a failure rather than a landed chain. */
   failed?: boolean
   /** The answer is waiting to be landed: the steps need a parameter only the page
@@ -407,6 +412,9 @@ export default function OperatorChatDock({
   // Grounding is on by default — reading a page has no side effects, and a
   // parameter taken from the page is the whole point of asking in the editor.
   const [readPage, setReadPage] = useState(true)
+  // The last run's log is evidence, but it leaves the machine with the request
+  // AND may describe an older version of the canvas, so it is opt-in.
+  const [readRunLog, setReadRunLog] = useState(false)
   // Elements the user pointed at by hand since the last message. They outrank
   // any page read, so they ride along with the next send and are consumed there.
   const [picked, setPicked] = useState<PickedElement[]>([])
@@ -642,6 +650,7 @@ export default function OperatorChatDock({
         ...(context.selectedSpec ? { selectedSpec: context.selectedSpec } : {}),
         ...(context.windowId !== undefined ? { windowId: context.windowId } : {}),
         ...(readPage ? {} : { skipPageRead: true }),
+        ...(readRunLog ? { includeLastRunLog: true } : {}),
         ...(picks.length > 0 ? { pickedElements: picks } : {}),
         ...(context.workflowGoal ? { workflowGoal: context.workflowGoal } : {}),
         ...(context.workflowId ? { workflowId: context.workflowId } : {}),
@@ -678,6 +687,8 @@ export default function OperatorChatDock({
           ...(data.reasoning ? { reasoning: data.reasoning } : {}),
           ...(data.thinkingSkippedModel ? { thinkingSkippedModel: data.thinkingSkippedModel } : {}),
           page: data.page,
+          ...(data.lastRun ? { lastRun: data.lastRun } : {}),
+          ...(data.lastRunMissing ? { lastRunMissing: true } : {}),
           ...(data.screenshot ? { screenshot: data.screenshot } : {}),
           offer: {
             action: chain,
@@ -724,6 +735,8 @@ export default function OperatorChatDock({
         ...(data.reasoning ? { reasoning: data.reasoning } : {}),
         ...(data.thinkingSkippedModel ? { thinkingSkippedModel: data.thinkingSkippedModel } : {}),
         page: data.page ?? null,
+        ...(data.lastRun ? { lastRun: data.lastRun } : {}),
+        ...(data.lastRunMissing ? { lastRunMissing: true } : {}),
         ...(data.screenshot ? { screenshot: data.screenshot } : {}),
         ...(landing ? { landing } : {}),
       })
@@ -950,6 +963,19 @@ export default function OperatorChatDock({
             {turn.page === null && !turn.failed && (
               <p className="mt-1 text-[11px] leading-snug text-faint">{t('operatorAiPageNone')}</p>
             )}
+            {turn.lastRun && (
+              <p className="mt-1 flex items-start gap-1 text-[11px] leading-snug text-faint">
+                <History size={11} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span className="truncate">
+                  {t('operatorAiRunLogUsed').replace('{outcome}', turn.lastRun.outcome)}
+                </span>
+              </p>
+            )}
+            {turn.lastRunMissing && (
+              <p className="mt-1 text-[11px] leading-snug text-faint">
+                {t('operatorAiRunLogNone')}
+              </p>
+            )}
             {turn.screenshot && <ScreenshotLine screenshot={turn.screenshot} t={t} />}
             {turn.observed && (
               <p className="mt-1 whitespace-pre-wrap text-[11px] leading-snug text-muted">
@@ -1094,23 +1120,42 @@ export default function OperatorChatDock({
           value={input}
         />
         <div className="mt-1.5 flex items-center gap-1.5">
-          <button
-            aria-label={readPage ? t('operatorAiPageOn') : t('operatorAiPageOff')}
-            aria-pressed={readPage}
-            className="mr-auto flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] hover:bg-hover"
-            onClick={() => setReadPage((current) => !current)}
-            title={readPage ? t('operatorAiPageOn') : t('operatorAiPageOff')}
-            type="button"
-          >
-            {readPage ? (
-              <Eye size={12} aria-hidden="true" className="text-accent" />
-            ) : (
-              <EyeOff size={12} aria-hidden="true" className="text-faint" />
-            )}
-            <span className={readPage ? 'text-muted' : 'text-faint'}>
-              {readPage ? t('operatorAiPageToggleOn') : t('operatorAiPageToggleOff')}
-            </span>
-          </button>
+          <div className="mr-auto flex items-center gap-1">
+            <button
+              aria-label={readPage ? t('operatorAiPageOn') : t('operatorAiPageOff')}
+              aria-pressed={readPage}
+              className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] hover:bg-hover"
+              onClick={() => setReadPage((current) => !current)}
+              title={readPage ? t('operatorAiPageOn') : t('operatorAiPageOff')}
+              type="button"
+            >
+              {readPage ? (
+                <Eye size={12} aria-hidden="true" className="text-accent" />
+              ) : (
+                <EyeOff size={12} aria-hidden="true" className="text-faint" />
+              )}
+              <span className={readPage ? 'text-muted' : 'text-faint'}>
+                {readPage ? t('operatorAiPageToggleOn') : t('operatorAiPageToggleOff')}
+              </span>
+            </button>
+            <button
+              aria-label={readRunLog ? t('operatorAiRunLogOn') : t('operatorAiRunLogOff')}
+              aria-pressed={readRunLog}
+              className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] hover:bg-hover"
+              onClick={() => setReadRunLog((current) => !current)}
+              title={readRunLog ? t('operatorAiRunLogOn') : t('operatorAiRunLogOff')}
+              type="button"
+            >
+              <History
+                size={12}
+                aria-hidden="true"
+                className={readRunLog ? 'text-accent' : 'text-faint'}
+              />
+              <span className={readRunLog ? 'text-muted' : 'text-faint'}>
+                {readRunLog ? t('operatorAiRunLogToggleOn') : t('operatorAiRunLogToggleOff')}
+              </span>
+            </button>
+          </div>
           <button
             aria-label={t('operatorAiPickShort')}
             className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] hover:bg-hover disabled:opacity-50"

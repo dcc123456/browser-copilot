@@ -413,6 +413,10 @@ export type Command =
       /** The user's "don't read the page" override. Reading is on otherwise: a
        *  page read has no side effects, and it is what grounds the parameters. */
       skipPageRead?: boolean
+      /** The user's "read the last run log" switch. Off by default: the log is
+       *  sent to the model provider, so it is an explicit per-conversation choice.
+       *  The background resolves the newest finished run of `workflowId`. */
+      includeLastRunLog?: boolean
       /** Locators the user picked by hand with the page picker for this turn.
        *  They outrank the page read: the user pointed at the element themselves. */
       pickedElements?: import('./workflow/operator-advise').PickedElement[]

@@ -365,6 +365,13 @@ export const EDITOR_STRINGS = {
     operatorAiPageOff: 'Not reading the page — click to let the assistant read it again.',
     operatorAiPageToggleOn: 'Read page',
     operatorAiPageToggleOff: 'No page read',
+    operatorAiRunLogOn:
+      'The last finished run log is sent with each request — click to stop sending it.',
+    operatorAiRunLogOff: 'Not sending the last run log — click to let the assistant read it.',
+    operatorAiRunLogToggleOn: 'Last run log',
+    operatorAiRunLogToggleOff: 'No run log',
+    operatorAiRunLogUsed: 'Parameters checked against the last run log ({outcome})',
+    operatorAiRunLogNone: 'No finished run log was found for this workflow.',
     operatorAiOfferQuestion:
       'These steps still need the page: {keys}. Act on the page once first, then add them with the locators it really uses?',
     operatorAiOfferAct: 'Act once, then add',
@@ -742,6 +749,12 @@ export const EDITOR_STRINGS = {
     operatorAiPageOff: '未读取页面，点击后助手会重新读取。',
     operatorAiPageToggleOn: '读取页面',
     operatorAiPageToggleOff: '不读页面',
+    operatorAiRunLogOn: '正在把上一次运行日志随请求发送，点击可停止。',
+    operatorAiRunLogOff: '未发送上一次运行日志，点击后助手会读取它。',
+    operatorAiRunLogToggleOn: '上次运行日志',
+    operatorAiRunLogToggleOff: '不读运行日志',
+    operatorAiRunLogUsed: '参数依据上一次运行日志（{outcome}）核对',
+    operatorAiRunLogNone: '没有找到这个工作流已结束的运行日志。',
     operatorAiOfferQuestion:
       '这些步骤还缺少页面参数：{keys}。要不要先在页面上做一次，再按页面真实的定位添加？',
     operatorAiOfferAct: '先做一次再添加',

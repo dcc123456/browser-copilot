@@ -59,6 +59,7 @@ import {
   type OperatorAdviseDelta,
   type OperatorAdviseMessage,
   type OperatorAdviseResult,
+  type OperatorLastRun,
   type OperatorObserveResult,
   type OperatorObserveStep,
   type OperatorObservedStep,
@@ -114,6 +115,12 @@ export interface OperatorAdviseInput {
   workflowGoal?: string
   /** Only used to attribute the token spend. */
   workflowId?: string
+  /** The last finished run of this workflow, when the user turned on reading
+   *  its log. The background resolves it from the same run board the Logs panel
+   *  reads; the engine only relays it into the prompt. */
+  lastRun?: OperatorLastRun
+  /** The toggle was on but no finished run is recorded. */
+  lastRunMissing?: boolean
   maxOperators?: number
 }
 
@@ -327,9 +334,25 @@ export async function runOperatorAdvise(
   const trace: AdviseTrace = { reasoning: [] }
   const result = await advise(input, deps, trace)
   const reasoning = trace.reasoning.join('').trim()
-  if (!reasoning && !trace.thinkingSkippedModel) return result
+  // Tell the editor which log grounded the answer (or that none was found), so
+  // the switch's effect is visible instead of only claimed in the model's reply.
+  const runLog = {
+    ...(input.lastRun
+      ? {
+          lastRun: {
+            outcome: input.lastRun.outcome,
+            ...(typeof input.lastRun.finishedAt === 'number'
+              ? { finishedAt: input.lastRun.finishedAt }
+              : {}),
+          },
+        }
+      : {}),
+    ...(input.lastRunMissing ? { lastRunMissing: true } : {}),
+  }
+  if (!reasoning && !trace.thinkingSkippedModel) return { ...result, ...runLog }
   return {
     ...result,
+    ...runLog,
     ...(reasoning ? { reasoning } : {}),
     ...(trace.thinkingSkippedModel ? { thinkingSkippedModel: trace.thinkingSkippedModel } : {}),
   }
@@ -374,6 +397,8 @@ async function advise(
     ...(input.pickedElements?.length ? { pickedElements: input.pickedElements } : {}),
     ...(input.selectedSpec ? { selectedSpec: input.selectedSpec } : {}),
     ...(input.selectedBlockId ? { selectedBlockId: input.selectedBlockId } : {}),
+    ...(input.lastRun ? { lastRun: input.lastRun } : {}),
+    ...(input.lastRunMissing ? { lastRunMissing: true } : {}),
     maxOperators,
   }
   const prompt = buildOperatorAdvisePrompt(promptInput)
