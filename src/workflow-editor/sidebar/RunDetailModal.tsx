@@ -10,10 +10,27 @@
  * @module workflow-editor/sidebar/RunDetailModal
  */
 
-import { CircleCheck, CircleStop, CircleX, Download, LoaderCircle, Search } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import {
+  Check,
+  CircleCheck,
+  CircleStop,
+  CircleX,
+  Copy,
+  Download,
+  LoaderCircle,
+  Search,
+} from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { copyText } from '../../lib/clipboard'
 import Modal from '../ui/Modal'
-import { TraceRow, VariablesInspector, buildTrace, clock, type RunView } from './log-view'
+import {
+  TraceRow,
+  VariablesInspector,
+  buildTrace,
+  clock,
+  formatRunLogText,
+  type RunView,
+} from './log-view'
 import type { TranslateFn } from '../i18n'
 
 export default function RunDetailModal({
@@ -32,6 +49,7 @@ export default function RunDetailModal({
 }) {
   const [inspectVars, setInspectVars] = useState<Record<string, unknown> | null>(null)
   const [query, setQuery] = useState('')
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'failed'>('idle')
 
   const trace = useMemo(() => (run ? buildTrace(run) : []), [run])
   const state = run?.outcome
@@ -77,6 +95,24 @@ export default function RunDetailModal({
     URL.revokeObjectURL(url)
   }
 
+  const copyLogs = async () => {
+    if (!run) return
+    try {
+      await copyText(formatRunLogText(run, filtered))
+      setCopyState('ok')
+    } catch {
+      setCopyState('failed')
+    }
+  }
+
+  // The confirmation is a momentary state of the button, not a toast: the modal
+  // already owns the user's attention and a toast would stack on top of it.
+  useEffect(() => {
+    if (copyState === 'idle') return
+    const timer = setTimeout(() => setCopyState('idle'), 2000)
+    return () => clearTimeout(timer)
+  }, [copyState])
+
   const title = (
     <span className="wf-run-detail-title">
       {state === undefined && <LoaderCircle size={14} className="wf-spin" />}
@@ -98,6 +134,19 @@ export default function RunDetailModal({
               {clock(run.finishedAt ?? run.startedAt)}
             </span>
             <span className="wf-console-tools-spacer" />
+            <button
+              type="button"
+              className="wf-console-export"
+              title={t('copyLogs')}
+              onClick={() => void copyLogs()}
+            >
+              {copyState === 'ok' ? <Check size={14} /> : <Copy size={14} />}{' '}
+              {copyState === 'ok'
+                ? t('logsCopied')
+                : copyState === 'failed'
+                  ? t('logsCopyFailed')
+                  : t('copyLogs')}
+            </button>
             <button type="button" className="wf-console-export" onClick={exportLogs}>
               <Download size={14} /> {t('exportLogs')}
             </button>

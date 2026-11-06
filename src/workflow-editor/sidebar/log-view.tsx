@@ -158,6 +158,47 @@ export function durationLabel(ms?: number): string {
   return `${(ms / 1000).toFixed(2)}s`
 }
 
+/**
+ * The run as plain text — what "Copy logs" puts on the clipboard.
+ *
+ * A readable transcript rather than the export's JSON: the clipboard is where
+ * it goes next (a chat message, an issue), so the block lines, the error text
+ * and (in debug mode) the captured variables have to survive as words. The
+ * caller decides WHICH entries to pass — the modal copies the filtered view,
+ * exactly what the user is looking at.
+ */
+export function formatRunLogText(run: RunView, entries: readonly TraceEntry[]): string {
+  const lines: string[] = []
+  lines.push(`${run.label || 'workflow'} (${run.runId})`)
+  const finished = run.finishedAt ? ` → ${when(run.finishedAt)}` : ''
+  lines.push(`${run.outcome ?? 'running'} · ${when(run.startedAt)}${finished}`)
+  if (run.summary) lines.push(run.summary)
+  if (run.error) lines.push(`Error: ${run.error}`)
+  lines.push('')
+  for (const entry of entries) {
+    const head = [
+      clock(entry.at),
+      entry.durationMs ? `(${durationLabel(entry.durationMs)})` : '',
+      entry.label,
+      entry.description,
+    ]
+      .filter(Boolean)
+      .join(' ')
+    lines.push(head)
+    for (const line of entry.lines) {
+      lines.push(line.kind === 'error' ? `! ${line.text}` : `  ${line.text}`)
+    }
+    if (entry.vars && Object.keys(entry.vars).length > 0) {
+      try {
+        lines.push(`  vars: ${JSON.stringify(entry.vars)}`)
+      } catch {
+        // A cyclic value cannot be serialized; the trace lines above still are.
+      }
+    }
+  }
+  return lines.join('\n')
+}
+
 const TYPE_STYLE: Record<TraceEntry['type'], { Icon: LucideIcon; cls: string }> = {
   tool: { Icon: CirclePlay, cls: 'wf-console-info' },
   success: { Icon: Check, cls: 'wf-console-success' },
