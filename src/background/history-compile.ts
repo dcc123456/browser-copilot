@@ -35,6 +35,7 @@ import type { Workflow } from '../lib/workflow/types'
 import {
   checkProducerCompleteness,
   describeProducerIssues,
+  type ProducerCompletenessIssue,
 } from '../lib/workflow/producer-completeness'
 import { composeWorkflowFromDraft } from './operator-tool-handler'
 
@@ -122,11 +123,44 @@ export type SaveEmptyReason = WorkflowDraftEmptyReason
  * no workflow and no explanation.
  */
 export type SaveResolution =
-  { workflow: Workflow; source: 'draft' | 'history' } | { empty: SaveEmptyReason; detail?: string }
+  | { workflow: Workflow; source: 'draft' | 'history' }
+  | {
+      empty: SaveEmptyReason
+      detail?: string
+      /**
+       * The workflow the gate withheld. Carried on `validation-failed` so the
+       * panel can offer "save anyway": a static producer finding is a reason
+       * to warn, not a reason to leave the user with no way to persist the
+       * generated draft at all.
+       */
+      workflow?: Workflow
+    }
 
 /** Nodes the graph holds apart from its trigger head. */
 function actionNodeCount(workflow: Workflow): number {
   return workflow.drawflow.nodes.filter((node) => node.data?.['blockId'] !== 'trigger').length
+}
+
+/**
+ * Withhold a workflow that failed the producer gate, but keep it on the
+ * resolution so the panel can still persist it on request.
+ *
+ * The findings are also copied onto `settings.saveWarnings`: the save records
+ * that these are known problems, so the health card keeps telling the user why
+ * the graph is not runnable after they chose to save it anyway.
+ */
+function withholdForProducerIssues(
+  workflow: Workflow,
+  issues: readonly ProducerCompletenessIssue[],
+): SaveResolution {
+  const reasons = issues.map((issue) => issue.message)
+  const existing = workflow.settings.saveWarnings ?? []
+  workflow.settings.saveWarnings = [...existing, ...reasons.filter((r) => !existing.includes(r))]
+  return {
+    empty: 'validation-failed',
+    detail: describeProducerIssues(issues),
+    workflow,
+  }
 }
 
 /**
@@ -160,16 +194,14 @@ export async function resolveWorkflowForSave(
   const draft = 'error' in out ? null : out.workflow
   if (draft && actionNodeCount(draft) > 0) {
     const incomplete = checkProducerCompleteness(draft)
-    if (incomplete.length > 0)
-      return { empty: 'validation-failed', detail: describeProducerIssues(incomplete) }
+    if (incomplete.length > 0) return withholdForProducerIssues(draft, incomplete)
     return { workflow: draft, source: 'draft' }
   }
 
   const compiled = await compileConversationHistory(conversationId, name)
   if (compiled.workflow) {
     const incomplete = checkProducerCompleteness(compiled.workflow)
-    if (incomplete.length > 0)
-      return { empty: 'validation-failed', detail: describeProducerIssues(incomplete) }
+    if (incomplete.length > 0) return withholdForProducerIssues(compiled.workflow, incomplete)
     return { workflow: compiled.workflow, source: 'history' }
   }
 

@@ -715,6 +715,10 @@ export interface Messages {
   chatWorkflowRegenerate: string
   /** Tooltip for the regenerate button. */
   chatWorkflowRegenerateHint: string
+  /** Button on the not-runnable notice: persist the draft despite the finding. */
+  chatWorkflowSaveAnyway: string
+  /** Tooltip for the save-anyway button. */
+  chatWorkflowSaveAnywayHint: string
   /** Message sent to the model when regenerating after a validation failure. */
   chatWorkflowRegeneratePrompt: (detail: string) => string
   /** Same, but the model tried and every action failed — worth retrying. */
@@ -2478,10 +2482,13 @@ const en: Messages = {
   chatWorkflowNothingSaved:
     'Nothing to save from this turn: no page operations were recorded. Do the task and try again, or ask the model to perform it on the page.',
   chatWorkflowNotRunnable: (detail) =>
-    `The generated workflow did not pass the runnability check, so there is nothing to save yet: ${detail}. Ask the AI to fix it and try again.`,
+    `The generated workflow did not pass the runnability check: ${detail}. Ask the AI to fix it, or save it anyway and fix it in the editor.`,
   chatWorkflowRegenerate: 'Regenerate workflow',
   chatWorkflowRegenerateHint:
     'Send the missing steps back to the AI and run one more generation round.',
+  chatWorkflowSaveAnyway: 'Save anyway',
+  chatWorkflowSaveAnywayHint:
+    'Save the workflow even though this check failed. You can repair it later in the editor or with AI debug.',
   chatWorkflowRegeneratePrompt: (detail) =>
     `The generated workflow is missing the steps that produce its data, so it cannot run: ${detail}. Please first add the reading steps (wf_op_get-text / wf_op_read-page / wf_op_attribute-value / wf_op_ai-agent) that produce every referenced value, wire them before the consuming nodes, and then end your turn again. Do not paste page content as literals.`,
   chatWorkflowNothingSavedFailed:
@@ -3612,9 +3619,11 @@ Keep the whole report dense and within the message size cap.`,
 
 const zhCN: Messages = {
   chatWorkflowNotRunnable: (detail) =>
-    `生成的工作流未通过可运行性检查，暂时没有可保存的内容：${detail}。请让 AI 修复后重试。`,
+    `生成的工作流未通过可运行性检查：${detail}。可以让 AI 修复后重试，也可以先保存，再到编辑器里修复。`,
   chatWorkflowRegenerate: '重新生成工作流',
   chatWorkflowRegenerateHint: '把缺失步骤反馈给 AI，再跑一轮生成。',
+  chatWorkflowSaveAnyway: '仍然保存',
+  chatWorkflowSaveAnywayHint: '检查未通过也可以保存；之后可在编辑器或 AI 调试中修复。',
   chatWorkflowRegeneratePrompt: (detail) =>
     `生成的工作流缺少产出数据的步骤，无法运行：${detail}。请先补加读取步骤（wf_op_get-text / wf_op_read-page / wf_op_attribute-value / wf_op_ai-agent），让每个被引用的值都有对应的生产者节点，并把它们接在消费节点之前，然后再结束回合。不要把页面内容直接当字面量粘贴。`,
   tabChat: '对话',

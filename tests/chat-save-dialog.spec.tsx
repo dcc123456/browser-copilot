@@ -922,6 +922,35 @@ describe('chat save-as-workflow flow', () => {
       }
     })
 
+    it('offers Save anyway on the validation-failed notice and persists the withheld graph', async () => {
+      // The background withholds the card but hands the graph back, so the
+      // user is never left without a way to save it.
+      draftReply = {
+        type: 'workflows.draft',
+        empty: 'validation-failed',
+        detail: 'Node "export-data" writes the data table, but no upstream producer exists.',
+        workflow: { ...baseWorkflow(), id: 'wf-withheld' },
+      }
+      const { container, root } = await endTurnAndOpenPopup()
+      try {
+        expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+        expect(bodyButtons()).toContain('Save anyway')
+        await clickBodyButton('Save anyway')
+        // Exactly one save, of the withheld graph, still marked as generated.
+        expect(saveCommands).toHaveLength(1)
+        expect(saveCommands[0]!.workflow.id).toBe('wf-withheld')
+        expect(saveCommands[0]!.fromGeneration).toBe(true)
+        // The notice is gone and the transcript confirms the save.
+        expect(bodyButtons()).not.toContain('Save anyway')
+        expect(container.textContent).toContain('Saved workflow:')
+      } finally {
+        await act(async () => {
+          root.unmount()
+        })
+        container.remove()
+      }
+    })
+
     it('keeps the popup with the save error after a failed save so it can be retried', async () => {
       saveBehavior = 'fail'
       const { container, root } = await endTurnAndOpenPopup()

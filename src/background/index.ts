@@ -1926,7 +1926,14 @@ async function handleCommand(
         conversation?.title?.trim() || 'Workflow',
       )
       if ('empty' in resolved)
-        return { type: 'workflows.draft', empty: resolved.empty, detail: resolved.detail }
+        return {
+          type: 'workflows.draft',
+          empty: resolved.empty,
+          detail: resolved.detail,
+          // A producer-completeness failure carries the withheld graph so the
+          // panel can offer "save anyway"; other empty reasons have none.
+          ...(resolved.workflow ? { workflow: resolved.workflow } : {}),
+        }
 
       // No automatic runnability verification on generation: the generated
       // workflow is returned as-is (no real replay, no model repair call).

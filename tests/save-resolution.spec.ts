@@ -150,6 +150,35 @@ describe('resolveWorkflowForSave — source order', () => {
     expect(out).toMatchObject({ empty: 'validation-failed' })
     expect('detail' in out ? out.detail : '').toContain('{{title}}')
     expect(listHistoryMock).not.toHaveBeenCalled()
+    // The withheld graph still travels with the resolution: the panel offers
+    // "save anyway" instead of leaving the user with no way to persist it.
+    expect('workflow' in out ? out.workflow?.id : undefined).toBe('wf')
+    // And the record keeps the finding, so the saved workflow can still say why
+    // it is not runnable.
+    expect('workflow' in out ? out.workflow?.settings.saveWarnings : undefined).toEqual([
+      expect.stringContaining('{{title}}'),
+    ])
+  })
+
+  it('carries the compiled history graph when that path fails the gate', async () => {
+    composeMock.mockResolvedValue(NO_DRAFT)
+    listHistoryMock.mockResolvedValue([historyEntry()])
+    fromHistoryMock.mockReturnValue(
+      makeWorkflow([
+        triggerNode,
+        {
+          id: 'x',
+          label: 'export-data',
+          position: { x: 0, y: 0 },
+          data: { blockId: 'export-data', format: 'csv' },
+        },
+      ]),
+    )
+
+    const out = await resolveWorkflowForSave('c1', 'My flow')
+
+    expect(out).toMatchObject({ empty: 'validation-failed', workflow: expect.anything() })
+    expect('detail' in out ? out.detail : '').toContain('saveData')
   })
 
   it('passes the conversation title through as the workflow name', async () => {

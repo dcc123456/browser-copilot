@@ -2031,6 +2031,13 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
    * current notice has nothing actionable.
    */
   const [validationDetail, setValidationDetail] = useState<string | null>(null)
+  /**
+   * The workflow a `validation-failed` notice withheld: the graph failed the
+   * producer-completeness gate, but the user may still want it. "Save anyway"
+   * persists this; `null` means the current notice has nothing to save.
+   */
+  const [validationWorkflow, setValidationWorkflow] = useState<Workflow | null>(null)
+  const [savingValidationWorkflow, setSavingValidationWorkflow] = useState(false)
 
   // When the end-of-turn save card materializes in workflow mode, pop the card
   // up as a modal IMMEDIATELY (replacing the loading dialog). The preview/save
@@ -2081,7 +2088,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
         clearSavePreparing(convId)
         return
       }
-      if (!result.workflow) {
+      // `empty` wins over the presence of a graph: a validation failure now
+      // carries the withheld workflow so the notice can offer "save anyway",
+      // and that must not silently turn into a normal save card.
+      if (result.empty || !result.workflow) {
         // The background says WHY: it never touched the page, or it tried and
         // everything failed. Only the second is worth retrying.
         setSaveNotice(
@@ -2094,13 +2104,18 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 tRef.current.chatWorkflowNotRunnable(result.detail ?? '')
               : tRef.current.chatWorkflowNothingSaved,
         )
-        setValidationDetail(result.empty === 'validation-failed' ? (result.detail ?? '') : null)
+        const failed = result.empty === 'validation-failed'
+        setValidationDetail(failed ? (result.detail ?? '') : null)
+        // The background hands the withheld graph back on a validation failure
+        // so the notice can offer "Save anyway" — never a dead end.
+        setValidationWorkflow(failed ? (result.workflow ?? null) : null)
         closeGenerationLoading(convId)
         clearSavePreparing(convId)
         return
       }
       setSaveNotice(null)
       setValidationDetail(null)
+      setValidationWorkflow(null)
       workflow = result.workflow
       // `history` means the panel compiled the actions the model actually
       // performed; `draft` means the model placed operator blocks itself.
@@ -2113,6 +2128,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
       if (steps === 0) {
         setSaveNotice(tRef.current.chatWorkflowNothingSaved)
         setValidationDetail(null)
+        setValidationWorkflow(null)
         closeGenerationLoading(convId)
         clearSavePreparing(convId)
         return
@@ -3270,6 +3286,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
     setBusy(true)
     setSaveNotice(null)
     setValidationDetail(null)
+    setValidationWorkflow(null)
     if (modeRef.current === 'workflow') {
       generationLogsRef.current = [outgoing.slice(0, 200)]
       modalOpenedForRef.current = null
@@ -3284,6 +3301,36 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
         state: 'GENERATING',
         logs: [...generationLogsRef.current],
       })
+    }
+  }
+
+  /**
+   * "Save anyway" on a `validation-failed` notice: persist the withheld graph
+   * without another model turn.
+   *
+   * The finding is advisory here, not a veto. It already rode onto the
+   * workflow as a `saveWarning`, so the record keeps saying why the graph is
+   * not runnable after the user chose to save it — and the editor (or AI
+   * debug) can repair it there.
+   */
+  const saveValidationWorkflowAnyway = async (): Promise<void> => {
+    const workflow = validationWorkflow
+    if (!workflow || savingValidationWorkflow) return
+    setSavingValidationWorkflow(true)
+    try {
+      await sendCommand({ type: 'workflows.save', workflow, fromGeneration: true })
+      // The draft the background withheld must not seed the next turn once the
+      // user has committed it, same contract as the save card.
+      sendCommand({ type: 'workflows.draft.clear', conversationId }).catch(() => undefined)
+      append({ role: 'status', text: tRef.current.chatSaveWorkflowSaved({ name: workflow.name }) })
+      setSaveNotice(null)
+      setValidationDetail(null)
+      setValidationWorkflow(null)
+    } catch (error) {
+      // Keep the notice and its button up: the retry must stay one click away.
+      append({ role: 'error', text: (error as Error).message })
+    } finally {
+      setSavingValidationWorkflow(false)
     }
   }
 
@@ -4377,10 +4424,20 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
               {saveNotice}
             </p>
             <div className="actions">
-              {validationDetail !== null && (
+              {validationWorkflow !== null && (
                 <button
                   className="primary"
-                  disabled={busy}
+                  disabled={busy || savingValidationWorkflow}
+                  onClick={() => void saveValidationWorkflowAnyway()}
+                  title={t.chatWorkflowSaveAnywayHint}
+                  type="button"
+                >
+                  {t.chatWorkflowSaveAnyway}
+                </button>
+              )}
+              {validationDetail !== null && (
+                <button
+                  disabled={busy || savingValidationWorkflow}
                   onClick={regenerateAfterValidation}
                   title={t.chatWorkflowRegenerateHint}
                   type="button"
@@ -4392,6 +4449,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 onClick={() => {
                   setSaveNotice(null)
                   setValidationDetail(null)
+                  setValidationWorkflow(null)
                   // A rejected broken draft must not seed the next turn: drop it
                   // (same contract as the save-card Skip action).
                   sendCommand({
