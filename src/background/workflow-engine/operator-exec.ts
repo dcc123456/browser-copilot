@@ -21,7 +21,7 @@
  * @module background/workflow-engine/operator-exec
  */
 
-import { interpolateParams } from '../../lib/workflow/interpolate'
+import { interpolateBlockParams } from '../../lib/workflow/interpolate'
 import { OPERATOR_BLOCK_IDS } from '../../lib/workflow/operator-tools'
 import { operatorExecClass, recordOnlyReason } from '../../lib/workflow/operator-class'
 import type { ScopeWindow } from '../automation-scope'
@@ -167,7 +167,9 @@ export async function executeOperatorNode(
   }
 
   const variables = deps.variables ?? {}
-  const params = interpolateParams(data, variables)
+  // Same pre-pass the engine uses, so a `set-variable` call made while drafting
+  // keeps an object reference typed instead of recording "[object Object]".
+  const params = interpolateBlockParams(blockId, data, variables)
   const isBranch = BRANCH_BLOCK_IDS.has(blockId)
   const lines: string[] = []
   const ctx = buildCtx(deps, lines, isBranch ? { ...SENTINEL_OUTPUTS } : undefined)

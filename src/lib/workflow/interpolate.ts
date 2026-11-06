@@ -446,3 +446,53 @@ export function interpolateParams(
   }
   return changed ? out : data
 }
+
+/** Blocks whose `value` slots store data rather than prose. */
+const VALUE_SLOT_BLOCKS: ReadonlySet<string> = new Set(['set-variable'])
+
+/**
+ * The engine's pre-executor interpolation, aware of blocks whose parameters are
+ * value slots rather than text.
+ *
+ * `set-variable` writes each row's `value` into the variable bag as-is, so a
+ * whole `{{ref}}` must reach the executor as the reference itself. The generic
+ * pass rendered it as `[object Object]` first, and the typed object was gone
+ * before the executor could keep it — so `{{copy.a1}}` could no longer read a
+ * field. Here the value slots are handed over as authored and the executor
+ * resolves a whole reference to its raw type (and renders composite text like
+ * `Bearer {{token}}` itself). Row NAMES are still text and interpolate as before.
+ *
+ * Every other block keeps the generic pass: its parameters (selector, message,
+ * URL) must reach the driver as strings.
+ */
+export function interpolateBlockParams(
+  blockId: string,
+  data: Record<string, unknown>,
+  vars: Record<string, unknown>,
+  refData?: unknown,
+): Record<string, unknown> {
+  if (!VALUE_SLOT_BLOCKS.has(blockId)) return interpolateParams(data, vars, refData)
+
+  const { variables: rawRows, value: rawValue, ...rest } = data
+  const out = interpolateParams(rest, vars, refData)
+  // The sentinels describe only `rest`; a set-variable node never acts on the
+  // page, so its slots have nothing to fail on an unresolved token.
+  delete out[EMPTY_INTERP_KEY]
+  delete out[UNRESOLVED_INTERP_KEY]
+  if ('variables' in data) {
+    out['variables'] = Array.isArray(rawRows)
+      ? rawRows.map((row) => {
+          if (!row || typeof row !== 'object' || Array.isArray(row)) return row
+          const record = { ...(row as Record<string, unknown>) }
+          for (const [field, fieldValue] of Object.entries(record)) {
+            if (field !== 'value' && typeof fieldValue === 'string') {
+              record[field] = interpolate(fieldValue, vars, refData)
+            }
+          }
+          return record
+        })
+      : rawRows
+  }
+  if ('value' in data) out['value'] = rawValue
+  return out
+}

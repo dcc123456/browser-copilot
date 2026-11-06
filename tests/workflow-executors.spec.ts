@@ -7,6 +7,7 @@ import {
   type WorkflowExecCtx,
 } from '../src/background/workflow-engine/executors'
 import type { OpResult } from '../src/lib/ops'
+import { interpolateBlockParams } from '../src/lib/workflow/interpolate'
 
 /**
  * The driver module is imported for real except `execOnActiveTab`, which we
@@ -600,6 +601,21 @@ describe('set-variable keeps typed values', () => {
     const config = { a1: 1 }
     await EXECUTORS['set-variable']!({ variables: [{ name: 'cfg', value: config }] }, ctx)
     expect(ctx.variables['cfg']).toBe(config)
+  })
+
+  it('keeps an object copied through the engine pre-pass typed', async () => {
+    // The engine used to interpolate every param before the executor saw it, so
+    // `{{article}}` became "[object Object]" and the executor's typed branch
+    // never ran. The block-aware pre-pass hands the slot over as authored.
+    const { ctx } = makeCtx()
+    ctx.variables['article'] = { title: 'T', meta: { a1: 7 } }
+    const params = interpolateBlockParams(
+      'set-variable',
+      { variables: [{ name: 'copy', value: '{{article}}' }] },
+      ctx.variables,
+    )
+    await EXECUTORS['set-variable']!(params, ctx)
+    expect(ctx.variables['copy']).toEqual({ title: 'T', meta: { a1: 7 } })
   })
 
   it('resolves a dotted reference into a JSON string variable', async () => {

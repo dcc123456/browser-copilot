@@ -284,6 +284,19 @@ describe('executeOperatorNode', () => {
     expect(variables).toEqual({ total: 7 })
   })
 
+  it('hands set-variable its value slots raw so a reference keeps its type', async () => {
+    // Generation-time variables feed later operator calls; rendering the slot
+    // to text here would record a copy that can no longer be read field by
+    // field. The block-aware pre-pass is shared with the run engine.
+    const { calls, executors } = recordingExecutors({ 'set-variable': null })
+    await executeOperatorNode(
+      'set-variable',
+      { variables: [{ name: 'copy', value: '{{article}}' }] },
+      { signal, executors, variables: { article: { a1: 1 } } },
+    )
+    expect(calls[0]!.data).toEqual({ variables: [{ name: 'copy', value: '{{article}}' }] })
+  })
+
   it('hands tab pinning back to the caller', async () => {
     const executors: Record<string, BlockExecutor> = {
       'new-tab': async (_data, ctx) => {

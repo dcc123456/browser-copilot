@@ -12,7 +12,11 @@
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../../lib/workflow/types'
 import { nodeBlockId as blockIdOf, nodeParams as paramsOf } from '../../lib/workflow/node-params'
 import { getWorkflow } from '../../lib/workflow/storage'
-import { getByPath, interpolateParams, UNRESOLVED_INTERP_KEY } from '../../lib/workflow/interpolate'
+import {
+  getByPath,
+  interpolateBlockParams,
+  UNRESOLVED_INTERP_KEY,
+} from '../../lib/workflow/interpolate'
 import {
   GROUP_BLOCK_ID,
   groupChildrenOf,
@@ -959,7 +963,11 @@ async function runCore(
     // `selector: '{{loopElementSelector}} .price'` reaches the driver with a
     // real selector. The loop / sub-workflow interpreters below read the same
     // bag, so their `selector` and `workflowId` resolve too.
-    const params = interpolateParams(paramsOf(current), variables)
+    //
+    // `set-variable` is the exception: its rows are VALUE slots, so a whole
+    // `{{ref}}` is left for the executor to resolve to its typed value instead
+    // of being rendered as text here (which wrote "[object Object]").
+    const params = interpolateBlockParams(blockId, paramsOf(current), variables)
 
     // Cloud blocks are never executable locally.
     if (CLOUD_BLOCK_IDS.has(blockId)) {

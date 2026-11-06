@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runWorkflow } from '../src/background/workflow-engine/engine'
-import { EMPTY_INTERP_KEY, interpolate, interpolateParams } from '../src/lib/workflow/interpolate'
+import {
+  EMPTY_INTERP_KEY,
+  interpolate,
+  interpolateBlockParams,
+  interpolateParams,
+} from '../src/lib/workflow/interpolate'
 import type { Workflow, WorkflowEdge, WorkflowNode } from '../src/lib/workflow/types'
 
 /** Build a minimal Workflow from nodes + edges. */
@@ -396,5 +401,81 @@ describe('interpolateParams', () => {
   it('does not flag a deliberately empty value', () => {
     const out = interpolateParams({ value: '' }, {})
     expect(out[EMPTY_INTERP_KEY]).toBeUndefined()
+  })
+})
+
+describe('interpolateBlockParams', () => {
+  it('keeps set-variable value slots raw for the executor to resolve', () => {
+    // The pre-pass runs before the executor, so rendering a whole `{{ref}}` to
+    // text here destroyed the object the executor was about to copy.
+    const out = interpolateBlockParams(
+      'set-variable',
+      {
+        variables: [
+          { name: 'copy', value: '{{article}}' },
+          { name: 'greeting', value: 'Hi {{who}}' },
+        ],
+      },
+      { article: { a1: 1 }, who: 'Ada' },
+    )
+    expect(out).toEqual({
+      variables: [
+        { name: 'copy', value: '{{article}}' },
+        { name: 'greeting', value: 'Hi {{who}}' },
+      ],
+    })
+  })
+
+  it('still interpolates set-variable row names and the other params', () => {
+    const out = interpolateBlockParams(
+      'set-variable',
+      {
+        variables: [{ name: '{{prefix}}Done', value: '{{article}}' }],
+        description: 'Set {{who}}',
+      },
+      { prefix: 'is', article: { a: 1 }, who: 'Ada' },
+    )
+    expect(out).toEqual({
+      variables: [{ name: 'isDone', value: '{{article}}' }],
+      description: 'Set Ada',
+    })
+  })
+
+  it('keeps the legacy single value slot raw too', () => {
+    expect(
+      interpolateBlockParams(
+        'set-variable',
+        { variableName: 'copy', value: '{{article}}' },
+        { article: { a: 1 } },
+      ),
+    ).toEqual({ variableName: 'copy', value: '{{article}}' })
+  })
+
+  it('leaves other blocks on the plain text pass', () => {
+    expect(
+      interpolateBlockParams('forms', { selector: '#pw', value: '{{pw}}' }, { pw: 's3cret' }),
+    ).toEqual({ selector: '#pw', value: 's3cret' })
+  })
+})
+
+describe('workflow engine value slots', () => {
+  it('hands set-variable raw slots so an object copy can stay typed', async () => {
+    const seen: Record<string, unknown>[] = []
+    const setNode: WorkflowNode = {
+      id: 'set',
+      label: 'set-variable',
+      position: { x: 0, y: 0 },
+      data: { variables: [{ name: 'copy', value: '{{article}}' }] },
+    }
+    await runWorkflow(makeWorkflow([setNode], []), {
+      variables: { article: { title: 'T' } },
+      executors: {
+        'set-variable': async (data) => {
+          seen.push(data)
+          return null
+        },
+      },
+    })
+    expect(seen[0]).toEqual({ variables: [{ name: 'copy', value: '{{article}}' }] })
   })
 })
