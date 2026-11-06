@@ -36,6 +36,7 @@ import {
   takeInterjections,
 } from './agent-channel'
 import { retain, release } from './keepalive'
+import { answerRunInput } from './run-input-hub'
 import {
   resetStorageCache,
   STORAGE_DIRECTORY_CHANGED,
@@ -1028,6 +1029,8 @@ setWindowPickRequester(async (request: WindowPickRequest) => {
  */
 type PageBroadcast =
   | AgentServerMessage
+  | import('../lib/messages').WorkflowsRunInputRequest
+  | import('../lib/messages').WorkflowsRunInputSettled
   | Extract<
       import('../lib/messages').CommandResult,
       { type: 'workflows.repairEvent' | 'workflows.operatorAdviseEvent' }
@@ -2136,6 +2139,8 @@ async function handleCommand(
         // Panel run button: act inside the panel's window (undefined for the
         // editor popup, which is not a normal window).
         ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+        // Only the initiating page shows the `parameter-prompt` dialog.
+        ...(command.promptToken ? { promptToken: command.promptToken } : {}),
       })
 
       // Auto repair (spec §30 Run defaults): the repair loop is an OPT-IN
@@ -2322,6 +2327,7 @@ async function handleCommand(
         resumeFrom: command.runId,
         debug: workflow.settings?.debugMode === true,
         ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
+        ...(command.promptToken ? { promptToken: command.promptToken } : {}),
       })
       return {
         type: 'workflows.resume',
@@ -2333,6 +2339,17 @@ async function handleCommand(
           ...(r.resumedFrom !== undefined ? { resumedFrom: r.resumedFrom } : {}),
         },
       }
+    }
+
+    case 'workflows.runInputAnswer': {
+      // The dialog answers a prompt its own run is waiting on. `ok:false` means
+      // it already settled (timeout, cancellation, another window) — the page
+      // has already closed the dialog either way.
+      const ok = answerRunInput(command.requestId, {
+        values: command.values,
+        ...(command.cancelled ? { cancelled: true } : {}),
+      })
+      return { type: 'workflows.runInputAnswer', ok }
     }
 
     case 'workflows.debug': {

@@ -48,6 +48,7 @@ import Banner from './components/Banner'
 import { useRowHighlight } from './hooks/useRowHighlight'
 import { useRunningTasks } from './hooks/useRunningTasks'
 import { confirmDialog } from '../ui/confirm'
+import { beginRunInputSession, endRunInputSession } from '../ui/run-input-session'
 import { FailureCenterDialog } from './FailureCenter'
 import { WorkflowHealthView } from './WorkflowHealthView'
 import PublishWorkflowDialog from './PublishWorkflowDialog'
@@ -456,8 +457,11 @@ export default function WorkflowsTab() {
 
   const runNow = async (id: string): Promise<void> => {
     setBusy(true)
+    // A `parameter-prompt` mid-run asks THIS panel; the token routes the
+    // dialog past any other open extension page.
+    const promptToken = beginRunInputSession()
     try {
-      const result = await sendCommand({ type: 'workflows.run', id })
+      const result = await sendCommand({ type: 'workflows.run', id, promptToken })
       if (result.type === 'workflows.run') {
         if (result.outcome.ok) {
           setBanner({
@@ -478,6 +482,7 @@ export default function WorkflowsTab() {
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
     } finally {
+      endRunInputSession(promptToken)
       setBusy(false)
     }
   }
@@ -495,8 +500,9 @@ export default function WorkflowsTab() {
       return
     }
     setBusy(true)
+    const promptToken = beginRunInputSession()
     try {
-      const result = await sendCommand({ type: 'workflows.resume', id, runId })
+      const result = await sendCommand({ type: 'workflows.resume', id, runId, promptToken })
       if (result.type === 'workflows.resume') {
         const outcome = result.outcome
         if (!outcome.ok) {
@@ -518,6 +524,7 @@ export default function WorkflowsTab() {
     } catch (error) {
       setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
     } finally {
+      endRunInputSession(promptToken)
       setBusy(false)
     }
   }

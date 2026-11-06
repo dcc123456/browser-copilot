@@ -12,6 +12,7 @@
 import type { Workflow } from '../../lib/workflow/types'
 import { recordCheckpoint, resumePointOf } from '../../lib/workflow/checkpoints'
 import { seedFromTrigger } from '../../lib/workflow/workflow-inputs'
+import type { RunInputPrompt } from '../../lib/workflow/run-input'
 import {
   createChromeCheckpointStore,
   findNewestPersistedRunId,
@@ -31,6 +32,7 @@ import {
   type RunningTask,
 } from '../running-tasks'
 import { retain, release } from '../keepalive'
+import { requestRunInput } from '../run-input-hub'
 import {
   createDebugSession,
   type DebugControlAction,
@@ -193,6 +195,13 @@ export interface ExecuteWorkflowOptions {
    * completed by the AI agent on the live page instead of failing the run.
    */
   aiTakeover?: AiTakeoverHook
+  /**
+   * Token of the page that launched this run. When set, a `parameter-prompt`
+   * block broadcasts an interactive dialog mid-run and only that page answers
+   * it. Omitted by every unattended caller, where the block keeps resolving
+   * from defaults silently.
+   */
+  promptToken?: string
   /** Optional caller-side sink for each engine step, fired alongside the run log. */
   onStep?: (kind: string, nodeId: string, text: string) => void
   /**
@@ -844,6 +853,9 @@ export async function executeWorkflow(
       traceCollector.finishNode(node, status, traceBefore, variables ?? {}, failure)
       if (traceActiveNodeId === nodeId) traceActiveNodeId = undefined
     }
+    // Captured once: the hook outlives this object and must keep the token the
+    // run was STARTED with, even if the caller mutates its options later.
+    const promptToken = opts.promptToken
     const result = await runWorkflow(effective, {
       startAt,
       variables,
@@ -851,6 +863,22 @@ export async function executeWorkflow(
       ...(opts.stopBefore ? { stopBefore: opts.stopBefore } : {}),
       ...(scope ? { scope } : {}),
       ...(opts.aiTakeover ? { aiTakeover: opts.aiTakeover } : {}),
+      // Interactive `parameter-prompt`: only a run someone is watching asks.
+      ...(promptToken
+        ? {
+            requestInput: (prompt: RunInputPrompt) =>
+              requestRunInput(
+                {
+                  ...prompt,
+                  promptToken,
+                  runId,
+                  workflowId: workflow.id,
+                  workflowName: workflow.name,
+                },
+                runSignal,
+              ),
+          }
+        : {}),
       ...(Object.keys(preflightBlockers).length > 0 ? { preflightBlockers } : {}),
       // Generated-strict readiness: the real probe reads live page state per
       // poll (element presence/visibility, committed values, tab settle).

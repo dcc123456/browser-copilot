@@ -263,6 +263,17 @@ export interface Messages {
   /** Per-workflow action: publish it to the shared marketplace as a pull request. */
   workflowsPublish: string
 
+  // --- Runtime parameter prompt (parameter-prompt block) ------------------
+  runInputTitle: string
+  runInputWorkflow: (params: { name: string }) => string
+  runInputSubmit: string
+  runInputStop: string
+  runInputRequiredMark: string
+  runInputRequiredField: (params: { name: string }) => string
+  runInputInvalidJson: string
+  runInputSecretHint: string
+  runInputTimeoutHint: (params: { seconds: number }) => string
+
   // --- Workflow marketplace: publishing ----------------------------------
   marketplacePublishTitle: string
   marketplacePublishRepoHint: (params: { repo: string }) => string
@@ -2095,6 +2106,16 @@ const en: Messages = {
   workflowsImportInvalid: 'Invalid workflow file(s): at least one export could not be read.',
   workflowsImported: ({ count }) => `Imported ${count} workflow(s).`,
   workflowsPublish: 'Publish',
+  runInputTitle: 'Parameters required',
+  runInputWorkflow: ({ name }) => `Workflow: ${name}`,
+  runInputSubmit: 'Continue',
+  runInputStop: 'Stop run',
+  runInputRequiredMark: 'required',
+  runInputRequiredField: ({ name }) => `"${name}" is required.`,
+  runInputInvalidJson: 'Enter valid JSON.',
+  runInputSecretHint: 'Leave blank to keep the saved value.',
+  runInputTimeoutHint: ({ seconds }) =>
+    `Continues with the defaults if nothing is submitted within ${seconds}s.`,
   marketplacePublishTitle: 'Publish workflow',
   marketplacePublishRepoHint: ({ repo }) =>
     `Opens a pull request against ${repo}. It is merged automatically when your token can write to that repository; otherwise the maintainer merges it.`,
@@ -3832,6 +3853,15 @@ const zhCN: Messages = {
   workflowsImportInvalid: '无效的工作流文件：至少一个导出无法读取。',
   workflowsImported: ({ count }) => `已导入 ${count} 个工作流。`,
   workflowsPublish: '发布',
+  runInputTitle: '需要填写参数',
+  runInputWorkflow: ({ name }) => `工作流：${name}`,
+  runInputSubmit: '继续运行',
+  runInputStop: '停止运行',
+  runInputRequiredMark: '必填',
+  runInputRequiredField: ({ name }) => `“${name}”不能为空。`,
+  runInputInvalidJson: '请输入合法的 JSON。',
+  runInputSecretHint: '留空表示沿用已保存的值。',
+  runInputTimeoutHint: ({ seconds }) => `${seconds} 秒后未填写将使用默认值继续。`,
   marketplacePublishTitle: '发布工作流',
   marketplacePublishRepoHint: ({ repo }) =>
     `将向 ${repo} 提交一个 PR；令牌对该仓库有写权限时会自动合并，否则由维护者合并后才会出现在工作流广场中。`,

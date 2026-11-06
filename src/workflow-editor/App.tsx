@@ -65,6 +65,9 @@ import { withoutNodeAddedByAi } from '../lib/workflow/node-goal-contract'
 import { nodeRunIssuesOf } from '../lib/workflow/validation'
 import { appendRecordedWorkflow } from '../lib/workflow/record-append'
 import { sendCommand } from '../lib/messages'
+import RunInputHost from '../ui/RunInputHost'
+import type { RunInputDialogLabels } from '../ui/RunInputDialog'
+import { beginRunInputSession, endRunInputSession } from '../ui/run-input-session'
 import { hostWindowId, rememberEditedWorkflow } from './host-window'
 import { autoReconnectStorage } from '../lib/fs-reconnect'
 import { getSettings } from '../lib/storage'
@@ -265,6 +268,22 @@ export default function EditorApp() {
     makeEditorLocale(resolveEditorLocale(undefined), makeTranslate(resolveEditorLocale(undefined))),
   )
   const t = editorLocale.t
+  // `parameter-prompt` copy for the run-time dialog. `t` values are strings, so
+  // interpolated sentences substitute their placeholder here.
+  const runInputLabels = useMemo<RunInputDialogLabels>(
+    () => ({
+      title: t('runInputTitle'),
+      workflow: (name) => t('runInputWorkflow').replace('{name}', name),
+      submit: t('runInputSubmit'),
+      stop: t('runInputStop'),
+      requiredMark: t('runInputRequiredMark'),
+      requiredField: (name) => t('runInputRequiredField').replace('{name}', name),
+      invalidJson: t('runInputInvalidJson'),
+      secretHint: t('runInputSecretHint'),
+      timeoutHint: (seconds) => t('runInputTimeoutHint').replace('{seconds}', String(seconds)),
+    }),
+    [t],
+  )
 
   const toast = useToast()
 
@@ -879,6 +898,9 @@ export default function EditorApp() {
       setRunning(true)
       const testing = testingMode
       if (testing) setTestingRunActive(true)
+      // A `parameter-prompt` mid-run asks THIS window; the token keeps another
+      // open editor from answering a dialog it did not launch.
+      const promptToken = beginRunInputSession()
       try {
         // Run scoped to the window that opened this editor (see host-window).
         const windowId = hostWindowId()
@@ -888,6 +910,7 @@ export default function EditorApp() {
           startAt: startNodeId,
           ...(windowId !== undefined ? { windowId } : {}),
           ...(testing ? { testing: true } : {}),
+          promptToken,
         })
         if (r.type === 'workflows.run') {
           const cert = (r.outcome as { certification?: VerificationReport }).certification
@@ -914,6 +937,7 @@ export default function EditorApp() {
         setError(msg)
         toast.show(`${t('runFailed')}: ${msg}`, 'error')
       } finally {
+        endRunInputSession(promptToken)
         setRunning(false)
         if (testing) setTestingRunActive(false)
       }
@@ -1906,6 +1930,8 @@ export default function EditorApp() {
         {toast.node}
         <ToastHost />
         <ConfirmHost />
+        {/* Runtime `parameter-prompt` dialog for the run this editor launched. */}
+        <RunInputHost labels={runInputLabels} />
 
         {/* Block settings + on-error modal (gear button in node hover toolbar). */}
         {settingsForId && settingsBlock && (

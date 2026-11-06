@@ -143,7 +143,6 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
     'selector',
   ],
   'workflow-state': ['exceptCurrent', 'workflowsToStop'],
-  'parameter-prompt': ['timeout'],
 }
 
 /** name -> body, for every top-level declaration in the executors module. */

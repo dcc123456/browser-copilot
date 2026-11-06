@@ -90,6 +90,12 @@ import {
   missingRequiredInputs,
   workflowParametersOf,
 } from '../../lib/workflow/workflow-inputs'
+import {
+  applyRunInputValues,
+  runInputFieldsOf,
+  runInputTimeoutOf,
+} from '../../lib/workflow/run-input'
+import { MASK } from '../../lib/workflow/execution-evidence'
 import { sanitizeModelAnswer } from '../../lib/model-output'
 import { preprocessImage } from '../../lib/vision'
 import { LoopBreakpointError } from './loop-breakpoint'
@@ -156,6 +162,14 @@ export interface WorkflowExecCtx {
    * engine owns the buffer, executors only read it.
    */
   getRunLog?: () => string[]
+  /**
+   * Interactive `parameter-prompt`: ask the page that launched the run for the
+   * declared values and wait for the dialog. Absent on unattended hosts, where
+   * the block fills defaults and refuses a missing required input instead.
+   */
+  requestInput?: (
+    prompt: import('../../lib/workflow/run-input').RunInputPrompt,
+  ) => Promise<import('../../lib/workflow/run-input').RunInputAnswer>
   /**
    * The tab this run is acting on. Undefined until resolved; navigation blocks
    * update it when they open/switch tabs so later steps follow the right page
@@ -3098,11 +3112,16 @@ const workflowState: BlockExecutor = async (data, ctx) => {
  * Reading the wrong keys made the block a no-op that emitted an empty string,
  * so a workflow relying on it typed a blank field.
  *
- * There is no interactive prompt in this build: values come from the scope,
- * which the run path seeds from the workflow's declared inputs (trigger
- * parameters) and which earlier steps fill. A declared input that is still
- * missing therefore FAILS when marked required, rather than silently passing
- * `''` to the rest of the graph.
+ * ATTENDED runs ask: when the integration layer supplies `ctx.requestInput`,
+ * the block opens an Automa-style dialog listing every declared parameter,
+ * waits for the user, and writes the answer into the scope with each
+ * parameter's type applied. The host only supplies the hook for runs someone
+ * is watching (editor / side panel); the Runner, scheduled and triggered runs
+ * leave it out and keep resolving silently from the scope and defaults — a
+ * headless run must never hang on a question nobody can see.
+ *
+ * Whether asked or not, a declared input that is still missing FAILS when
+ * marked required, rather than silently passing `''` to the rest of the graph.
  */
 const parameterPrompt: BlockExecutor = async (data, ctx) => {
   assertActive(ctx)
@@ -3112,8 +3131,40 @@ const parameterPrompt: BlockExecutor = async (data, ctx) => {
     return null
   }
 
+  if (ctx.requestInput) {
+    const description = interpolate(
+      String(data['description'] ?? ''),
+      ctx.variables,
+      ctx.refData,
+    ).trim()
+    const fields = runInputFieldsOf(parameters, ctx.variables, (fallback) =>
+      interpolate(fallback, ctx.variables, ctx.refData),
+    )
+    ctx.emit('info', '参数输入：等待填写…')
+    const answer = await ctx.requestInput({
+      ...(description !== '' ? { description } : {}),
+      fields,
+      timeoutMs: runInputTimeoutOf(data['timeout']),
+    })
+    if (answer.cancelled) {
+      // Named AbortError so the engine records `cancelled`; a plain Error would
+      // report a failure and attribute it to the block.
+      const stop = new Error('参数输入：已取消运行')
+      stop.name = 'AbortError'
+      throw stop
+    }
+    if (answer.timedOut) {
+      // Automa's contract: a timeout skips the wait and continues with the
+      // defaults / values already in the scope.
+      ctx.emit('info', '参数输入：等待超时，使用默认值继续')
+    } else {
+      applyRunInputValues(parameters, answer.values, ctx.variables)
+    }
+  }
+
   // A default only fills a gap: a value the scope already holds came from a
-  // trigger payload or an earlier step and is the more specific answer.
+  // trigger payload, an earlier step or the dialog and is the more specific
+  // answer.
   for (const param of parameters) {
     if (ctx.variables[param.name] !== undefined) continue
     const fallback = param.defaultValue ?? ''
@@ -3134,8 +3185,11 @@ const parameterPrompt: BlockExecutor = async (data, ctx) => {
     throw new Error(`Missing required workflow input(s): ${missing.join(', ')}`)
   }
 
+  // Secrets must not land in the run log: it is copied, shown in the panel and
+  // (optionally) handed to the operator assistant.
   const resolved = parameters.map(
-    (param) => `${param.name}=${String(ctx.variables[param.name] ?? '')}`,
+    (param) =>
+      `${param.name}=${param.secret === true ? MASK : String(ctx.variables[param.name] ?? '')}`,
   )
   ctx.emit('result', resolved.join(' · '))
   return null

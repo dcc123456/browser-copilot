@@ -22,6 +22,8 @@ import UserFilePickerCardHost from './UserFilePickerCard'
 import UpdateCenter from './update/UpdateCenter'
 import { ConfirmHost } from '../ui/confirm'
 import { ToastHost } from '../ui/toast'
+import RunInputHost from '../ui/RunInputHost'
+import type { RunInputDialogLabels } from '../ui/RunInputDialog'
 
 type TabId =
   | 'chat'
@@ -155,6 +157,21 @@ export default function App() {
 
   const locale = effectiveLocale((localeSetting ?? 'auto') as 'auto', navigator.language)
   const i18n = useMemo(() => ({ locale, t: messagesFor(locale) }), [locale])
+  // Copy for a `parameter-prompt` dialog the panel launched mid-run.
+  const runInputLabels = useMemo<RunInputDialogLabels>(() => {
+    const t = i18n.t
+    return {
+      title: t.runInputTitle,
+      workflow: (name) => t.runInputWorkflow({ name }),
+      submit: t.runInputSubmit,
+      stop: t.runInputStop,
+      requiredMark: t.runInputRequiredMark,
+      requiredField: (name) => t.runInputRequiredField({ name }),
+      invalidJson: t.runInputInvalidJson,
+      secretHint: t.runInputSecretHint,
+      timeoutHint: (seconds) => t.runInputTimeoutHint({ seconds }),
+    }
+  }, [i18n])
 
   // A deleted skill must not stay selected in Chat, or the turn would reference
   // instructions that no longer exist.
@@ -401,6 +418,8 @@ export default function App() {
       <WindowPicker />
       {/* Workflow upload-file blocks in user-select mode ask here for files. */}
       <UserFilePickerCardHost />
+      {/* `parameter-prompt` dialog for a workflow this panel started. */}
+      <RunInputHost labels={runInputLabels} />
     </I18nProvider>
   )
 }

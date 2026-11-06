@@ -37,6 +37,7 @@ import type { RepeatSuggestion } from './workflow/loop-collapse'
 import type { SelectorProbeResult } from './workflow/selector-probe'
 import type { AttachmentDescriptor, AttachmentSummary } from './attachments'
 import type { UpdateState } from './update/types'
+import type { RunInputRequest } from './workflow/run-input'
 
 /** Aggregated token usage for one agent turn (summed across all tool rounds). */
 export interface TurnTokenUsage {
@@ -321,6 +322,23 @@ export type Command =
        * runs are refused while one is already active.
        */
       testing?: boolean
+      /**
+       * Token of the page that launched this run. A `parameter-prompt` block
+       * mid-run broadcasts its dialog with this token; only that page shows it,
+       * so two editor windows never answer each other's prompts. Omitted by
+       * unattended callers, which keep the silent default-filling behavior.
+       */
+      promptToken?: string
+    }
+  /**
+   * Answers an open `parameter-prompt` dialog. `cancelled` stops the run;
+   * otherwise `values` are the raw form texts the executor coerces.
+   */
+  | {
+      type: 'workflows.runInputAnswer'
+      requestId: string
+      values: Record<string, string>
+      cancelled?: boolean
     }
   /**
    * Answers a paused testing run. `stop` cancels the run; `resume` continues to
@@ -490,6 +508,8 @@ export type Command =
       runId: string
       /** See workflows.run.windowId. */
       windowId?: number
+      /** See workflows.run.promptToken. */
+      promptToken?: string
     }
   /**
    * Whether a workflow has a resumable point (M4): the panel only offers the
@@ -844,6 +864,7 @@ export type CommandResult =
     }
   | { type: 'workflows.takeoverDiscard' }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
+  | { type: 'workflows.runInputAnswer'; ok: boolean }
   | { type: 'record.start'; recording: boolean }
   | {
       type: 'record.stop'
@@ -863,6 +884,21 @@ export type CommandResult =
 
 /** Envelope so a failed command never looks like a successful one. */
 export type CommandResponse = { ok: true; data: CommandResult } | { ok: false; error: string }
+
+/**
+ * One open `parameter-prompt` dialog, pushed to every extension page. Only the
+ * page whose token matches `request.promptToken` renders it.
+ */
+export interface WorkflowsRunInputRequest {
+  type: 'workflows.runInputRequest'
+  request: RunInputRequest
+}
+
+/** A prompt settled (answered, timed out or cancelled); every surface closes it. */
+export interface WorkflowsRunInputSettled {
+  type: 'workflows.runInputSettled'
+  requestId: string
+}
 
 /**
  * One-way push messages the service worker broadcasts to every extension page.

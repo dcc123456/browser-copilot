@@ -65,6 +65,7 @@ import {
   type ReadinessProbe,
 } from './readiness-engine'
 import { withFailureVerdict } from './failure-classifier'
+import type { RunInputAnswer, RunInputPrompt } from '../../lib/workflow/run-input'
 
 export type EmitKind = 'tool' | 'status' | 'result' | 'error' | 'info'
 
@@ -273,6 +274,13 @@ export interface WorkflowRunOptions {
     breakpoint: boolean
     signal: AbortSignal
   }) => void | Promise<void>
+  /**
+   * Interactive `parameter-prompt`: asks the page that launched the run for the
+   * block's declared values and waits. Omitted by unattended hosts (the Runner,
+   * scheduled / triggered runs), where the block keeps filling defaults
+   * silently — a headless run must never hang on a question nobody can see.
+   */
+  requestInput?: (prompt: RunInputPrompt) => Promise<RunInputAnswer>
   /**
    * AI takeover (AI 接管): when a block fails, the engine hands that ONE node
    * to the injected hook before failing the run. The hook completes the node's
@@ -557,6 +565,7 @@ function buildExecCtx(
   getRunLog: () => string[],
   attribution: TokenAttribution | undefined,
   tabMemory: WorkflowExecCtx['tabMemory'],
+  requestInput: WorkflowRunOptions['requestInput'],
 ): WorkflowExecCtx {
   return {
     variables,
@@ -573,6 +582,7 @@ function buildExecCtx(
     ...(scope ? { scope } : {}),
     ...(reliability ? { reliability } : {}),
     ...(attribution ? { attribution } : {}),
+    ...(requestInput ? { requestInput } : {}),
     emit: (kind, text) => onStep(kind, currentId, text),
   }
 }
@@ -627,6 +637,7 @@ async function runCore(
     captureGoalBaseline,
     getPageContext,
     onSubWorkflow,
+    requestInput,
   } = options
 
   // The browser executors are statically imported above. Node-based runners
@@ -1072,6 +1083,7 @@ async function runCore(
       () => stepLines.map((line) => line.text),
       runAttribution,
       tabMemory,
+      requestInput,
     )
     const policy = onErrorPolicy(params)
 
@@ -1963,6 +1975,9 @@ async function runCore(
       onCheckpoint,
       // Breakpoints inside a sub-workflow pause the parent run (same run id).
       ...(onBeforeNode ? { onBeforeNode } : {}),
+      // A child's parameter prompt belongs to the same attended run, so the
+      // dialog the parent would have shown answers the child too.
+      ...(requestInput ? { requestInput } : {}),
       // Keep one trace spanning the full parent→child nesting (P3).
       onSubWorkflow,
       onStep: onStep ? (kind, nodeId, text) => onStep(kind, nodeId, `[子] ${text}`) : undefined,

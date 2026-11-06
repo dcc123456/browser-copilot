@@ -283,14 +283,14 @@ No variables. One main output port, which a stop action never reaches because th
 
 ## Parameter prompt
 
-Resolves the workflow's declared inputs before the following steps run. This build shows no interactive dialog: values come from the run scope, and defaults fill the gaps. [Automa reference](https://www.goautoma.com/extension/docs/blocks/parameter-prompt.html)
+Resolves the workflow's declared inputs before the following steps run. When the run is started from the workflow editor or the side panel, the step opens an interactive dialog listing every declared parameter, waits for the answer and writes it into the run scope. Unattended runs — the headless Runner, scheduled, triggered and Feishu runs — have no page to answer, so they resolve silently from the run scope and defaults. [Automa reference](https://www.goautoma.com/extension/docs/blocks/parameter-prompt.html)
 
 ### Settings
 
-| Field                                | Type   | Default | Notes                                                                             |
-| ------------------------------------ | ------ | ------- | --------------------------------------------------------------------------------- |
-| Timeout (millisecond) (0 to disable) | Number | `60000` | Stored with the node; not applied because no prompt is displayed.                 |
-| Parameters                           | List   | Empty   | Declared inputs; each entry has a name, a required flag, and an optional default. |
+| Field                                | Type   | Default | Notes                                                                                                                          |
+| ------------------------------------ | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Timeout (millisecond) (0 to disable) | Number | `60000` | How long the dialog waits before continuing with defaults. `0` waits as long as the service worker can stay alive (9 minutes). |
+| Parameters                           | List   | Empty   | Declared inputs; each entry has a name, a required flag, and an optional default.                                              |
 
 ### Outputs
 
@@ -300,11 +300,15 @@ Resolves the workflow's declared inputs before the following steps run. This bui
 
 ### Browser Copilot notes
 
+- The dialog pre-fills each field with the scope's current value, then with the interpolated default; object values appear as formatted JSON.
+- A secret parameter is never sent to the dialog: its field starts blank, and leaving it blank keeps the value already stored. The run log masks secret values as `***`.
 - A value already present in the run scope wins; a default is written only when the variable is undefined, so a trigger payload or an earlier step is never overwritten.
 - Defaults are interpolated before they are stored.
+- If the dialog times out, the run continues with the defaults / existing values; a required parameter that is still missing then fails the step.
+- Clicking **Stop run** cancels the whole run (the same outcome as the Cancel button), not just this step.
 - A missing required parameter fails the step and names every missing input, instead of driving later steps with a blank value.
 - With no parameters declared, the step records an informational message and continues.
-- The timeout and any prompt or placeholder text are persisted but have no effect while no prompt is shown.
+- The dialog belongs to the page that started the run; two editor windows never answer each other's prompts.
 
 <!-- operator:webhook -->
 
