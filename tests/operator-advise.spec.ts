@@ -157,6 +157,13 @@ describe('buildOperatorAdvisePrompt', () => {
     expect(prompt).toContain('At most 2 operators')
   })
 
+  it('spells out a compact row shape the parameter name alone hides', () => {
+    const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
+    // set-variable is offered compact; without this the model only read
+    // "variables" and invented one object or a string instead of [name, value].
+    expect(prompt).toContain('rows: variables: [name, value]')
+  })
+
   it('grounds the parameters in the page it was shown', () => {
     const page: OperatorPageRead = {
       url: 'https://example.com/form',
@@ -364,6 +371,78 @@ describe('parseOperatorAdviseReply', () => {
     )
     expect(parsed?.proposals.map((p) => p.blockId)).toEqual(['new-tab'])
     expect(parsed?.rejected).toEqual(['launch-browser'])
+  })
+
+  it('reads a single proposal written on its own instead of an array', () => {
+    const parsed = parseOperatorAdviseReply(
+      '{"reply":"ok","proposals":{"blockId":"new-tab","data":{"url":"https://b"}}}',
+      offered,
+    )
+    expect(parsed?.proposals).toEqual([
+      { blockId: 'new-tab', data: { url: 'https://b' }, rationale: '' },
+    ])
+    expect(parsed?.rejected).toEqual([])
+  })
+
+  it('reads a proposals list the model double-encoded as a string', () => {
+    const parsed = parseOperatorAdviseReply(
+      JSON.stringify({
+        reply: 'ok',
+        proposals: JSON.stringify([{ blockId: 'new-tab', data: { url: 'u' } }]),
+      }),
+      offered,
+    )
+    expect(parsed?.proposals.map((p) => p.blockId)).toEqual(['new-tab'])
+  })
+
+  it('reads parameters the model encoded as a JSON string', () => {
+    const parsed = parseOperatorAdviseReply(
+      JSON.stringify({
+        reply: 'ok',
+        proposals: [{ blockId: 'new-tab', data: '{"url":"https://b"}' }],
+      }),
+      offered,
+    )
+    expect(parsed?.proposals[0]?.data).toEqual({ url: 'https://b' })
+  })
+
+  it('resolves a differently spelled offered id, and still refuses the rest', () => {
+    // A model that writes Set Variable / set_variable named the same concept;
+    // the alias may only ever resolve to an id that turn was offered.
+    const parsed = parseOperatorAdviseReply(
+      '{"reply":"ok","proposals":[{"blockId":"Set Variable","data":{}},{"blockId":"launch-browser","data":{}}]}',
+      ['set-variable'],
+    )
+    expect(parsed?.proposals.map((p) => p.blockId)).toEqual(['set-variable'])
+    expect(parsed?.rejected).toEqual(['launch-browser'])
+  })
+
+  it('lands a named operator whose parameters were left out, so the gap can be named', () => {
+    // Omitting a value is what the prompt asks for; dropping the whole step
+    // behind an empty reply is what made the assistant look like it lied.
+    const parsed = parseOperatorAdviseReply(
+      '{"reply":"ok","proposals":[{"blockId":"set-variable"},{"blockId":"new-tab","data":"oops"}]}',
+      ['set-variable', 'new-tab'],
+    )
+    expect(parsed?.proposals).toEqual([
+      { blockId: 'set-variable', data: {}, rationale: '' },
+      { blockId: 'new-tab', data: {}, rationale: '' },
+    ])
+  })
+
+  it('carries a set-variable answer from the reply to the canvas', () => {
+    // The reported failure: a reply naming set-variable ended with nothing on
+    // the canvas. The pure path must place exactly that row.
+    const parsed = parseOperatorAdviseReply(
+      '{"reply":"已添加 set-variable 节点","action":"append","proposals":[{"blockId":"set-variable","data":{"variables":[{"name":"jobsSummary","value":"{{jobsData}}"}]}}]}',
+      ['set-variable'],
+    )
+    const patch = appendOperatorChain(graph([node('t', 'trigger')], []), parsed!.proposals, {
+      newId: () => 'n1',
+    })
+    expect(patch.added.map((added) => added.id)).toEqual(['n1'])
+    expect(patch.added[0]?.data.variables).toEqual([{ name: 'jobsSummary', value: '{{jobsData}}' }])
+    expect(patch.problem).toBeUndefined()
   })
 
   it('caps the chain and reports what was cut', () => {

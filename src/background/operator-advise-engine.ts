@@ -486,6 +486,15 @@ async function advise(
       used('The answer after the screenshot was not readable, so the first answer was kept.'),
     )
   }
+  // The round exists to COMPLETE the batch, not to delete it. An answer that
+  // names no step after the screen was shown leaves the first batch in place;
+  // replacing it would hand the editor an empty list behind a reply that still
+  // claims the step was added.
+  if (retried.proposals.length === 0 && parsed.proposals.length > 0) {
+    return keep(
+      used('The answer after the screenshot named no step, so the first answer was kept.'),
+    )
+  }
   return { ok: true, ...retried, raw: retryText, page: pageRef, screenshot: used() }
 }
 

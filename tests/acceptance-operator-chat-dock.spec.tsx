@@ -51,8 +51,9 @@ beforeAll(() => {
   }
 })
 
-/** The editor translator mocked as key passthrough, so rows assert on key names. */
-const t = (key: string) => key
+/** The editor translator mocked as key passthrough, so rows assert on key names.
+ *  The refused-names row keeps its placeholder so the merged id is observable. */
+const t = (key: string) => (key === 'operatorAiRejected' ? 'operatorAiRejected {names}' : key)
 
 type AdviseReply = Extract<CommandResult, { type: 'workflows.operatorAdvise' }>
 
@@ -641,6 +642,26 @@ describe('V-operator-dock: the floating assistant', () => {
 
     expect(requests).toEqual([])
     expect(container.textContent).toContain('operatorAiNoSteps')
+  })
+
+  it('names the operators the parser refused, instead of only saying nothing landed', async () => {
+    reply = {
+      type: 'workflows.operatorAdvise',
+      data: {
+        ok: true,
+        reply: '已添加 set-variable 节点',
+        action: 'append',
+        proposals: [],
+        rejected: ['launch-browser'],
+      },
+    }
+    await render()
+    await ask('打开百度')
+
+    expect(requests).toEqual([])
+    expect(container.textContent).toContain('operatorAiNoSteps')
+    expect(container.textContent).toContain('operatorAiRejected')
+    expect(container.textContent).toContain('launch-browser')
   })
 
   it('offers undo for the batch it just landed, and only for that batch', async () => {

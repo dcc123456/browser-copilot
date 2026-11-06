@@ -413,6 +413,28 @@ describe('runOperatorAdvise', () => {
     })
   })
 
+  it('keeps the first answer when the screenshot round names no step', async () => {
+    // A retry that comes back with an empty list must not erase the batch the
+    // user was already shown a reply for — that is how "added" ended with no node.
+    const result = await runOperatorAdvise(input({ windowId: 7 }), {
+      signal: new AbortController().signal,
+      readPage: async () => pageRead,
+      screenshotRoute: async () => 'inline' as const,
+      captureScreenshot: async () => shot,
+      callModel: async (prompt) =>
+        prompt.includes('## A screenshot of the page')
+          ? '{"reply":"已添加","proposals":[]}'
+          : noElement,
+    })
+    expect(result.ok).toBe(true)
+    expect(result.proposals).toHaveLength(1)
+    expect(result.screenshot).toEqual({
+      route: 'inline',
+      taken: true,
+      error: 'The answer after the screenshot named no step, so the first answer was kept.',
+    })
+  })
+
   it('reports an image model that could not read the screen, without a second chat call', async () => {
     let calls = 0
     const result = await runOperatorAdvise(input({ windowId: 7 }), {

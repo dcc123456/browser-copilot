@@ -788,6 +788,37 @@ function schemaPropertyNames(schema: Record<string, unknown>): string[] {
 }
 
 /**
+ * The row shapes a compact offer would otherwise hide: `variables` is an array of
+ * `{name, value}` objects, and a model that only reads the parameter name invents
+ * a different shape (one object, a string, an array of strings). Only leaf rows
+ * are named — a nested group (`conditions.conditions`) says nothing useful in a
+ * one-line offer.
+ */
+function schemaRowShapes(schema: Record<string, unknown>): string[] {
+  const properties = schema['properties']
+  if (!properties || typeof properties !== 'object') return []
+  const shapes: string[] = []
+  for (const [key, value] of Object.entries(properties as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue
+    const property = value as Record<string, unknown>
+    if (property['type'] !== 'array') continue
+    const items = property['items']
+    if (!items || typeof items !== 'object') continue
+    const itemProperties = (items as Record<string, unknown>)['properties']
+    if (!itemProperties || typeof itemProperties !== 'object') continue
+    const fields = Object.values(itemProperties as Record<string, unknown>)
+    const isLeafRow = fields.every((field) => {
+      if (!field || typeof field !== 'object') return true
+      const type = (field as Record<string, unknown>)['type']
+      return type === undefined || type === 'string' || type === 'number' || type === 'boolean'
+    })
+    if (!isLeafRow) continue
+    shapes.push(`${key}: [${Object.keys(itemProperties as Record<string, unknown>).join(', ')}]`)
+  }
+  return shapes
+}
+
+/**
  * The operator set offered to the model for this utterance: the deterministic
  * discovery shortlist, then every core operator as a floor, then every other
  * writable operator by id.
@@ -923,6 +954,8 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
         candidate.required.length > 0 ? `; required: ${candidate.required.join(', ')}` : ''
       const detail = names.length > 0 ? ` [params: ${names.join(', ')}${required}]` : ''
       lines.push(`- ${candidate.blockId} — ${candidate.name}${detail}`)
+      const rows = schemaRowShapes(candidate.schema)
+      if (rows.length > 0) lines.push(`  rows: ${rows.join('; ')}`)
       continue
     }
     lines.push(
@@ -958,13 +991,74 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     '- Prefer stable locators (#id, [data-testid], [name]) over generated classes or nth-child chains.',
     `- At most ${maxOperators} operators (one for "edit"/"replace"). Return an empty "proposals" array when nothing on the list fits or the user is only asking a question — then "reply" must say why.`,
     '- For "edit", if the step already holds every value the user asked for, return no proposals and say it is unchanged — never report a change your answer does not contain.',
+    '- If "proposals" is empty, "reply" must not say that anything was added or changed — say why no offered operator fits.',
     '- "reply" is shown to the user, in the language they wrote in, and must match what you actually did.',
     '',
     '## Response format',
     'Respond with ONLY a JSON object — no markdown fence, no commentary:',
     '{"reply":"<one sentence for the user>","action":"append|prepend|edit|replace","proposals":[{"blockId":"<id>","data":{ …parameters… },"rationale":"<why this operator>"}]}',
+    '"proposals" is always an array of rows (one row is an array of one) and each row\'s "data" is an object; a parameter you cannot fill is left out of "data", not replaced by a string or an array.',
   )
   return lines.join('\n')
+}
+
+/**
+ * Two spellings of one id that a model may produce: `set-variable`,
+ * `set_variable`, `Set Variable` and `setVariable` all normalize to the same
+ * key. Only formatting differs — the offer itself stays closed-world.
+ */
+function blockIdKey(id: string): string {
+  return id.toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+/**
+ * Resolve the id a row names against the offer that turn was given. Exact ids
+ * win; otherwise a row is matched by {@link blockIdKey}, which can only recover
+ * an id the model was actually offered. An id that matches nothing is refused.
+ */
+function resolveOfferedBlockId(raw: string, offered: ReadonlySet<string>): string | undefined {
+  const trimmed = raw.trim()
+  if (offered.has(trimmed)) return trimmed
+  const key = blockIdKey(trimmed)
+  if (key === '') return undefined
+  for (const id of offered) if (blockIdKey(id) === key) return id
+  return undefined
+}
+
+/**
+ * The proposals field as models actually write it: the documented array, a single
+ * row on its own, or either one JSON-encoded (a double-encoded answer). Anything
+ * else is no rows at all.
+ */
+function proposalRowsOf(value: unknown): unknown[] {
+  if (typeof value === 'string') {
+    try {
+      return proposalRowsOf(JSON.parse(value) as unknown)
+    } catch {
+      return []
+    }
+  }
+  if (Array.isArray(value)) return value
+  if (value !== null && typeof value === 'object') return [value]
+  return []
+}
+
+/**
+ * The parameters one row carries. A named operator whose `data` is missing or
+ * unreadable still lands: the catalog defaults apply and the missing-parameter
+ * row names the gap, which is what the prompt promises the model ("omit what
+ * you are unsure of — the editor reports anything still missing").
+ */
+function proposalDataOf(value: unknown): Record<string, unknown> {
+  let source = value
+  if (typeof source === 'string') {
+    try {
+      source = JSON.parse(source) as unknown
+    } catch {
+      return {}
+    }
+  }
+  return sanitizeNodeData(source) ?? {}
 }
 
 /**
@@ -973,6 +1067,12 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
  * voids the whole answer instead of being guessed as `append`, and every
  * parameter object is sanitized by the same gate AI Fix uses, which also strips
  * the `__workflowAi` namespace so the model cannot forge the provenance marker.
+ *
+ * The row SHAPE is read tolerantly, because a shape mistake used to lose the
+ * whole step while the reply still claimed success: a lone row, a JSON-encoded
+ * list and a differently spelled offered id are understood, and a named
+ * operator with unusable parameters lands on its defaults so the missing-parameter
+ * row can name the gap. Only an id this build never offered is refused.
  */
 export function parseOperatorAdviseReply(
   text: string,
@@ -1012,24 +1112,23 @@ export function parseOperatorAdviseReply(
   const allowed = new Set(offeredBlockIds)
   const proposals: OperatorProposal[] = []
   const rejected: string[] = []
-  const rows = Array.isArray(parsed['proposals']) ? parsed['proposals'] : []
+  const rows = proposalRowsOf(parsed['proposals'])
   for (const row of rows) {
-    if (!row || typeof row !== 'object') continue
-    const blockId = (row as Record<string, unknown>)['blockId']
-    const data = (row as Record<string, unknown>)['data']
-    if (typeof blockId !== 'string' || !allowed.has(blockId)) {
-      rejected.push(typeof blockId === 'string' ? blockId : '(malformed row)')
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue
+    const rawBlockId = (row as Record<string, unknown>)['blockId']
+    if (typeof rawBlockId !== 'string' || rawBlockId.trim() === '') {
+      rejected.push(typeof rawBlockId === 'string' ? rawBlockId : '(malformed row)')
       continue
     }
-    const sanitized = sanitizeNodeData(data)
-    if (!sanitized) {
-      rejected.push(blockId)
+    const blockId = resolveOfferedBlockId(rawBlockId, allowed)
+    if (!blockId) {
+      rejected.push(rawBlockId.trim())
       continue
     }
     const rationale = (row as Record<string, unknown>)['rationale']
     proposals.push({
       blockId,
-      data: sanitized,
+      data: proposalDataOf((row as Record<string, unknown>)['data']),
       rationale: typeof rationale === 'string' ? rationale.trim() : '',
     })
   }

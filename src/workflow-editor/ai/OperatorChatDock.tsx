@@ -679,9 +679,14 @@ export default function OperatorChatDock({
             action: chain,
             proposals: data.proposals,
             missing,
-            unavailable: data.proposals
-              .filter((proposal) => !isObservableBlock(proposal.blockId))
-              .map((proposal) => operatorBlockName(proposal.blockId)),
+            // The rows the parser refused are named up front too: a page run
+            // cannot bring an operator this build never offered.
+            unavailable: [
+              ...data.proposals
+                .filter((proposal) => !isObservableBlock(proposal.blockId))
+                .map((proposal) => operatorBlockName(proposal.blockId)),
+              ...data.rejected.map((id) => operatorBlockName(id)),
+            ],
           },
         })
         return
@@ -698,6 +703,15 @@ export default function OperatorChatDock({
               proposals: data.proposals,
               ...(context.selectedNodeId ? { targetNodeId: context.selectedNodeId } : {}),
             })
+      // The parser already named the rows it refused; without this they only
+      // existed inside the collapsed raw answer, and "No step was placed" had no
+      // cause. An id this build does not know stays as written.
+      if (landing && data.rejected.length > 0) {
+        landing = {
+          ...landing,
+          skipped: [...landing.skipped, ...data.rejected.map((id) => operatorBlockName(id))],
+        }
+      }
       pushTurn({
         role: 'assistant',
         content: data.reply,
