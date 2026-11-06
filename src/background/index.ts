@@ -1908,6 +1908,19 @@ async function handleCommand(
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.delete' }
 
+    case 'workflows.parameterValues': {
+      const workflow = await getWorkflow(command.id)
+      if (!workflow) throw new Error('Workflow not found.')
+      // Configuration, not content: no revision bump and no `updatedAt` touch,
+      // so setting a value neither looks like an edit in the history nor
+      // reorders the side panel's list.
+      await saveWorkflow(
+        { ...workflow, parameterValues: command.values },
+        { touchUpdatedAt: false },
+      )
+      return { type: 'workflows.parameterValues' }
+    }
+
     case 'workflows.marketplace': {
       // Metadata only: no revision bump, no trigger reschedule, and no
       // updatedAt change — the workflow itself did not move.

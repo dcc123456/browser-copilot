@@ -1326,6 +1326,26 @@
                 </tbody>
               </table>
             </div>
+            <h3 id="browser-copilot-notes-11">Browser Copilot notes</h3>
+            <ul>
+              <li>
+                Downstream blocks can reference every declared parameter with <code>{{name}}</code>,
+                and the <code>/</code> variable menu lists them once the prompt block is upstream.
+              </li>
+              <li>
+                Values can be set ahead of time from the workflow list&#39;s
+                <strong>Parameters</strong> action or the editor toolbar&#39;s
+                <strong>Parameters</strong> tab. A saved value is used by the run and is no longer
+                asked for — which is what makes a scheduled run of a parameterized workflow work.
+                Leave a field empty to keep being asked at run time.
+              </li>
+              <li>
+                Secret parameters are listed in that panel but cannot be set there: a credential
+                must never be stored in the workflow definition, because the definition is exported
+                and shared. Type it in the run dialog or resolve it with a
+                <strong>Get secret</strong> block.
+              </li>
+            </ul>
             <h3 id="outputs-11">Outputs</h3>
             <ul>
               <li>One variable per parameter, using the parameter&#39;s name.</li>
@@ -1335,7 +1355,7 @@
               </li>
               <li>One main output port.</li>
             </ul>
-            <h3 id="browser-copilot-notes-11">Browser Copilot notes</h3>
+            <h3 id="browser-copilot-notes-12">Browser Copilot notes</h3>
             <ul>
               <li>
                 The dialog pre-fills each field with the scope&#39;s current value, then with the
@@ -1504,7 +1524,7 @@
                 a transport error or a non-2xx status when that port is connected.
               </li>
             </ul>
-            <h3 id="browser-copilot-notes-12">Browser Copilot notes</h3>
+            <h3 id="browser-copilot-notes-13">Browser Copilot notes</h3>
             <ul>
               <li>
                 Only request failures use the fallback port. A configuration error — an unreadable
@@ -1612,7 +1632,7 @@
               </li>
               <li>One main output port. The block does not write the data table.</li>
             </ul>
-            <h3 id="browser-copilot-notes-13">Browser Copilot notes</h3>
+            <h3 id="browser-copilot-notes-14">Browser Copilot notes</h3>
             <ul>
               <li>
                 With no target element, the agent reads the page through its tools; with a target,

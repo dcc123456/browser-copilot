@@ -44,6 +44,7 @@ import type {
 import { migrateWorkflow, triggerFromNodes } from '../lib/workflow/migrate'
 import { readEdgeStyle, workflowEdgeOf } from '../lib/workflow/edge-data'
 import { ensureSecretProducer, type SuggestionGraph } from '../lib/workflow/var-suggestions'
+import { parameterPromptInputsOf } from '../lib/workflow/workflow-inputs'
 import {
   appendOperatorChain,
   applyOperatorAction,
@@ -67,6 +68,9 @@ import { appendRecordedWorkflow } from '../lib/workflow/record-append'
 import { sendCommand } from '../lib/messages'
 import RunInputHost from '../ui/RunInputHost'
 import type { RunInputDialogLabels } from '../ui/RunInputDialog'
+import WorkflowParametersDialog, {
+  type WorkflowParametersDialogLabels,
+} from '../ui/WorkflowParametersDialog'
 import { beginRunInputSession, endRunInputSession } from '../ui/run-input-session'
 import { hostWindowId, rememberEditedWorkflow } from './host-window'
 import { autoReconnectStorage } from '../lib/fs-reconnect'
@@ -287,6 +291,27 @@ export default function EditorApp() {
 
   const toast = useToast()
 
+  // Copy for the workflow-panel parameter editor (same sharing rule as the
+  // run-time dialog above: the module stays out of i18n).
+  const parameterLabels = useMemo<WorkflowParametersDialogLabels>(
+    () => ({
+      title: t('parametersTitle'),
+      workflow: (name) => t('parametersWorkflow').replace('{name}', name),
+      hint: t('parametersHint'),
+      save: t('parametersSave'),
+      cancel: t('cancel'),
+      clearAll: t('parametersClearAll'),
+      clearField: (name) => t('parametersClearField').replace('{name}', name),
+      empty: t('parametersEmpty'),
+      secretHint: t('parametersSecretHint'),
+      unset: t('parametersUnset'),
+      requiredMark: t('runInputRequiredMark'),
+      requiredField: (name) => t('runInputRequiredField').replace('{name}', name),
+      invalidJson: t('runInputInvalidJson'),
+    }),
+    [t],
+  )
+
   const [meta, setMeta] = useState<{
     name: string
     description: string
@@ -300,6 +325,15 @@ export default function EditorApp() {
     trigger: { type: 'manual', enabled: true },
     settings: DEFAULT_SETTINGS,
   })
+  /**
+   * Saved values for the workflow's `parameter-prompt` inputs. Kept apart from
+   * `meta` on purpose: values are persisted by their own command the moment the
+   * panel saves them, so touching them must not raise the canvas's
+   * unsaved-changes dot (the signature below includes `meta`, not this).
+   */
+  const [parameterValues, setParameterValues] = useState<Record<string, string>>({})
+  const [parametersOpen, setParametersOpen] = useState(false)
+  const [parametersSaving, setParametersSaving] = useState(false)
 
   const reactFlow = useReactFlow()
   const loadedRef = useRef(false)
@@ -473,6 +507,7 @@ export default function EditorApp() {
           trigger: wf.trigger ?? m.trigger,
           settings: wf.settings ?? m.settings,
         }))
+        setParameterValues(wf.parameterValues ?? {})
         const flowNodes = wf.drawflow.nodes.map(toFlowNode)
         setNodes(flowNodes)
         // healEdgeHandles: React Flow silently DROPS edges whose stored
@@ -833,6 +868,13 @@ export default function EditorApp() {
     return out
   }, [nodes])
 
+  /**
+   * Inputs declared by the canvas's `parameter-prompt` blocks (group children
+   * included). Drives the toolbar tab and the panel: no declaration means no
+   * entry, and an untouched field still asks at run time.
+   */
+  const parameterInputs = useMemo(() => parameterPromptInputsOf(nodes.map(toWorkflowNode)), [nodes])
+
   const buildWorkflow = useCallback(async (): Promise<Workflow | null> => {
     if (!workflowId) return null
     const { x, y, zoom } = reactFlow.getViewport()
@@ -849,10 +891,11 @@ export default function EditorApp() {
       // denormalize it into the top-level field so the workflows list chip
       // and background listeners see the current launch type right on save.
       trigger: triggerFromNodes(wfNodes) ?? meta.trigger,
+      ...(Object.keys(parameterValues).length > 0 ? { parameterValues } : {}),
       settings: meta.settings,
       ...(newWorkflowFolderRef.current ? { folderId: newWorkflowFolderRef.current } : {}),
     }
-  }, [workflowId, nodes, edges, meta, reactFlow, t])
+  }, [workflowId, nodes, edges, meta, parameterValues, reactFlow, t])
 
   const handleSave = useCallback(async (): Promise<boolean> => {
     const wf = await buildWorkflow()
@@ -879,6 +922,31 @@ export default function EditorApp() {
       setSaving(false)
     }
   }, [buildWorkflow, meta, toast, t])
+
+  /**
+   * Persist the parameter panel's values.
+   *
+   * A dedicated command, not `handleSave`: the graph may have unsaved canvas
+   * edits, and saving values must neither commit those nor bump the revision.
+   */
+  const saveParameterValues = useCallback(
+    async (values: Record<string, string>): Promise<void> => {
+      if (!workflowId) return
+      setParametersSaving(true)
+      try {
+        await sendCommand({ type: 'workflows.parameterValues', id: workflowId, values })
+        setParameterValues(values)
+        setParametersOpen(false)
+        toast.show(t('parametersSaved').replace('{name}', meta.name || t('untitled')), 'ok')
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        toast.show(`${t('parametersSaveFailed')}: ${msg}`, 'error')
+      } finally {
+        setParametersSaving(false)
+      }
+    },
+    [workflowId, meta.name, toast, t],
+  )
 
   const handleRun = useCallback(
     async (startNodeId?: string) => {
@@ -1800,6 +1868,8 @@ export default function EditorApp() {
           onOpenLogs={() => setLogsOpen(true)}
           onOpenGoal={() => setGoalOpen(true)}
           onOpenDataTable={() => setDataTableOpen(true)}
+          parameterCount={parameterInputs.length}
+          onOpenParameters={() => setParametersOpen(true)}
           onToggleRecording={() => void toggleRecording()}
           selectedCount={selectedIds.size}
           onPackSelection={packSelection}
@@ -1932,6 +2002,17 @@ export default function EditorApp() {
         <ConfirmHost />
         {/* Runtime `parameter-prompt` dialog for the run this editor launched. */}
         <RunInputHost labels={runInputLabels} />
+        {parametersOpen && (
+          <WorkflowParametersDialog
+            busy={parametersSaving}
+            labels={parameterLabels}
+            onClose={() => setParametersOpen(false)}
+            onSave={(values) => void saveParameterValues(values)}
+            parameters={parameterInputs}
+            values={parameterValues}
+            workflowName={meta.name || t('untitled')}
+          />
+        )}
 
         {/* Block settings + on-error modal (gear button in node hover toolbar). */}
         {settingsForId && settingsBlock && (

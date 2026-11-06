@@ -1,7 +1,8 @@
 /**
  * Top toolbar — compact Automa-style controls in an in-flow row.
  *
- * Left group: palette toggle + Editor/Logs/Goal/Data-table tabs. Right group:
+ * Left group: palette toggle + Editor/Logs/Goal/Data-table tabs, plus a
+ * Parameters tab when a block declares inputs. Right group:
  * debug/testing, group-pack (when a chain is selected), record, a labelled Save
  * (with an unsaved-changes dot) and Run. Canvas history and auto-layout live in
  * the bottom toolbar. The workflow name/rename live in the left sidebar header.
@@ -21,6 +22,7 @@ import {
   Pause,
   Play,
   Save,
+  SlidersHorizontal,
   SquareTerminal,
   Table2,
   Target,
@@ -46,6 +48,8 @@ export default function TopToolbar({
   onOpenLogs,
   onOpenGoal,
   onOpenDataTable,
+  parameterCount,
+  onOpenParameters,
   onToggleRecording,
   selectedCount,
   onPackSelection,
@@ -74,6 +78,10 @@ export default function TopToolbar({
   onOpenGoal: () => void
   /** Open the data-table explanation panel. */
   onOpenDataTable: () => void
+  /** How many inputs the workflow's parameter-input blocks declare. */
+  parameterCount: number
+  /** Open the panel that sets those input values ahead of a run. */
+  onOpenParameters: () => void
   onToggleRecording: () => void
   /** How many canvas nodes are selected right now. */
   selectedCount: number
@@ -125,6 +133,19 @@ export default function TopToolbar({
           <Table2 size={14} />
           {t('dataTable')}
         </button>
+        {/* Only meaningful once a block actually declares inputs: an always-on
+            tab would open an empty editor on every ordinary workflow. */}
+        {parameterCount > 0 && (
+          <button
+            type="button"
+            className="wf-tab inline-flex items-center gap-1.5"
+            onClick={onOpenParameters}
+            title={t('parametersHint')}
+          >
+            <SlidersHorizontal size={14} />
+            {t('parameters')}
+          </button>
+        )}
       </div>
 
       {repair && repair.state !== 'idle' ? (

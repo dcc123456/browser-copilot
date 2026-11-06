@@ -969,12 +969,17 @@
             <ul>
               <li>
                 This build ignores <strong>Close</strong>, the match pattern, and
-                <strong>Close all windows</strong>: it always closes the active tab of the run&#39;s
-                window.
+                <strong>Close all windows</strong>: it always closes the tab the run is driving —
+                not the tab you have focused in the browser — so switching tabs mid-run cannot
+                redirect it at your own page.
               </li>
               <li>
-                After closing, the run is pinned to the tab the browser activates next, so later
-                steps do not keep pointing at a dead tab id.
+                With no http(s) tab to close, the step fails and says so instead of reporting
+                success.
+              </li>
+              <li>
+                After closing, the run is pinned to the tab the browser activates next (inside the
+                run&#39;s window), so later steps do not keep pointing at a dead tab id.
               </li>
               <li>Closing the last tab of a window closes that window as well.</li>
             </ul>

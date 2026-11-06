@@ -24,7 +24,11 @@
  * @module lib/workflow/workflow-inputs
  */
 
-import type { WorkflowParameter, WorkflowTrigger } from './types'
+import type { WorkflowNode, WorkflowParameter, WorkflowTrigger } from './types'
+import { blockIdOf, groupChildrenOf, isGroupNode } from './group'
+
+/** The block that declares inputs at run time (`parameters` in its data). */
+export const PARAMETER_PROMPT_BLOCK_ID = 'parameter-prompt'
 
 /** The parameter types the editor offers; anything else is treated as a string. */
 const PARAM_TYPES: ReadonlySet<string> = new Set(['string', 'number', 'json', 'checkbox'])
@@ -125,6 +129,65 @@ export function seedInputs(parameters: readonly WorkflowParameter[]): Record<str
 /** The declared inputs of a workflow, read from its trigger mirror. */
 export function triggerInputs(trigger: WorkflowTrigger | undefined): WorkflowParameter[] {
   return workflowParametersOf(trigger?.parameters)
+}
+
+/**
+ * The inputs declared by `parameter-prompt` blocks in this node list.
+ *
+ * Group children are included: a prompt inside a `blocks-group` runs with the
+ * group, so its parameters are just as real as a top-level one. Callers pass the
+ * nodes they consider reachable (see `var-suggestions`) or the whole graph (the
+ * panel's parameter editor). The first declaration of a name wins — two blocks
+ * declaring the same name share one row, and the first is the one whose type
+ * and description the user sees.
+ */
+export function parameterPromptInputsOf(nodes: readonly WorkflowNode[]): WorkflowParameter[] {
+  const out: WorkflowParameter[] = []
+  const seen = new Set<string>()
+  const consider = (params: readonly WorkflowParameter[]): void => {
+    for (const param of params) {
+      if (seen.has(param.name)) continue
+      seen.add(param.name)
+      out.push(param)
+    }
+  }
+  for (const node of nodes) {
+    if (blockIdOf(node) === PARAMETER_PROMPT_BLOCK_ID) {
+      consider(workflowParametersOf(node.data?.parameters))
+      continue
+    }
+    if (!isGroupNode(node)) continue
+    for (const child of groupChildrenOf(node)) {
+      if (child.id === PARAMETER_PROMPT_BLOCK_ID) {
+        consider(workflowParametersOf(child.data['parameters']))
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * The values a run should START with from the workflow's saved parameter panel.
+ *
+ * `values` is raw form text (what the panel stored), so each entry is coerced by
+ * its declaration's type — a number must reach the scope as a number. Blank
+ * entries contribute nothing. Secrets are skipped on purpose: a credential never
+ * enters the workflow definition (it would be exported with it), so a secret is
+ * always answered at run time or resolved through a `get-secret` block.
+ */
+export function presetInputScope(
+  parameters: readonly WorkflowParameter[],
+  values: Readonly<Record<string, string>> | undefined,
+): Record<string, unknown> {
+  if (!values) return {}
+  const out: Record<string, unknown> = {}
+  for (const param of parameters) {
+    if (param.secret === true) continue
+    const raw = values[param.name]
+    if (typeof raw !== 'string' || raw.trim() === '') continue
+    out[param.name] = coerceInputValue(param, raw)
+  }
+  return out
 }
 
 /**

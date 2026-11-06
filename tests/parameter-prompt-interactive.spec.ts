@@ -23,6 +23,7 @@ function makeCtx(
   requestInput?: (
     prompt: RunInputPrompt,
   ) => Promise<{ values: Record<string, string>; cancelled?: boolean; timedOut?: boolean }>,
+  presetInputs?: Readonly<Record<string, unknown>>,
 ): { ctx: WorkflowExecCtx; emitted: Emitted[]; request: ReturnType<typeof vi.fn> } {
   const emitted: Emitted[] = []
   const request = vi.fn(requestInput ?? (async () => ({ values: {} })))
@@ -32,6 +33,7 @@ function makeCtx(
     signal: new AbortController().signal,
     emit: (kind: string, text: string) => emitted.push({ kind, text }),
     ...(requestInput ? { requestInput: request } : {}),
+    ...(presetInputs ? { presetInputs } : {}),
   } as unknown as WorkflowExecCtx
   return { ctx, emitted, request }
 }
@@ -166,6 +168,37 @@ describe('parameter-prompt asks the launching page', () => {
     const prompt = request.mock.calls[0]![0] as RunInputPrompt
     expect(prompt.fields[0]!.secretStored).toBeUndefined()
     expect(ctx.variables['apiKey']).toBe('new-token')
+  })
+
+  it('asks only for the values the workflow panel did not save', async () => {
+    const { ctx, request } = makeCtx(
+      { keyword: 'iPhone' },
+      async () => ({ values: { city: '上海' } }),
+      { keyword: 'iPhone' },
+    )
+    await parameterPrompt(
+      {
+        parameters: [param({ name: 'keyword' }), param({ name: 'city' })],
+      },
+      ctx,
+    )
+
+    const prompt = request.mock.calls[0]![0] as RunInputPrompt
+    expect(prompt.fields.map((field) => field.name)).toEqual(['city'])
+    expect(ctx.variables['city']).toBe('上海')
+    // The saved value survives untouched.
+    expect(ctx.variables['keyword']).toBe('iPhone')
+  })
+
+  it('asks nothing when every declared value was saved in the panel', async () => {
+    const { ctx, emitted, request } = makeCtx({ keyword: 'iPhone' }, async () => ({ values: {} }), {
+      keyword: 'iPhone',
+    })
+    await parameterPrompt({ parameters: [param({ name: 'keyword' })] }, ctx)
+
+    expect(request).not.toHaveBeenCalled()
+    expect(emitted.some((line) => line.text.includes('已保存的参数值'))).toBe(true)
+    expect(ctx.variables['keyword']).toBe('iPhone')
   })
 
   it('falls back to a 60-second wait for a missing timeout', async () => {

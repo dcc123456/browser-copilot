@@ -262,6 +262,19 @@ export interface Messages {
   workflowsImported: (params: { count: number }) => string
   /** Per-workflow action: publish it to the shared marketplace as a pull request. */
   workflowsPublish: string
+  /** Per-workflow action: edit the values its parameter-input blocks use. */
+  workflowsParameters: string
+  workflowsParametersTitle: string
+  workflowsParametersWorkflow: (params: { name: string }) => string
+  workflowsParametersHint: string
+  workflowsParametersEmpty: string
+  workflowsParametersClearAll: string
+  workflowsParametersClearField: (params: { name: string }) => string
+  workflowsParametersUnset: string
+  workflowsParametersSecretHint: string
+  workflowsParametersSave: string
+  workflowsParametersSaved: (params: { name: string }) => string
+  workflowsParametersSaveFailed: string
 
   // --- Runtime parameter prompt (parameter-prompt block) ------------------
   runInputTitle: string
@@ -2106,6 +2119,20 @@ const en: Messages = {
   workflowsImportInvalid: 'Invalid workflow file(s): at least one export could not be read.',
   workflowsImported: ({ count }) => `Imported ${count} workflow(s).`,
   workflowsPublish: 'Publish',
+  workflowsParameters: 'Parameters',
+  workflowsParametersTitle: 'Workflow parameters',
+  workflowsParametersWorkflow: ({ name }) => `Workflow: ${name}`,
+  workflowsParametersHint:
+    'Values set here are used when the workflow runs: scheduled and manual runs will not ask for them again. Leave a field empty to be asked at run time.',
+  workflowsParametersEmpty: 'This workflow has no parameter-input block.',
+  workflowsParametersClearAll: 'Clear all',
+  workflowsParametersClearField: ({ name }) => `Clear ${name}`,
+  workflowsParametersUnset: 'not set',
+  workflowsParametersSecretHint:
+    'Secret values are never saved in the workflow. Set them at run time or use a Get secret block.',
+  workflowsParametersSave: 'Save values',
+  workflowsParametersSaved: ({ name }) => `Parameter values saved for "${name}".`,
+  workflowsParametersSaveFailed: 'Could not save parameter values.',
   runInputTitle: 'Parameters required',
   runInputWorkflow: ({ name }) => `Workflow: ${name}`,
   runInputSubmit: 'Continue',
@@ -3853,6 +3880,20 @@ const zhCN: Messages = {
   workflowsImportInvalid: '无效的工作流文件：至少一个导出无法读取。',
   workflowsImported: ({ count }) => `已导入 ${count} 个工作流。`,
   workflowsPublish: '发布',
+  workflowsParameters: '参数',
+  workflowsParametersTitle: '工作流参数',
+  workflowsParametersWorkflow: ({ name }) => `工作流：${name}`,
+  workflowsParametersHint:
+    '在这里设置的值会在运行工作流时直接使用：定时任务和手动运行都不会再询问。留空的字段仍会在运行时询问。',
+  workflowsParametersEmpty: '这个工作流没有参数输入算子。',
+  workflowsParametersClearAll: '全部清空',
+  workflowsParametersClearField: ({ name }) => `清空 ${name}`,
+  workflowsParametersUnset: '未设置',
+  workflowsParametersSecretHint:
+    '密钥类参数不会保存在工作流里。请在运行时填写，或改用「读取密钥」算子。',
+  workflowsParametersSave: '保存参数',
+  workflowsParametersSaved: ({ name }) => `已保存「${name}」的参数值。`,
+  workflowsParametersSaveFailed: '保存参数值失败。',
   runInputTitle: '需要填写参数',
   runInputWorkflow: ({ name }) => `工作流：${name}`,
   runInputSubmit: '继续运行',

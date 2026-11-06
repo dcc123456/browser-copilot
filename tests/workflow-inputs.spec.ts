@@ -9,11 +9,23 @@ import {
   coerceInputValue,
   isRequiredInput,
   missingRequiredInputs,
+  parameterPromptInputsOf,
+  presetInputScope,
   seedFromTrigger,
   seedInputs,
   triggerInputs,
   workflowParametersOf,
 } from '../src/lib/workflow/workflow-inputs'
+import type { WorkflowNode } from '../src/lib/workflow/types'
+
+function node(blockId: string, data: Record<string, unknown> = {}): WorkflowNode {
+  return {
+    id: `${blockId}-1`,
+    label: blockId,
+    position: { x: 0, y: 0 },
+    data: { blockId, ...data },
+  }
+}
 
 describe('workflowParametersOf', () => {
   it('reads a well-formed declaration list', () => {
@@ -160,6 +172,81 @@ describe('seedFromTrigger', () => {
       city: '北京',
       fromCaller: 'x',
     })
+  })
+})
+
+describe('parameterPromptInputsOf', () => {
+  it('reads the declarations of a parameter-prompt block', () => {
+    const nodes = [
+      node('parameter-prompt', {
+        parameters: [{ name: 'city', type: 'string', description: 'City' }],
+      }),
+      node('get-text'),
+    ]
+    expect(parameterPromptInputsOf(nodes)).toEqual([
+      { name: 'city', type: 'string', description: 'City' },
+    ])
+  })
+
+  it('includes a prompt nested in a group', () => {
+    // Group children are not canvas nodes but they run, so their inputs must
+    // appear in the panel and the `/` menu like any other.
+    const group = node('blocks-group', {
+      blocks: [
+        { id: 'parameter-prompt', itemId: 'p1', data: { parameters: [{ name: 'city' }] } },
+        { id: 'get-text', itemId: 't1', data: {} },
+      ],
+    })
+    expect(parameterPromptInputsOf([group]).map((param) => param.name)).toEqual(['city'])
+  })
+
+  it('keeps the first declaration of a repeated name', () => {
+    const nodes = [
+      node('parameter-prompt', { parameters: [{ name: 'city', type: 'number' }] }),
+      node('parameter-prompt', { parameters: [{ name: 'city', type: 'string' }] }),
+    ]
+    const params = parameterPromptInputsOf(nodes)
+    expect(params).toHaveLength(1)
+    expect(params[0]!.type).toBe('number')
+  })
+
+  it('ignores blocks that are not a prompt', () => {
+    expect(parameterPromptInputsOf([node('get-text', { parameters: [{ name: 'x' }] })])).toEqual([])
+  })
+})
+
+describe('presetInputScope', () => {
+  const parameters = [
+    { name: 'city', type: 'string' as const },
+    { name: 'limit', type: 'number' as const },
+    { name: 'config', type: 'json' as const },
+    { name: 'apiKey', type: 'string' as const, secret: true },
+  ]
+
+  it('coerces each saved value by its declaration type', () => {
+    expect(presetInputScope(parameters, { city: '上海', limit: '10', config: '{"a":1}' })).toEqual({
+      city: '上海',
+      limit: 10,
+      config: { a: 1 },
+    })
+  })
+
+  it('skips blank, undeclared and secret values', () => {
+    // A secret never enters the workflow definition, so a stored-looking entry
+    // must not become a run variable either.
+    expect(
+      presetInputScope(parameters, {
+        city: '   ',
+        limit: '',
+        apiKey: 'token',
+        removed: 'stale',
+      }),
+    ).toEqual({})
+  })
+
+  it('returns an empty scope without any saved values', () => {
+    expect(presetInputScope(parameters, undefined)).toEqual({})
+    expect(presetInputScope(parameters, {})).toEqual({})
   })
 })
 

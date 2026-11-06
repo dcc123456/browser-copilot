@@ -59,16 +59,23 @@ export function validateRunInput(
   return errors
 }
 
-function FieldControl({
+/**
+ * One parameter control. Shared with the workflow panel's parameter editor so a
+ * JSON field validates and a checkbox round-trips identically in both places.
+ */
+export function RunInputFieldControl({
   field,
   inputId,
   value,
   onChange,
+  hideName = false,
 }: {
   field: RunInputField
   inputId: string
   value: string
   onChange: (next: string) => void
+  /** Drop the checkbox's inline name when the host renders its own label. */
+  hideName?: boolean
 }): React.ReactElement {
   if (field.type === 'checkbox') {
     return (
@@ -83,7 +90,7 @@ function FieldControl({
           onChange={(event) => onChange(event.target.checked ? 'true' : 'false')}
           type="checkbox"
         />
-        <span>{field.name}</span>
+        {hideName ? null : <span>{field.name}</span>}
       </label>
     )
   }
@@ -179,7 +186,7 @@ export default function RunInputDialog({
               {field.description && (
                 <p className="m-0 mb-1 text-[11px] leading-snug text-muted">{field.description}</p>
               )}
-              <FieldControl
+              <RunInputFieldControl
                 field={field}
                 inputId={inputId}
                 onChange={(next) => change(field.name, next)}

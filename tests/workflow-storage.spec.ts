@@ -121,6 +121,27 @@ describe('workflow storage', () => {
     expect(await getWorkflow('missing')).toBeUndefined()
   })
 
+  it('persists parameter-prompt values and drops a malformed map', async () => {
+    // The panel's saved values are configuration, not graph content, but the
+    // whitelist is the only place a field survives a save: dropping it would
+    // erase every value the panel set on the next editor save.
+    await saveWorkflow(
+      makeWorkflow({ id: 'with-values', parameterValues: { city: '上海', limit: '10' } }),
+    )
+    expect((await getWorkflow('with-values'))!.parameterValues).toEqual({
+      city: '上海',
+      limit: '10',
+    })
+
+    await saveWorkflow(
+      makeWorkflow({
+        id: 'bad-values',
+        parameterValues: { city: 5 } as unknown as Record<string, string>,
+      }),
+    )
+    expect((await getWorkflow('bad-values'))!.parameterValues).toBeUndefined()
+  })
+
   it('persists marketplace provenance and drops a malformed ref', async () => {
     const ref = {
       repo: 'dcc123456/BC-workflow',

@@ -18,7 +18,7 @@
 
 import type { WorkflowEdge, WorkflowNode, WorkflowTrigger } from './types'
 import { incomingNormalEdges, reverseReachable } from './graph-edges'
-import { triggerInputs } from './workflow-inputs'
+import { parameterPromptInputsOf, triggerInputs } from './workflow-inputs'
 import { ENGINE_PROVIDED_NAMES } from './integrity'
 import {
   blockIdOf,
@@ -113,6 +113,21 @@ export function collectSuggestions(
   }
 
   for (const param of triggerInputs(graph.trigger)) {
+    if (!param.name) continue
+    push({
+      id: `input:${param.name}`,
+      origin: 'input',
+      name: param.name,
+      insert: `{{${param.name}}}`,
+      hint: param.description,
+    })
+  }
+
+  // A `parameter-prompt` block declares inputs exactly like the trigger does;
+  // downstream fields must be able to reference them with `/` too. Only
+  // reachable prompts count — a prompt on another branch has not run yet, so
+  // offering its names would hand the user a reference that resolves empty.
+  for (const param of parameterPromptInputsOf(upstream)) {
     if (!param.name) continue
     push({
       id: `input:${param.name}`,

@@ -237,6 +237,13 @@ export type Command =
     }
   | { type: 'workflows.delete'; id: string }
   /**
+   * Saves the values the workflow panel collected for its `parameter-prompt`
+   * blocks. Deliberately not a `workflows.save`: the graph is unchanged, so this
+   * must not bump the revision line nor wait for (or persist) unsaved canvas
+   * edits. An empty map clears the settings.
+   */
+  | { type: 'workflows.parameterValues'; id: string; values: Record<string, string> }
+  /**
    * Records the listing a workflow was published under.
    *
    * Publishing does not change the graph, so this is deliberately not a save:
@@ -698,6 +705,7 @@ export type CommandResult =
   | { type: 'workflows.get'; workflow?: Workflow }
   | { type: 'workflows.save' }
   | { type: 'workflows.delete' }
+  | { type: 'workflows.parameterValues' }
   | { type: 'workflows.marketplace' }
   | { type: 'workflows.duplicate'; workflow?: Workflow }
   | { type: 'workflows.assignGroup' }

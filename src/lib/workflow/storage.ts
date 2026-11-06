@@ -44,6 +44,17 @@ const DEFAULT_SETTINGS: WorkflowSettings = {
 }
 
 /**
+ * A saved-parameter map is plain string→string. Anything else (arrays, nested
+ * objects, numbers written by an old version) is dropped rather than trusted —
+ * `parameterValues` feeds the run scope, so a non-string would bypass the
+ * declared type coercion the executor applies.
+ */
+function isParameterValueMap(value: unknown): value is Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return Object.values(value).every((entry) => typeof entry === 'string')
+}
+
+/**
  * Normalizes a stored workflow value into the current shape, or returns `null`
  * when the record is unusable (missing the id/name every workflow needs).
  *
@@ -203,6 +214,10 @@ export function asWorkflow(value: unknown): Workflow | null {
     ...(v.trigger && typeof v.trigger === 'object' && typeof v.trigger.type === 'string'
       ? { trigger: v.trigger }
       : {}),
+    // Saved `parameter-prompt` values are configuration, not graph content, but
+    // the whitelist is the only place a field survives a save: dropping it here
+    // would erase every value the panel set on the very next editor save.
+    ...(isParameterValueMap(v.parameterValues) ? { parameterValues: v.parameterValues } : {}),
     ...(v.table !== undefined ? { table: v.table } : {}),
     // Revisioning lives at the TOP level, so it needs its own guard: dropping
     // it made every save erase the audit line the repair/generation paths just

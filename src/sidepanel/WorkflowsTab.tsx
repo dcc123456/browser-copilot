@@ -29,6 +29,7 @@ import { sendCommand } from '../lib/messages'
 import type { CommandResult } from '../lib/messages'
 import type { TaskRunLog } from '../lib/scheduler-types'
 import type { Workflow } from '../lib/workflow/types'
+import { parameterPromptInputsOf } from '../lib/workflow/workflow-inputs'
 import { normalizeTriggers, primaryTrigger } from '../lib/workflow/triggers'
 import type { WorkflowGroup } from '../lib/workflow/groups'
 import {
@@ -48,6 +49,9 @@ import Banner from './components/Banner'
 import { useRowHighlight } from './hooks/useRowHighlight'
 import { useRunningTasks } from './hooks/useRunningTasks'
 import { confirmDialog } from '../ui/confirm'
+import WorkflowParametersDialog, {
+  type WorkflowParametersDialogLabels,
+} from '../ui/WorkflowParametersDialog'
 import { beginRunInputSession, endRunInputSession } from '../ui/run-input-session'
 import { FailureCenterDialog } from './FailureCenter'
 import { WorkflowHealthView } from './WorkflowHealthView'
@@ -488,6 +492,29 @@ export default function WorkflowsTab() {
   }
 
   /**
+   * Save the parameter editor's values. The graph is untouched, so this uses the
+   * dedicated command (no revision bump, no `updatedAt` reorder) and then
+   * reloads so the row's chip and the next run both read the stored record.
+   */
+  const saveParameterValues = async (
+    workflow: Workflow,
+    values: Record<string, string>,
+  ): Promise<void> => {
+    setParametersSaving(true)
+    try {
+      await sendCommand({ type: 'workflows.parameterValues', id: workflow.id, values })
+      setParametersTarget(null)
+      setBanner({ kind: 'ok', text: t.workflowsParametersSaved({ name: workflow.name }) })
+      await load()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setBanner({ kind: 'error', text: `${t.workflowsParametersSaveFailed} ${message}` })
+    } finally {
+      setParametersSaving(false)
+    }
+  }
+
+  /**
    * M4 resume: continue the last run from its last clean checkpoint instead of
    * re-driving the graph from its trigger. This is the recovery path for a
    * non-idempotent flow — re-running a login whose form is already gone can
@@ -541,6 +568,29 @@ export default function WorkflowsTab() {
 
   /** Workflow whose publish dialog is open; null when closed. */
   const [publishTarget, setPublishTarget] = useState<Workflow | null>(null)
+
+  /** Workflow whose saved-parameter editor is open; null when closed. */
+  const [parametersTarget, setParametersTarget] = useState<Workflow | null>(null)
+  const [parametersSaving, setParametersSaving] = useState(false)
+  // Copy for the shared parameter editor (the module itself stays i18n-free).
+  const parameterLabels = useMemo<WorkflowParametersDialogLabels>(
+    () => ({
+      title: t.workflowsParametersTitle,
+      workflow: (name) => t.workflowsParametersWorkflow({ name }),
+      hint: t.workflowsParametersHint,
+      save: t.workflowsParametersSave,
+      cancel: t.cancel,
+      clearAll: t.workflowsParametersClearAll,
+      clearField: (name) => t.workflowsParametersClearField({ name }),
+      empty: t.workflowsParametersEmpty,
+      secretHint: t.workflowsParametersSecretHint,
+      unset: t.workflowsParametersUnset,
+      requiredMark: t.runInputRequiredMark,
+      requiredField: (name) => t.runInputRequiredField({ name }),
+      invalidJson: t.runInputInvalidJson,
+    }),
+    [t],
+  )
 
   /**
    * Workflow id → the catalog card that is newer than the installed copy.
@@ -1694,6 +1744,17 @@ export default function WorkflowsTab() {
                           <button disabled={busy} onClick={() => openEditor(wf.id)} type="button">
                             {t.workflowsEdit}
                           </button>
+                          {/* Only offered when a block actually declares inputs:
+                              otherwise the dialog could only say "nothing here". */}
+                          {parameterPromptInputsOf(wf.drawflow.nodes).length > 0 && (
+                            <button
+                              disabled={busy}
+                              onClick={() => setParametersTarget(wf)}
+                              type="button"
+                            >
+                              {t.workflowsParameters}
+                            </button>
+                          )}
                           <button disabled={busy} onClick={() => exportWorkflow(wf)} type="button">
                             {t.workflowsExport}
                           </button>
@@ -1789,6 +1850,18 @@ export default function WorkflowsTab() {
             </section>
           )
         })
+      )}
+
+      {parametersTarget && (
+        <WorkflowParametersDialog
+          busy={parametersSaving}
+          labels={parameterLabels}
+          onClose={() => setParametersTarget(null)}
+          onSave={(values) => void saveParameterValues(parametersTarget, values)}
+          parameters={parameterPromptInputsOf(parametersTarget.drawflow.nodes)}
+          values={parametersTarget.parameterValues ?? {}}
+          workflowName={parametersTarget.name}
+        />
       )}
 
       {failureCenter && (

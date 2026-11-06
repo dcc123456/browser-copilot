@@ -326,6 +326,15 @@ export interface Workflow {
     zoom?: number
   }
   trigger?: WorkflowTrigger
+  /**
+   * Values the user set for `parameter-prompt` inputs from the workflow panel.
+   * Raw form text keyed by parameter name; each value is coerced by that
+   * parameter's declared type when a run starts. A configured value also means
+   * an attended run does not ask for it again — scheduled and manual runs use
+   * it as-is. Secrets are never stored here: a credential would be exported
+   * with the workflow, so those are still answered at run time.
+   */
+  parameterValues?: Record<string, string>
   settings: WorkflowSettings
   /** Backing data-store reference (e.g. a spreadsheet table id). */
   table?: unknown

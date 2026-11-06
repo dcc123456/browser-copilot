@@ -282,6 +282,14 @@ export interface WorkflowRunOptions {
    */
   requestInput?: (prompt: RunInputPrompt) => Promise<RunInputAnswer>
   /**
+   * Values the workflow's parameter panel already saved, keyed by parameter name
+   * and already coerced. `parameter-prompt` skips these names — a saved value is
+   * an answer, and re-asking on every manual run defeats saving it. Top-level
+   * runs only: a sub-workflow has its own settings and is not passed the
+   * parent's map.
+   */
+  presetInputs?: Readonly<Record<string, unknown>>
+  /**
    * AI takeover (AI 接管): when a block fails, the engine hands that ONE node
    * to the injected hook before failing the run. The hook completes the node's
    * function on the live page (seeing the page through the agent's tools); on
@@ -566,6 +574,7 @@ function buildExecCtx(
   attribution: TokenAttribution | undefined,
   tabMemory: WorkflowExecCtx['tabMemory'],
   requestInput: WorkflowRunOptions['requestInput'],
+  presetInputs: WorkflowRunOptions['presetInputs'],
 ): WorkflowExecCtx {
   return {
     variables,
@@ -583,6 +592,7 @@ function buildExecCtx(
     ...(reliability ? { reliability } : {}),
     ...(attribution ? { attribution } : {}),
     ...(requestInput ? { requestInput } : {}),
+    ...(presetInputs ? { presetInputs } : {}),
     emit: (kind, text) => onStep(kind, currentId, text),
   }
 }
@@ -638,6 +648,7 @@ async function runCore(
     getPageContext,
     onSubWorkflow,
     requestInput,
+    presetInputs,
   } = options
 
   // The browser executors are statically imported above. Node-based runners
@@ -1084,6 +1095,7 @@ async function runCore(
       runAttribution,
       tabMemory,
       requestInput,
+      presetInputs,
     )
     const policy = onErrorPolicy(params)
 

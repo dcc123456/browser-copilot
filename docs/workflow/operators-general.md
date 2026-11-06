@@ -292,6 +292,12 @@ Resolves the workflow's declared inputs before the following steps run. When the
 | Timeout (millisecond) (0 to disable) | Number | `60000` | How long the dialog waits before continuing with defaults. `0` waits as long as the service worker can stay alive (9 minutes). |
 | Parameters                           | List   | Empty   | Declared inputs; each entry has a name, a required flag, and an optional default.                                              |
 
+### Browser Copilot notes
+
+- Downstream blocks can reference every declared parameter with `{{name}}`, and the `/` variable menu lists them once the prompt block is upstream.
+- Values can be set ahead of time from the workflow list's **Parameters** action or the editor toolbar's **Parameters** tab. A saved value is used by the run and is no longer asked for — which is what makes a scheduled run of a parameterized workflow work. Leave a field empty to keep being asked at run time.
+- Secret parameters are listed in that panel but cannot be set there: a credential must never be stored in the workflow definition, because the definition is exported and shared. Type it in the run dialog or resolve it with a **Get secret** block.
+
 ### Outputs
 
 - One variable per parameter, using the parameter's name.

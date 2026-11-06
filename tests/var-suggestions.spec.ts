@@ -105,6 +105,60 @@ describe('collectSuggestions — graph scope', () => {
   })
 })
 
+describe('collectSuggestions — parameter-prompt inputs', () => {
+  const prompt = (id: string, parameters: unknown[]): WorkflowNode =>
+    node(id, 'parameter-prompt', { parameters })
+
+  it('offers the parameters declared by a reachable prompt block', () => {
+    const nodes = [
+      node('t', 'trigger'),
+      prompt('ask', [
+        { name: 'city', type: 'string', description: '目标城市', data: { required: true } },
+      ]),
+      node('read', 'get-text', { variableName: 'title' }),
+    ]
+    const edges = [edge('t', 'ask'), edge('ask', 'read')]
+    const items = collectSuggestions(graph(nodes, edges), 'read', {})
+    expect(items.find((item) => item.name === 'city')).toMatchObject({
+      origin: 'input',
+      insert: '{{city}}',
+      hint: '目标城市',
+    })
+  })
+
+  it('does not offer parameters of a prompt that cannot reach this node', () => {
+    const nodes = [
+      node('t', 'trigger'),
+      prompt('ask', [{ name: 'city', type: 'string' }]),
+      node('read', 'get-text', { variableName: 'title' }),
+      prompt('elsewhere', [{ name: 'other', type: 'string' }]),
+    ]
+    const edges = [edge('t', 'ask'), edge('ask', 'read')]
+    const items = collectSuggestions(graph(nodes, edges), 'read', {})
+    expect(names(items)).toContain('city')
+    expect(names(items)).not.toContain('other')
+  })
+
+  it('reads prompt parameters declared inside an upstream group', () => {
+    const grouped = node('g', 'blocks-group', {
+      blocks: [
+        {
+          id: 'parameter-prompt',
+          itemId: 'child',
+          data: { parameters: [{ name: 'city', type: 'string' }] },
+        },
+      ],
+    })
+    const nodes = [
+      node('t', 'trigger'),
+      grouped,
+      node('read', 'get-text', { variableName: 'title' }),
+    ]
+    const edges = [edge('t', 'g'), edge('g', 'read')]
+    expect(names(collectSuggestions(graph(nodes, edges), 'read', {}))).toContain('city')
+  })
+})
+
 describe('collectSuggestions — aliases and loop context', () => {
   it('offers refData only when something runs before', () => {
     const nodes = [node('t', 'trigger'), node('a', 'get-text', { variableName: 'title' })]

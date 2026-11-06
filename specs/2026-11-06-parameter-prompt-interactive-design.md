@@ -61,7 +61,27 @@
 - 运行日志里的结果行对秘密参数输出 `***`（复用 `execution-evidence.ts` 的 `MASK`），
   避免密钥进入可复制、可展示、可交给 AI 助手的运行日志。
 
-### 3.5 复用
+### 3.5 面板预设值与 `/` 菜单（本次追加）
+
+- **预设值存放位置**：`Workflow.parameterValues?: Record<string, string>`，保存的是表单原文，
+  按声明类型在运行时用 `coerceInputValue` 转换。放在工作流顶层而不是算子 `data` 里，因为
+  定时任务读取的是已保存的工作流，而不是编辑器画布。
+- **优先级**：触发声明的默认值 < 面板保存值 < 调用方传入的 `variables`（触发查询、飞书参数）。
+  后两者更具体，应覆盖默认值。
+- **不再询问**：`executeWorkflow` 在启动时把预设值算成 `presetInputs` 同时传给作用域种子和
+  引擎；`parameter-prompt` 只对 `presetInputs` 里没有名字的参数发问。全部已配置时只写一行
+  info，不弹窗，因此定时/无人值守运行也能正常跑完。
+- **密钥永不落盘**：`presetInputScope` 跳过 `secret: true` 的声明；面板也只列出、不可编辑。
+  工作流定义会被导出、下载并交给 AI 助手，凭据写进去等于泄露。
+- **独立保存命令**：`workflows.parameterValues` 只改这一个字段（`touchUpdatedAt: false`，
+  不 bump revision）。编辑器的画布可能还有未保存改动，保存参数不能顺带提交它们，也不应让
+  “未保存”圆点亮起。
+- **`/` 菜单**：`collectSuggestions` 在触发输入之后追加“可达的”参数输入块声明（含分组子节点）。
+  只算上游：另一条分支上的参数块还没运行，列出它会让用户写出运行时为空值的引用。
+- **入口**：工作流列表每行的**参数**按钮与编辑器工具栏的**参数**标签页（仅当图上存在参数输入
+  算子时出现），共用 `src/ui/WorkflowParametersDialog.tsx`；清空单个字段或全部字段都是显式按钮。
+
+### 3.6 复用
 
 - 模态外壳复用 `src/ui/FormDialog.tsx` 及其按钮。
 - 字段预填/回写与分析逻辑放在 `src/lib/workflow/run-input.ts`（chrome-free，可被两侧 UI
@@ -72,7 +92,10 @@
 
 - 新增：`src/lib/workflow/run-input.ts`、`src/background/run-input-hub.ts`、
   `src/ui/RunInputDialog.tsx`、`src/ui/RunInputHost.tsx`、`src/ui/use-run-input-request.ts`、
-  `src/ui/run-input-session.ts`
+  `src/ui/run-input-session.ts`、`src/ui/WorkflowParametersDialog.tsx`
+- 预设值：`Workflow.parameterValues`、`storage.ts` 白名单、`workflows.parameterValues` 命令、
+  `workflow-inputs.ts` 的 `parameterPromptInputsOf` / `presetInputScope`、`var-suggestions.ts`
+  的可达上游参数、`run-workflow.ts` 的种子与 `presetInputs` 传递
 - 引擎：`WorkflowRunOptions.requestInput`；`WorkflowExecCtx.requestInput`；子工作流透传
 - 执行器：`parameter-prompt` 在存在 hook 时请求输入；无 hook 行为不变
 - 运行路径：`executeWorkflow` 仅在 `promptToken` 存在时构造 hook
@@ -91,6 +114,12 @@
 - `tests/run-input-hub.spec.ts`：广播、回答、超时、中止、keepalive 成对释放、重复回答无效。
 - `tests/run-input-dialog.spec.ts`：必填 / JSON / 已存秘密的校验。
 - `tests/run-input-session.spec.ts`：token 路由与过期清理。
+- `tests/workflow-inputs.spec.ts`：参数块声明读取（含分组子节点、重名去重）、预设值类型转换、
+  空白/未声明/密钥值跳过。
+- `tests/parameter-prompt-interactive.spec.ts`：有预设值时只询问剩余字段；全部已配置时不发问。
+- `tests/workflow-storage.spec.ts`：`parameterValues` 通过 `asWorkflow` 白名单，非法映射被丢弃。
+- `tests/workflow-parameters-dialog.spec.ts`：表单字段构建与“只持久化已声明、非空、非密钥值”。
+- `tests/var-suggestions.spec.ts`：参数块声明出现在下游 `/` 菜单。
 
 ## 6. 未覆盖 / 已知边界
 

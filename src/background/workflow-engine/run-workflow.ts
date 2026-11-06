@@ -11,7 +11,11 @@
 
 import type { Workflow } from '../../lib/workflow/types'
 import { recordCheckpoint, resumePointOf } from '../../lib/workflow/checkpoints'
-import { seedFromTrigger } from '../../lib/workflow/workflow-inputs'
+import {
+  parameterPromptInputsOf,
+  presetInputScope,
+  seedFromTrigger,
+} from '../../lib/workflow/workflow-inputs'
 import type { RunInputPrompt } from '../../lib/workflow/run-input'
 import {
   createChromeCheckpointStore,
@@ -636,7 +640,15 @@ export async function executeWorkflow(
     // payload wins over them. Without this a generated workflow's `{{keyword}}`
     // references — which is how it records business data instead of freezing it
     // — would resolve to nothing and drive the page with empty values.
-    variables = seedFromTrigger(effective.trigger, opts.variables)
+    //
+    // Values saved from the workflow's parameter panel sit between the two: they
+    // are this workflow's own answers, so they beat the declared defaults, but a
+    // caller payload (trigger query, Feishu argument) is more specific and wins.
+    const presetInputs = presetInputScope(
+      parameterPromptInputsOf(effective.drawflow.nodes),
+      effective.parameterValues,
+    )
+    variables = seedFromTrigger(effective.trigger, { ...presetInputs, ...(opts.variables ?? {}) })
     // Generated-graph page hint: before the run starts, check whether the tab
     // it will drive is even the same origin as the page the graph was
     // generated on — the cheapest possible explanation for "first step says
@@ -879,6 +891,7 @@ export async function executeWorkflow(
               ),
           }
         : {}),
+      ...(Object.keys(presetInputs).length > 0 ? { presetInputs } : {}),
       ...(Object.keys(preflightBlockers).length > 0 ? { preflightBlockers } : {}),
       // Generated-strict readiness: the real probe reads live page state per
       // poll (element presence/visibility, committed values, tab settle).
