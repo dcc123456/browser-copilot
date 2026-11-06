@@ -197,9 +197,15 @@ const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 63_200
  * keys — measured 63_723). Raised 63_800 → 63_900 with the round-1 budget
  * (the new groups named in system-prompt rule 14 — measured 63_840). Raised
  * 63_900 → 64_200 with the round-1 budget (the semi-auto approval rule —
- * measured 64_093).
+ * measured 64_093). Raised 64_200 → 64_700 for the javascript-code `code`
+ * description (~573: the five helpers are PARAMETERS — `automaNextBlock`,
+ * `automaSetVariable`, `automaRefData`, `automaResetTimeout`, `variables` — and
+ * no `vars`/`refData` global exists; measured 64_666). The escape schema is the
+ * only place the model reads the contract while writing the body, so this is
+ * where the correction has to live; the always-loaded guide line was fixed
+ * within its own budget headroom.
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 64_200
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 64_700
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
  * now deliberately carries EVERY operator schema, so workflow runs several

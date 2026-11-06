@@ -82,7 +82,7 @@ trigger-event 用 event（非 eventName）。
 - 用 \`export-data\` 导出数据表；\`save-local\` 只存单个值，其 \`value\` 必须是 \`{{引用}}\`
   （上游产出或导出表），\`filename\` 可声明为输入；大段字面量会被拒绝。
 
-代码里的业务数据走 \`vars.xxx\` / \`refData\`。
+代码节点无 \`vars\`/\`refData\`；用 \`variables\`、\`automa*\`。
 
 ## 代码节点是最后手段（默认禁止）
 

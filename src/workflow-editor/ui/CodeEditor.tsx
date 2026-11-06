@@ -5,8 +5,9 @@
  * Fixed one-dark theme, line numbers, bracket matching, auto-indent, 2-space
  * tabs (Tab indents instead of leaving the field), and — for JavaScript —
  * autocomplete for the automa* helper functions available inside the
- * javascript-code block (`automaNextBlock`, `automaSetVariable`, …). The same
- * component is used read-only for JSON viewers (logs / variables).
+ * javascript-code block (`automaNextBlock`, `automaSetVariable`, …) plus a `/`
+ * menu that inserts an available workflow variable as `variables.name`. The
+ * same component is used read-only for JSON viewers (logs / variables).
  *
  * @module workflow-editor/ui/CodeEditor
  */
@@ -29,36 +30,68 @@ import {
   syntaxHighlighting,
   defaultHighlightStyle,
 } from '@codemirror/language'
-import { autocompletion, completionKeymap } from '@codemirror/autocomplete'
+import {
+  autocompletion,
+  completionKeymap,
+  type CompletionContext,
+  type CompletionResult,
+} from '@codemirror/autocomplete'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
-import { CODE_NODE_HELPERS } from '../../lib/workflow/code-node-helpers'
+import {
+  CODE_NODE_HELPERS,
+  scriptVariableCompletions,
+  type ScriptVariable,
+} from '../../lib/workflow/code-node-helpers'
 import { useEditorLocale } from '../locale-context'
 
-function automaAutocomplete(translate: (english: string) => string) {
-  return autocompletion({
-    override: [
-      (context) => {
-        const word = context.matchBefore(/[\w$]*$/)
-        if (!word || (word.from === word.to && !context.explicit)) return null
-        return {
-          from: word.from,
-          options: CODE_NODE_HELPERS.map((helper) => ({
-            label: helper.name,
-            detail: translate(helper.hint),
-            type: helper.kind === 'object' ? 'variable' : 'function',
-          })),
-          validFor: /^[\w$]*$/,
-        }
-      },
-    ],
-  })
+/** Automa helper names, offered while typing an ordinary word. */
+function helperCompletionSource(
+  translate: (english: string) => string,
+): (context: CompletionContext) => CompletionResult | null {
+  return (context) => {
+    const word = context.matchBefore(/[\w$]*$/)
+    if (!word || (word.from === word.to && !context.explicit)) return null
+    // A word right after a word-start slash belongs to the variable query; the
+    // slash source owns it, and offering helper names there would mix the two.
+    if (word.from > 0 && context.state.sliceDoc(word.from - 1, word.from) === '/') return null
+    return {
+      from: word.from,
+      options: CODE_NODE_HELPERS.map((helper) => ({
+        label: helper.name,
+        detail: translate(helper.hint),
+        type: helper.kind === 'object' ? 'variable' : 'function',
+      })),
+      validFor: /^[\w$]*$/,
+    }
+  }
+}
+
+/** `/` inserts a variable available at this node; see `scriptVariableCompletions`. */
+function scriptVariableSource(
+  variables: () => readonly ScriptVariable[],
+): (context: CompletionContext) => CompletionResult | null {
+  return (context) => {
+    const line = context.state.doc.lineAt(context.pos)
+    const completion = scriptVariableCompletions(line.text, context.pos - line.from, variables())
+    if (!completion) return null
+    return {
+      from: line.from + completion.from,
+      options: completion.options,
+      // Ranked already, and the term after `/` is not a CodeMirror word.
+      filter: false,
+      // Reject `//`, `/*` and a second slash in the term: the word-start rule
+      // opens the menu on the first slash, and prose must close it again.
+      validFor: /^\/(?![/\s*])[^\s/]*$/,
+    }
+  }
 }
 
 export default function CodeEditor({
   value,
   onChange,
+  variables,
   lang = 'javascript',
   readOnly = false,
   height,
@@ -66,6 +99,8 @@ export default function CodeEditor({
 }: {
   value: string
   onChange?: (value: string) => void
+  /** Workflow variables the `/` menu may insert (names only, no values). */
+  variables?: readonly ScriptVariable[]
   lang?: 'javascript' | 'json'
   readOnly?: boolean
   /** CSS height for the editor (e.g. '100%' or '320px'). */
@@ -80,6 +115,9 @@ export default function CodeEditor({
   onChangeRef.current = onChange
   const btRef = useRef(bt)
   btRef.current = bt
+  // The editor is created once; completion reads the live list through this ref.
+  const variablesRef = useRef<readonly ScriptVariable[]>(variables ?? [])
+  variablesRef.current = variables ?? []
 
   useEffect(() => {
     if (!hostRef.current) return
@@ -96,7 +134,6 @@ export default function CodeEditor({
         foldGutter(),
         indentOnInput(),
         bracketMatching(),
-        autocompletion(),
         ...(readOnly
           ? [EditorState.readOnly.of(true), EditorView.editable.of(false)]
           : [
@@ -112,7 +149,14 @@ export default function CodeEditor({
         highlightActiveLine(),
         langExt,
         ...(lang === 'javascript' && !readOnly
-          ? [automaAutocomplete((text) => btRef.current(text))]
+          ? [
+              autocompletion({
+                override: [
+                  helperCompletionSource((text) => btRef.current(text)),
+                  scriptVariableSource(() => variablesRef.current),
+                ],
+              }),
+            ]
           : []),
         updateListener,
         oneDark,

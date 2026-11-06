@@ -225,6 +225,8 @@ export const EDITOR_STRINGS = {
     codeTab: 'Code',
     availableFuncs: 'Available functions & variables:',
     wrapLine: 'wrap line',
+    scriptVarsHint:
+      'Type / in the code to insert an available variable (written as variables.name).',
     noPreload: 'No preload scripts.',
     theseErrorRules: 'These rules apply when this block throws an error.',
     settingsGeneral: 'General',
@@ -616,6 +618,7 @@ export const EDITOR_STRINGS = {
     codeTab: '代码',
     availableFuncs: '可用函数与变量：',
     wrapLine: '自动换行',
+    scriptVarsHint: '在代码中输入 / 即可插入可用变量（写入为 variables.xxx）。',
     noPreload: '暂无预加载脚本。',
     theseErrorRules: '当该算子执行出错时，应用以下规则。',
     settingsGeneral: '常规',
@@ -1223,8 +1226,6 @@ const BLOCK_FORM_STRINGS = {
     "This block requires Automa's cloud service and is not supported.":
       '此算子依赖 Automa 云服务，暂不支持。',
     'This block has no editable settings.': '此算子没有可编辑的设置。',
-    'Runs in the active page as a function body. Use return to send a value back (stored in lastResult); vars and refData are available as parameters.':
-      '在当前页面的函数体内执行。用 return 返回值（存入 lastResult）；vars、refData 作为参数可用。',
     // — screenshot / ocr —
     'A page': '页面（可见区域）',
     'A full page': '整页',

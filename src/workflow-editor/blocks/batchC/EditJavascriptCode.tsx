@@ -3,7 +3,8 @@
  *
  * Automa shows the code in the sidebar form as a read-only dark <pre> preview;
  * clicking it opens a large modal hosting the CodeMirror editor (with automa
- * helper autocomplete) on a "Code" tab and the preload-script list on a
+ * helper autocomplete and a `/` menu that inserts workflow variables as
+ * `variables.name`) on a "Code" tab and the preload-script list on a
  * "Preload scripts" tab. Available helper functions are listed under the
  * editor as horizontally-scrolling <code> chips linking to the docs. Fields:
  * description, timeout, execution context, everyNewTab, runBeforeLoad.
@@ -27,6 +28,7 @@ import type { EditFormProps } from '../EditForms'
 import { arr, id } from './shared'
 import { useEditorLocale } from '../../locale-context'
 import { CODE_NODE_HELPERS } from '../../../lib/workflow/code-node-helpers'
+import { useAvailableVariables } from '../shared/SlashVariableMenu'
 import HelperTip from '../../ui/HelperTip'
 import Modal from '../../ui/Modal'
 import CodeEditor from '../../ui/CodeEditor'
@@ -48,6 +50,8 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
   const [wrap, setWrap] = useState(false)
 
   const code = str(data, 'code')
+  // Names only: the menu must never pull a credential value into the script.
+  const scriptVariables = useAvailableVariables()
 
   const setScript = (index: number, patch: Partial<PreloadScript>) => {
     const next = scripts.slice()
@@ -163,6 +167,7 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
               <CodeEditor
                 value={code}
                 onChange={(v) => onChange({ code: v })}
+                variables={scriptVariables}
                 lang="javascript"
                 height="100%"
               />
@@ -188,6 +193,7 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
                   />
                 ))}
               </div>
+              <p className="mt-2 text-xs text-muted">{t('scriptVarsHint')}</p>
             </div>
           </div>
         ) : (

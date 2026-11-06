@@ -444,6 +444,17 @@ const COLLECT_PROPERTIES: Readonly<Record<string, unknown>> = {
  */
 const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
   [JAVASCRIPT_BLOCK_ID]: {
+    code: {
+      type: 'string',
+      description:
+        'Body. The harness passes five parameters — there is NO `vars`/`refData` global: ' +
+        "`variables` (the run's variable object; read variables.x, assign variables.x = value), " +
+        '`automaNextBlock(data?)` (the value this node hands downstream, read as lastResult / {{lastResult}}), ' +
+        '`automaSetVariable(name, value)` (writes a variable later blocks read as {{name}}), ' +
+        '`automaRefData(keyword, path?)` (variables | table | loopData | prevBlockData | globalData, optional dot path), ' +
+        '`automaResetTimeout()` (re-arms the timeout during a long poll). ' +
+        '`{{name}}` is resolved before the body runs; a bare expression is auto-returned.',
+    },
     [SCRIPT_JUSTIFICATION_ARG]: {
       type: 'string',
       description:

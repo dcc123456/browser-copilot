@@ -44,6 +44,7 @@ import {
   type VariableSuggestion,
 } from '../../../lib/workflow/var-suggestions'
 import type { SecretFieldRef } from '../../../lib/workflow/secret-params'
+import type { ScriptVariable } from '../../../lib/workflow/code-node-helpers'
 import { useEditorLocale } from '../../locale-context'
 import type { EditorStringKey } from '../../i18n'
 
@@ -128,6 +129,47 @@ export function SlashMenuProvider({
     [nodeId, graph, secrets, insertSecret],
   )
   return <SlashMenuContext.Provider value={value}>{children}</SlashMenuContext.Provider>
+}
+
+/**
+ * The variables a script at the edited node can read, for the code editor's
+ * `/` menu.
+ *
+ * Reuses the graph reach of the parameter-field menu. Two adjustments follow
+ * from inserting plain JavaScript instead of a `{{token}}`:
+ * - a credential whose `get-secret` producer does not exist yet is skipped —
+ *   the code editor cannot create that node, so inserting its name would only
+ *   fail at run time;
+ * - the engine alias `refData` is skipped: `{{refData}}` resolves to the
+ *   upstream block in a parameter, but no `variables.refData` exists inside a
+ *   script (read it with `automaRefData('prevBlockData')` instead).
+ *
+ * Returns names only; values never enter the editor.
+ */
+export function useAvailableVariables(): ScriptVariable[] {
+  const host = useContext(SlashMenuContext)
+  return useMemo(() => {
+    if (!host) return []
+    const seen = new Set<string>()
+    const out: ScriptVariable[] = []
+    for (const item of collectSuggestions(host.graph(), host.nodeId, { secrets: host.secrets })) {
+      if (item.needsProducer) continue
+      if (item.origin === 'alias' && item.name === 'refData') continue
+      const name = insertedVariableName(item)
+      if (seen.has(name)) continue
+      seen.add(name)
+      out.push({ name, ...(item.hint ? { hint: item.hint } : {}) })
+    }
+    return out
+  }, [host])
+}
+
+/** The name inside a suggestion's insertion (`{{lastText}}` → `lastText`). */
+function insertedVariableName(item: VariableSuggestion): string {
+  if (item.insert.startsWith('{{') && item.insert.endsWith('}}')) {
+    return item.insert.slice(2, -2).trim()
+  }
+  return item.name
 }
 
 interface FieldMenuOptions {

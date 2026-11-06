@@ -30,7 +30,10 @@ vi.mock('../src/lib/storage', async (importOriginal) => {
 import { act, createElement, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { TextArea, TextInput } from '../src/workflow-editor/blocks/shared/Field'
-import { SlashMenuProvider } from '../src/workflow-editor/blocks/shared/SlashVariableMenu'
+import {
+  SlashMenuProvider,
+  useAvailableVariables,
+} from '../src/workflow-editor/blocks/shared/SlashVariableMenu'
 import { EDITOR_STRINGS } from '../src/workflow-editor/i18n'
 import { EditorLocaleContext, makeEditorLocale } from '../src/workflow-editor/locale-context'
 import type { SuggestionGraph } from '../src/lib/workflow/var-suggestions'
@@ -358,5 +361,59 @@ describe('the credential rows', () => {
     type(el, '/')
     expect(menu()?.textContent).toContain('lastText')
     expect(menu()?.textContent).not.toContain('GitHub PAT')
+  })
+})
+
+describe('the code editor variable list', () => {
+  function VariablesProbe() {
+    const variables = useAvailableVariables()
+    return (
+      <ul>
+        {variables.map((variable) => (
+          <li key={variable.name} data-variable={variable.name}>
+            {variable.name}
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
+  async function mountVariables(): Promise<string[]> {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    mounted.push(root)
+    await act(async () => {
+      root.render(
+        createElement(
+          EditorLocaleContext.Provider,
+          { value: locale() },
+          createElement(SlashMenuProvider, {
+            nodeId: 'target',
+            graph: () => GRAPH,
+            insertSecret: async () => 'unused',
+            children: createElement(VariablesProbe),
+          }),
+        ),
+      )
+    })
+    // Let the provider's credential load settle; those rows are filtered below.
+    await act(async () => {
+      await Promise.resolve()
+    })
+    return Array.from(container.querySelectorAll('[data-variable]')).map(
+      (element) => element.getAttribute('data-variable') ?? '',
+    )
+  }
+
+  it('offers inputs and upstream variables only', async () => {
+    expect(await mountVariables()).toEqual(['keyword', 'lastText', 'pageUrl'])
+  })
+
+  it('never offers a credential whose producer does not exist yet', async () => {
+    const names = await mountVariables()
+    expect(names.join(' ')).not.toContain('GitHub PAT')
+    expect(names).not.toContain('secret_pat_token')
+    expect(document.body.textContent ?? '').not.toContain('SUPER-SECRET')
   })
 })
