@@ -164,6 +164,13 @@ describe('buildOperatorAdvisePrompt', () => {
     expect(prompt).toContain('rows: variables: [name, value]')
   })
 
+  it('forbids the instance ids an exported workflow uses', () => {
+    // The reported failure wrote "data-mapping-1"; the offer lists operator ids,
+    // and two steps of one operator are two rows — not two differently named ids.
+    const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
+    expect(prompt).toContain('not an instance id with a number on the end')
+  })
+
   it('grounds the parameters in the page it was shown', () => {
     const page: OperatorPageRead = {
       url: 'https://example.com/form',
@@ -415,6 +422,45 @@ describe('parseOperatorAdviseReply', () => {
     )
     expect(parsed?.proposals.map((p) => p.blockId)).toEqual(['set-variable'])
     expect(parsed?.rejected).toEqual(['launch-browser'])
+  })
+
+  it('reads an instance id back to the operator it numbers, and still refuses the rest', () => {
+    // The reported failure: the model named `data-mapping-1` (the id an exported
+    // workflow gives that step), the row was refused, and the canvas stayed empty
+    // behind a reply claiming the step was added.
+    const parsed = parseOperatorAdviseReply(
+      '{"reply":"已添加数据处理步骤","action":"append","proposals":[{"blockId":"data-mapping-1","data":{"dataSource":"variable","variableName":"jobDetails"}}]}',
+      ['data-mapping', 'set-variable'],
+    )
+    expect(parsed?.proposals).toEqual([
+      {
+        blockId: 'data-mapping',
+        data: { dataSource: 'variable', variableName: 'jobDetails' },
+        rationale: '',
+      },
+    ])
+    expect(parsed?.rejected).toEqual([])
+
+    const stillRefused = parseOperatorAdviseReply(
+      '{"reply":"ok","proposals":[{"blockId":"launch-browser-1","data":{}}]}',
+      ['data-mapping', 'new-tab'],
+    )
+    expect(stillRefused?.proposals).toEqual([])
+    expect(stillRefused?.rejected).toEqual(['launch-browser-1'])
+  })
+
+  it('lands the numbered operator on the canvas instead of an empty batch', () => {
+    const parsed = parseOperatorAdviseReply(
+      '{"reply":"已添加","action":"append","proposals":[{"blockId":"data-mapping-1","data":{"dataSource":"variable","variableName":"jobDetails","varSourceName":"jobsData"}}]}',
+      ['data-mapping'],
+    )!
+    const patch = appendOperatorChain(graph([node('t', 'trigger')], []), parsed.proposals, {
+      newId: () => 'n1',
+    })
+    expect(patch.added.map((added) => added.id)).toEqual(['n1'])
+    expect(patch.added[0]?.data.blockId).toBe('data-mapping')
+    expect(patch.skipped).toEqual([])
+    expect(patch.problem).toBeUndefined()
   })
 
   it('lands a named operator whose parameters were left out, so the gap can be named', () => {

@@ -986,6 +986,7 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     '## Rules',
     '- For "append" and "prepend", return the operators in execution order; they chain into one another automatically.',
     '- Use only ids from the list above. Never invent an id; never return an operator the canvas already has unless the user asks for another one.',
+    '- "blockId" is the operator id exactly as listed (e.g. "data-mapping"), not an instance id with a number on the end ("data-mapping-1"); two steps of the same operator are two rows with that same id.',
     '- Fill every value the user stated (URLs, text, selectors) and omit the rest — the catalog default is applied for you.',
     '- Where a value should come from an earlier step, reference it as {{variableName}} using a name the digest shows that step produces.',
     '- Prefer stable locators (#id, [data-testid], [name]) over generated classes or nth-child chains.',
@@ -1015,6 +1016,12 @@ function blockIdKey(id: string): string {
  * Resolve the id a row names against the offer that turn was given. Exact ids
  * win; otherwise a row is matched by {@link blockIdKey}, which can only recover
  * an id the model was actually offered. An id that matches nothing is refused.
+ *
+ * A trailing number is an INSTANCE id, not another operator: exported workflows
+ * name the second `data-mapping` node `data-mapping-1`, and a model that has seen
+ * that shape writes it here. The offer is still closed-world — the number is
+ * only dropped when what remains names exactly one offered id, so a step lands
+ * when the model meant a real operator and is refused when it did not.
  */
 function resolveOfferedBlockId(raw: string, offered: ReadonlySet<string>): string | undefined {
   const trimmed = raw.trim()
@@ -1022,7 +1029,15 @@ function resolveOfferedBlockId(raw: string, offered: ReadonlySet<string>): strin
   const key = blockIdKey(trimmed)
   if (key === '') return undefined
   for (const id of offered) if (blockIdKey(id) === key) return id
-  return undefined
+  const withoutIndex = key.replace(/[0-9]+$/, '')
+  if (withoutIndex === '' || withoutIndex === key) return undefined
+  let match: string | undefined
+  for (const id of offered) {
+    if (blockIdKey(id) !== withoutIndex) continue
+    if (match !== undefined) return undefined
+    match = id
+  }
+  return match
 }
 
 /**
