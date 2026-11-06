@@ -25,6 +25,7 @@ import {
   Locate,
   Square,
   TriangleAlert,
+  X,
   type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -191,11 +192,9 @@ export function formatRunLogText(run: RunView, entries: readonly TraceEntry[]): 
       lines.push(line.kind === 'error' ? `! ${line.text}` : `  ${line.text}`)
     }
     if (entry.vars && Object.keys(entry.vars).length > 0) {
-      try {
-        lines.push(`  vars: ${JSON.stringify(entry.vars)}`)
-      } catch {
-        // A cyclic value cannot be serialized; the trace lines above still are.
-      }
+      // Same renderer as the inspector: a cyclic bag must not silently drop the
+      // variables from the transcript the user pastes into a chat.
+      lines.push(`  vars: ${valueText(entry.vars)}`)
     }
   }
   return lines.join('\n')
@@ -210,15 +209,113 @@ const TYPE_STYLE: Record<TraceEntry['type'], { Icon: LucideIcon; cls: string }> 
   info: { Icon: Info, cls: 'wf-console-info' },
 }
 
-function preview(value: unknown): string {
+/**
+ * Replace only true cycles. Repeated non-cyclic references are legal JSON and
+ * must survive; a container that points back at an ancestor becomes a marker
+ * instead of aborting the whole rendering.
+ */
+function decycle(value: unknown): unknown {
+  const ancestors = new WeakSet<object>()
+  const walk = (node: unknown): unknown => {
+    if (typeof node === 'bigint') return `${node}n`
+    if (node === null || typeof node !== 'object') return node
+    if (node instanceof Date) return node.toISOString()
+    if (ancestors.has(node)) return '[Circular]'
+    ancestors.add(node)
+    let copy: unknown
+    if (Array.isArray(node)) {
+      copy = node.map(walk)
+    } else {
+      const record: Record<string, unknown> = {}
+      for (const [key, item] of Object.entries(node)) record[key] = walk(item)
+      copy = record
+    }
+    ancestors.delete(node)
+    return copy
+  }
+  return walk(value)
+}
+
+/**
+ * Render a captured variable for the inspector. Strings stay verbatim so the
+ * copy round-trip adds no quotes; everything else is JSON. A page value can be
+ * circular or hold a BigInt, and `JSON.stringify` then throws — the old
+ * fallback was `String(value)`, which is how a list of objects displayed as
+ * `[object Object],[object Object]` in the cards. Degrade through a decycled
+ * copy instead, so the data stays readable.
+ */
+export function valueText(value: unknown, pretty = false): string {
+  if (typeof value === 'string') return value
   if (value === null) return 'null'
   if (value === undefined) return 'undefined'
-  if (typeof value === 'string') return value
+  if (typeof value === 'bigint') return `${value}n`
+  const space = pretty ? 2 : undefined
   try {
-    return JSON.stringify(value)
+    return JSON.stringify(value, null, space) ?? String(value)
   } catch {
-    return String(value)
+    try {
+      return JSON.stringify(decycle(value), null, space) ?? String(value)
+    } catch {
+      return String(value)
+    }
   }
+}
+
+/**
+ * The full-value dialog opened by clicking a card. It lives inside the run
+ * modal's stacking context and sits above the cards, but stays plain DOM rather
+ * than a second `Modal`: two nested Modals both listen for Escape on window
+ * capture, so one key press would close both.
+ */
+function VariableDetail({
+  name,
+  value,
+  onClose,
+}: {
+  name: string
+  value: unknown
+  onClose: () => void
+}) {
+  const { bt } = useEditorLocale()
+  return (
+    <div
+      className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/45 p-6"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={name}
+        className="flex max-h-[calc(100vh-56px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border-strong bg-bg shadow-2xl"
+      >
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <Braces size={14} className="shrink-0 text-muted" />
+          <span className="min-w-0 flex-1 truncate font-mono text-sm text-ink">{name}</span>
+          <VariableCopyButton value={value} />
+          <button
+            type="button"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted hover:bg-hover hover:text-ink"
+            title={bt('Close')}
+            aria-label={bt('Close')}
+            onClick={onClose}
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-3">
+          {typeof value === 'string' ? (
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs text-ink">
+              {value}
+            </pre>
+          ) : (
+            <CodeEditor value={valueText(value, true)} lang="json" readOnly height="360px" />
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 /**
@@ -238,7 +335,7 @@ function VariableCopyButton({ value }: { value: unknown }) {
 
   const copy = async () => {
     try {
-      await copyText(preview(value))
+      await copyText(valueText(value))
       setState('ok')
     } catch {
       setState('failed')
@@ -253,7 +350,11 @@ function VariableCopyButton({ value }: { value: unknown }) {
       className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted hover:bg-hover hover:text-ink"
       title={label}
       aria-label={label}
-      onClick={() => void copy()}
+      onClick={(event) => {
+        // The card opens the full-value dialog; copying is its own action.
+        event.stopPropagation()
+        void copy()
+      }}
     >
       {state === 'ok' ? (
         <Check size={13} />
@@ -276,7 +377,9 @@ export function VariablesInspector({
 }) {
   const { bt } = useEditorLocale()
   const [tab, setTab] = useState<'gui' | 'raw'>('gui')
+  const [detailName, setDetailName] = useState<string | null>(null)
   const entries = Object.entries(vars ?? {})
+  const detailValue = detailName !== null ? vars?.[detailName] : undefined
   return (
     <div className="wf-vars-inspector">
       <div className="wf-vars-head">
@@ -307,20 +410,36 @@ export function VariablesInspector({
         <p className="wf-console-empty">No variables at this point.</p>
       ) : tab === 'raw' ? (
         <div className="wf-vars-raw">
-          <CodeEditor value={JSON.stringify(vars, null, 2)} lang="json" readOnly height="360px" />
+          <CodeEditor value={valueText(vars, true)} lang="json" readOnly height="360px" />
         </div>
       ) : (
         <div className="wf-vars-cards">
           {entries.map(([k, v]) => (
-            <div key={k} className="wf-var-card">
+            <div
+              key={k}
+              role="button"
+              tabIndex={0}
+              title={bt('Show full value')}
+              className="wf-var-card cursor-pointer transition-colors hover:border-accent"
+              onClick={() => setDetailName(k)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  setDetailName(k)
+                }
+              }}
+            >
               <label>{k}</label>
               <div className="flex items-center gap-1">
-                <input readOnly value={preview(v)} className="min-w-0 flex-1" />
+                <input readOnly value={valueText(v)} className="min-w-0 flex-1" />
                 <VariableCopyButton value={v} />
               </div>
             </div>
           ))}
         </div>
+      )}
+      {detailName !== null && (
+        <VariableDetail name={detailName} value={detailValue} onClose={() => setDetailName(null)} />
       )}
     </div>
   )

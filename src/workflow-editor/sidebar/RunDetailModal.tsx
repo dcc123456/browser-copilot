@@ -51,6 +51,15 @@ export default function RunDetailModal({
   const [query, setQuery] = useState('')
   const [copyState, setCopyState] = useState<'idle' | 'ok' | 'failed'>('idle')
 
+  // The panel stays mounted across runs (the logs list polls and swaps `run`),
+  // so an inspector left open would greet the next open with the previous run's
+  // variables. Reset on identity change, not object identity: the poll rebuilds
+  // `openRun` every tick and would close the inspector under the user's cursor.
+  const runId = run?.runId ?? null
+  useEffect(() => {
+    setInspectVars(null)
+  }, [runId])
+
   const trace = useMemo(() => (run ? buildTrace(run) : []), [run])
   const state = run?.outcome
 

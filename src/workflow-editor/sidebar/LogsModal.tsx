@@ -113,6 +113,14 @@ export default function LogsModal({
     }
   }, [open, workflowId])
 
+  // Closing the logs panel must forget the drilled-in run: otherwise reopening
+  // the panel puts the previous run's detail (and its variable inspector) back
+  // on top of the list the user expected to see.
+  useEffect(() => {
+    if (open) return
+    setOpenRunId(null)
+  }, [open])
+
   // Newest first: running on top, then finished (already newest-first).
   const all = useMemo(() => [...boards.runs, ...boards.finished], [boards])
   // Keep the open run's live data fresh by deriving it from the latest board.

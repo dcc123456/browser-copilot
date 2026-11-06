@@ -1490,6 +1490,7 @@ const BLOCK_FORM_STRINGS = {
     'Copy value': '复制值',
     Copied: '已复制',
     'Copy failed': '复制失败',
+    'Show full value': '查看完整值',
     Variables: '变量',
     // — block settings extras —
     'The number of times to retry the action': '操作重试次数',

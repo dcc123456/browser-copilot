@@ -10,7 +10,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { copyText } from '../src/lib/clipboard'
-import { VariablesInspector } from '../src/workflow-editor/sidebar/log-view'
+import { valueText, VariablesInspector } from '../src/workflow-editor/sidebar/log-view'
 
 vi.mock('../src/lib/clipboard', () => ({ copyText: vi.fn(async () => {}) }))
 
@@ -101,5 +101,60 @@ describe('variable cards copy their own value', () => {
       button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
     expect(button.getAttribute('aria-label')).toBe('Copy failed')
+  })
+
+  it('shows a list of objects as JSON, never [object Object]', () => {
+    const list = [{ a: 1 }, { b: 2 }, { c: 3 }, { d: 4 }, { e: 5 }]
+    act(() => {
+      root.render(createElement(VariablesInspector, { vars: { rows: list }, onBack: () => {} }))
+    })
+    const input = card('rows').querySelector('input')!
+    expect(input.value).toBe(JSON.stringify(list))
+    expect(input.value).not.toContain('[object Object]')
+  })
+
+  it('opens the full value when the card is clicked, without copying', async () => {
+    render()
+    await act(async () => {
+      card('title').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const dialog = container.querySelector('[role="dialog"]')
+    expect(dialog).not.toBeNull()
+    expect(dialog?.getAttribute('aria-label')).toBe('title')
+    // A long value arrives in full, with its newlines intact.
+    expect(dialog?.querySelector('pre')?.textContent).toBe('页面标题')
+    expect(copyText).not.toHaveBeenCalled()
+  })
+
+  it('keeps copying separate from opening the dialog', async () => {
+    render()
+    await act(async () => {
+      copyButton('title').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(copyText).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+  })
+})
+
+describe('valueText', () => {
+  it('keeps strings verbatim and serializes the rest', () => {
+    expect(valueText('a\nb')).toBe('a\nb')
+    expect(valueText(7)).toBe('7')
+    expect(valueText(null)).toBe('null')
+    expect(valueText({ a: 1 })).toBe('{"a":1}')
+    expect(valueText([{ a: 1 }, { b: 2 }])).toBe('[{"a":1},{"b":2}]')
+    expect(valueText(10n)).toBe('10n')
+  })
+
+  it('renders a cycle instead of throwing or degenerating', () => {
+    const ring: unknown[] = [{ a: 1 }]
+    ring.push(ring)
+    const text = valueText(ring)
+    expect(text).toContain('[Circular]')
+    expect(text).not.toContain('[object Object]')
+  })
+
+  it('pretty-prints with indentation for the dialog', () => {
+    expect(valueText({ a: 1 }, true)).toBe('{\n  "a": 1\n}')
   })
 })
