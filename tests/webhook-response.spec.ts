@@ -10,6 +10,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { EXECUTORS, type WorkflowExecCtx } from '../src/background/workflow-engine/executors'
+import { interpolateBlockParams } from '../src/lib/workflow/interpolate'
 
 function makeCtx(vars: Record<string, unknown> = {}, outputs?: Record<string, string>) {
   const emit = vi.fn((_kind: 'status' | 'result' | 'error' | 'info', _text: string) => {})
@@ -276,6 +277,143 @@ describe('webhook request contract (Automa parity)', () => {
       ctx,
     )
     expect(ctx.variables['dataTable']).toEqual([{ score: 1 }, { score: 2 }, { score: 3 }])
+  })
+})
+
+describe('webhook JSON body interpolation', () => {
+  /** The body string the executor handed to `fetch`. */
+  function sentBody(fetchMock: ReturnType<typeof installFetch>): string {
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    return String(call[1].body)
+  }
+
+  it('keeps a referenced object in value position as JSON, not "[object Object]"', async () => {
+    const fetchMock = installFetch('{}')
+    const { ctx } = makeCtx({ payload: { id: 7, tags: ['a', 'b'] } })
+    // The engine pre-pass runs first; it must leave the body authored so the
+    // executor can encode the reference with its real type.
+    const params = interpolateBlockParams(
+      'webhook',
+      {
+        url: 'https://api.test/x',
+        method: 'POST',
+        contentType: 'json',
+        body: '{"payload": {{payload}}}',
+      },
+      ctx.variables,
+    )
+    await EXECUTORS['webhook']!(params, ctx)
+    expect(JSON.parse(sentBody(fetchMock))).toEqual({ payload: { id: 7, tags: ['a', 'b'] } })
+  })
+
+  it('keeps numbers, booleans and a whole-document reference typed', async () => {
+    const fetchMock = installFetch('{}')
+    const { ctx } = makeCtx({ count: 3, enabled: false })
+    await EXECUTORS['webhook']!(
+      {
+        url: 'https://api.test/x',
+        method: 'POST',
+        contentType: 'json',
+        body: '{"count": {{count}}, "enabled": {{enabled}}}',
+      },
+      ctx,
+    )
+    expect(JSON.parse(sentBody(fetchMock))).toEqual({ count: 3, enabled: false })
+
+    const whole = installFetch('{}')
+    const { ctx: wholeCtx } = makeCtx({ filter: { q: 'books', page: 2 } })
+    await EXECUTORS['webhook']!(
+      {
+        url: 'https://api.test/x',
+        method: 'POST',
+        contentType: 'json',
+        body: '{{filter}}',
+      },
+      wholeCtx,
+    )
+    expect(JSON.parse(sentBody(whole))).toEqual({ q: 'books', page: 2 })
+  })
+
+  it('escapes quotes, backslashes and newlines inside a JSON string literal', async () => {
+    const fetchMock = installFetch('{}')
+    const note = 'he said "hi"\nbye \\ end'
+    const { ctx } = makeCtx({ note })
+    await EXECUTORS['webhook']!(
+      {
+        url: 'https://api.test/x',
+        method: 'POST',
+        contentType: 'json',
+        body: '{"note": "prefix {{note}} suffix", "ok": true}',
+      },
+      ctx,
+    )
+    expect(JSON.parse(sentBody(fetchMock))).toEqual({
+      note: `prefix ${note} suffix`,
+      ok: true,
+    })
+  })
+
+  it('leaves an unresolved token inside a string literal as authored text', async () => {
+    const fetchMock = installFetch('{}')
+    const { ctx } = makeCtx({})
+    await EXECUTORS['webhook']!(
+      {
+        url: 'https://api.test/x',
+        method: 'POST',
+        contentType: 'json',
+        body: '{"note": "{{missing}}"}',
+      },
+      ctx,
+    )
+    expect(JSON.parse(sentBody(fetchMock))).toEqual({ note: '{{missing}}' })
+  })
+
+  it('applies the same escaping to form-data rows', async () => {
+    const fetchMock = installFetch('{}')
+    const { ctx } = makeCtx({ note: 'he said "hi"' })
+    await EXECUTORS['webhook']!(
+      {
+        url: 'https://api.test/x',
+        method: 'POST',
+        contentType: 'form-data',
+        body: '[["note", "{{note}}"]]',
+      },
+      ctx,
+    )
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect((call[1].body as FormData).get('note')).toBe('he said "hi"')
+  })
+
+  it('names an unresolved variable in value position instead of "not valid JSON"', async () => {
+    const fetchMock = installFetch('{}')
+    const { ctx } = makeCtx({})
+    await expect(
+      EXECUTORS['webhook']!(
+        {
+          url: 'https://api.test/x',
+          method: 'POST',
+          contentType: 'json',
+          body: '{"x": {{missing}}}',
+        },
+        ctx,
+      ),
+    ).rejects.toThrow('{{missing}}')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('leaves a text body as prose interpolation', async () => {
+    const fetchMock = installFetch('{}')
+    const { ctx } = makeCtx({ name: 'Ada' })
+    await EXECUTORS['webhook']!(
+      {
+        url: 'https://api.test/x',
+        method: 'POST',
+        contentType: 'text',
+        body: 'hello {{name}}',
+      },
+      ctx,
+    )
+    expect(sentBody(fetchMock)).toBe('hello Ada')
   })
 })
 

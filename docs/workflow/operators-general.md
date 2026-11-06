@@ -350,6 +350,7 @@ Sends an HTTP request to a remote endpoint and decodes the response into variabl
 
 - Only request failures use the fallback port. A configuration error — an unreadable URL, header, or body — fails the step even when a fallback edge exists.
 - `GET` and `HEAD` send no body. Other methods encode the body according to the selected content type.
+- The body supports `{{variables}}`. For `json` (and the JSON-shaped `form` / `form-data` bodies) a token in value position keeps its real type — `{"items": {{rows}}}` sends the array — while a token inside a string literal is escaped as JSON string content, so a quote or newline in the data cannot break the document. An unresolved variable in value position fails the step and names it; `text/plain` bodies stay plain prose.
 - **Data path** is applied only to JSON responses. Text and base64 responses are stored as they arrive.
 - A timeout of `0` removes the request limit. Aborting the run aborts the request.
 - A non-2xx response without a fallback edge fails the step with the method, status, and URL.

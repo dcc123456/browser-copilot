@@ -264,6 +264,28 @@ export function escapeForJsLiteral(value: string): string {
 const EXACT_TOKEN = /^\{\{\s*([^{}]+?)\s*\}\}$/
 
 /**
+ * Resolve one `{{expression}}` body to the RAW value it names.
+ *
+ * {@link interpolate} renders text, which is right for prose but loses the type
+ * a caller that encodes the value itself (JSON, a variable slot) needs. Root
+ * `refData` resolves to the run's reference data, exactly like interpolation.
+ *
+ * `found: false` covers a malformed expression and a reference that resolved to
+ * `undefined`, so callers keep the existing unresolved-token behaviour.
+ */
+export function resolveReferenceValue(
+  expression: string,
+  vars: Record<string, unknown>,
+  refData?: unknown,
+): { found: boolean; value: unknown } {
+  const reference = parseReference(expression)
+  if (!reference) return { found: false, value: undefined }
+  const root = reference.name === 'refData' ? refData : vars[reference.name]
+  const value = walkPath(root, reference.path)
+  return value === undefined ? { found: false, value: undefined } : { found: true, value }
+}
+
+/**
  * Resolve a string that is EXACTLY one `{{reference}}` to its raw value.
  *
  * {@link interpolate} always renders TEXT, which is right for prose parameters
@@ -283,11 +305,7 @@ export function resolveExactReference(
 ): { found: boolean; value: unknown } {
   const match = EXACT_TOKEN.exec(text.trim())
   if (!match) return { found: false, value: undefined }
-  const reference = parseReference(match[1]!)
-  if (!reference) return { found: false, value: undefined }
-  const root = reference.name === 'refData' ? refData : vars[reference.name]
-  const value = walkPath(root, reference.path)
-  return value === undefined ? { found: false, value: undefined } : { found: true, value }
+  return resolveReferenceValue(match[1]!, vars, refData)
 }
 
 /**
@@ -308,12 +326,10 @@ export function interpolate(
   escape?: (value: string) => string,
 ): string {
   return text.replace(TOKEN, (whole, expression: string) => {
-    const reference = parseReference(expression)
-    if (!reference) return whole
-    const root = reference.name === 'refData' ? refData : vars[reference.name]
-    const value = walkPath(root, reference.path)
-    if (value === undefined) return whole
-    const rendered = typeof value === 'function' ? value.toString() : String(value)
+    const resolved = resolveReferenceValue(expression, vars, refData)
+    if (!resolved.found) return whole
+    const rendered =
+      typeof resolved.value === 'function' ? resolved.value.toString() : String(resolved.value)
     return escape ? escape(rendered) : rendered
   })
 }
@@ -451,6 +467,21 @@ export function interpolateParams(
 const VALUE_SLOT_BLOCKS: ReadonlySet<string> = new Set(['set-variable'])
 
 /**
+ * Params whose text the executor parses with its own rules and must therefore
+ * receive AUTHORED, not pre-rendered.
+ *
+ * A webhook body is JSON: `{"items": {{rows}}}` is only meaningful if the
+ * reference arrives typed, and `{"name": "{{user.name}}"}` is only safe if the
+ * substituted string can be escaped for JSON. The generic pass did neither — it
+ * wrote `[object Object]` into value position and unescaped quotes/newlines
+ * inside literals, so the block rejected its own body as invalid JSON. The
+ * webhook executor interpolates the body itself (see `lib/workflow/webhook`).
+ */
+const AWAITING_EXECUTOR_PARAMS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['webhook', ['body']],
+])
+
+/**
  * The engine's pre-executor interpolation, aware of blocks whose parameters are
  * value slots rather than text.
  *
@@ -463,7 +494,9 @@ const VALUE_SLOT_BLOCKS: ReadonlySet<string> = new Set(['set-variable'])
  * `Bearer {{token}}` itself). Row NAMES are still text and interpolate as before.
  *
  * Every other block keeps the generic pass: its parameters (selector, message,
- * URL) must reach the driver as strings.
+ * URL) must reach the driver as strings — except the webhook body, whose
+ * executor needs the authored tokens to encode them as JSON (see
+ * {@link AWAITING_EXECUTOR_PARAMS}).
  */
 export function interpolateBlockParams(
   blockId: string,
@@ -471,7 +504,21 @@ export function interpolateBlockParams(
   vars: Record<string, unknown>,
   refData?: unknown,
 ): Record<string, unknown> {
-  if (!VALUE_SLOT_BLOCKS.has(blockId)) return interpolateParams(data, vars, refData)
+  if (!VALUE_SLOT_BLOCKS.has(blockId)) {
+    const rawKeys = AWAITING_EXECUTOR_PARAMS.get(blockId)
+    if (rawKeys === undefined) return interpolateParams(data, vars, refData)
+    const rest: Record<string, unknown> = { ...data }
+    const raw: Record<string, unknown> = {}
+    for (const key of rawKeys) {
+      if (key in rest) {
+        raw[key] = rest[key]
+        delete rest[key]
+      }
+    }
+    const out = interpolateParams(rest, vars, refData)
+    for (const [key, value] of Object.entries(raw)) out[key] = value
+    return out
+  }
 
   const { variables: rawRows, value: rawValue, ...rest } = data
   const out = interpolateParams(rest, vars, refData)

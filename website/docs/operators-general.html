@@ -1535,6 +1535,15 @@
                 according to the selected content type.
               </li>
               <li>
+                The body supports <code>{{variables}}</code>. For <code>json</code> (and the
+                JSON-shaped <code>form</code> / <code>form-data</code> bodies) a token in value
+                position keeps its real type — <code>{&quot;items&quot;: {{rows}}}</code> sends the
+                array — while a token inside a string literal is escaped as JSON string content, so
+                a quote or newline in the data cannot break the document. An unresolved variable in
+                value position fails the step and names it; <code>text/plain</code> bodies stay
+                plain prose.
+              </li>
+              <li>
                 <strong>Data path</strong> is applied only to JSON responses. Text and base64
                 responses are stored as they arrive.
               </li>

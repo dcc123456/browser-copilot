@@ -12,7 +12,7 @@
  * @module lib/workflow/webhook
  */
 
-import { getByPath } from './interpolate'
+import { getByPath, resolveReferenceValue } from './interpolate'
 
 /** The form stores headers as rows; older nodes stored a JSON string. */
 export interface WebhookHeaderRow {
@@ -149,19 +149,90 @@ function fileNameOf(path: string): string {
   return segment === '' ? 'file' : decodeURIComponent(segment)
 }
 
-function parsedBodyOf(
-  data: Record<string, unknown>,
-  interpolate: Interpolator,
+/** The body exactly as authored — the engine leaves it for this module to encode. */
+function authoredBodyOf(data: Record<string, unknown>): string {
+  return String(data['body'] ?? '')
+}
+
+/** JSON text for a value used in VALUE position (quotes included for strings). */
+function jsonValueTextOf(value: unknown): string {
+  if (typeof value === 'function') return JSON.stringify(value.toString())
+  const text = JSON.stringify(value)
+  return text === undefined ? 'null' : text
+}
+
+/** JSON-escaped content for a value landing INSIDE a string literal. */
+function jsonStringContentOf(value: unknown): string {
+  const text =
+    typeof value === 'function'
+      ? value.toString()
+      : typeof value === 'string'
+        ? value
+        : jsonValueTextOf(value)
+  // `JSON.stringify` adds the quotes; the authored literal already has them.
+  return JSON.stringify(text).slice(1, -1)
+}
+
+/**
+ * Interpolate `{{tokens}}` without breaking the JSON document around them.
+ *
+ * The engine hands the body over authored (see `interpolateBlockParams`), so
+ * the reference still has its type here:
+ * - in VALUE position the token becomes JSON, so `{"items": {{rows}}}` carries
+ *   the real array instead of `[object Object]` or a comma-joined string;
+ * - inside a string literal the value becomes JSON string CONTENT, so a quote,
+ *   backslash or newline in the data can no longer invalidate the body.
+ *
+ * Unresolved tokens are left verbatim: inside a literal that is still valid
+ * JSON, while one in value position is reported through `missing` (it is the
+ * token that made the document unparsable, and naming it beats a generic
+ * "not valid JSON").
+ */
+function interpolateJsonBody(
+  text: string,
   variables: Record<string, unknown>,
   refData: unknown,
-): string {
-  return interpolate(String(data['body'] ?? ''), variables, refData)
+): { text: string; missing: string[] } {
+  let out = ''
+  let index = 0
+  let insideString = false
+  let escaped = false
+  const missing: string[] = []
+  while (index < text.length) {
+    if (text.startsWith('{{', index)) {
+      const close = text.indexOf('}}', index + 2)
+      if (close !== -1) {
+        const expression = text.slice(index + 2, close)
+        const resolved = resolveReferenceValue(expression, variables, refData)
+        if (resolved.found) {
+          out += insideString
+            ? jsonStringContentOf(resolved.value)
+            : jsonValueTextOf(resolved.value)
+          index = close + 2
+          continue
+        }
+        const name = expression.trim()
+        if (!insideString && !missing.includes(name)) missing.push(name)
+      }
+    }
+    const char = text[index]!
+    if (insideString) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') insideString = false
+    } else if (char === '"') {
+      insideString = true
+    }
+    out += char
+    index += 1
+  }
+  return { text: out, missing }
 }
 
 /**
  * Encode the body according to the content type:
- * - `text` stays raw;
- * - `json` must parse and is re-serialized;
+ * - `text` stays raw, interpolated as prose;
+ * - `json` is interpolated as JSON, must parse and is re-serialized;
  * - `form` becomes `application/x-www-form-urlencoded`;
  * - `form-data` is a 2-D array of `[name, urlOrText, filename?]` rows, where
  *   files must be http(s) URLs or data URLs (this build never reads arbitrary
@@ -175,16 +246,22 @@ export async function webhookBodyOf(
 ): Promise<BodyInit | undefined> {
   const method = String(data['method'] ?? 'POST').toUpperCase()
   if (NO_BODY_METHODS.has(method)) return undefined
-  const raw = parsedBodyOf(data, interpolate, variables, refData)
+  const raw = authoredBodyOf(data)
   if (raw.trim() === '') return undefined
 
   const contentType = String(data['contentType'] ?? 'json')
-  if (contentType === 'text') return raw
+  if (contentType === 'text') return interpolate(raw, variables, refData)
 
+  const { text: resolved, missing } = interpolateJsonBody(raw, variables, refData)
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(resolved)
   } catch {
+    if (missing.length > 0) {
+      throw new Error(
+        `webhook: body 中的变量没有值：${missing.map((token) => `{{${token}}}`).join('、')}`,
+      )
+    }
     throw new Error(`webhook: body 不是合法 JSON（contentType=${contentType}）`)
   }
 

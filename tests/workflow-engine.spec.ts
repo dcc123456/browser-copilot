@@ -456,6 +456,24 @@ describe('interpolateBlockParams', () => {
       interpolateBlockParams('forms', { selector: '#pw', value: '{{pw}}' }, { pw: 's3cret' }),
     ).toEqual({ selector: '#pw', value: 's3cret' })
   })
+
+  it('hands the webhook body over authored so its executor can encode it as JSON', () => {
+    // Rendering an object token as text produced `[object Object]` inside the
+    // JSON document; rendering a string ignored JSON quoting. Everything else
+    // on the node stays on the plain text pass.
+    const out = interpolateBlockParams(
+      'webhook',
+      {
+        url: 'https://api.test/{{path}}',
+        body: '{"user": {{user}}, "note": "{{note}}"}',
+      },
+      { path: 'v1', user: { name: 'Ada' }, note: 'hi' },
+    )
+    expect(out).toEqual({
+      url: 'https://api.test/v1',
+      body: '{"user": {{user}}, "note": "{{note}}"}',
+    })
+  })
 })
 
 describe('workflow engine value slots', () => {

@@ -1380,6 +1380,18 @@
                 <code>GET</code> 与
                 <code>HEAD</code> 不发送请求体；其他方法按所选内容类型编码请求体。
               </li>
+              <li>
+                请求体支持 <code>{{variables}}</code>。在 <code>json</code>（以及同样以 JSON 描述的
+                <code>form</code> /
+                <code>form-data</code>）请求体中，值位置的变量按真实类型写入——<code
+                  >{&quot;items&quot;: {{rows}}}</code
+                >
+                会发送数组；引号内的变量按 JSON
+                字符串转义，数据里的引号或换行不会破坏文档。值位置引用了不存在的变量时步骤失败并指出变量名；<code
+                  >text/plain</code
+                >
+                请求体仍按纯文本插值。
+              </li>
               <li><strong>数据路径</strong>只对 JSON 响应生效。文本与 base64 响应按原样保存。</li>
               <li>超时填 <code>0</code> 表示不限制。中止运行会同时中止请求。</li>
               <li>非 2xx 响应且没有回退连线时，步骤失败，错误信息包含方法、状态码和 URL。</li>
