@@ -1559,13 +1559,18 @@ export default function EditorApp() {
       .map((node) => node.id)
     const selectedNodeId = picked.length === 1 ? picked[0] : undefined
     const graph = suggestionGraphRef.current()
+    const selectedNode = selectedNodeId
+      ? graph.nodes.find((node) => node.id === selectedNodeId)
+      : undefined
     const selectedSpec = selectedNodeId ? selectedOperatorSpecOf(graph, selectedNodeId) : ''
+    const selectedBlockId = selectedNode?.data.blockId
     // The window this editor was opened from: the assistant may only read a page
     // in it, never in some other window the user did not open it from.
     const hostWindow = hostWindowId()
     return {
       graphDigest: operatorDigestOf(graph, selectedNodeId),
       ...(selectedNodeId ? { selectedNodeId } : {}),
+      ...(typeof selectedBlockId === 'string' ? { selectedBlockId } : {}),
       ...(selectedSpec ? { selectedSpec } : {}),
       ...(hostWindow !== undefined ? { windowId: hostWindow } : {}),
       ...(meta.description ? { workflowGoal: meta.description } : {}),

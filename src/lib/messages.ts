@@ -405,6 +405,9 @@ export type Command =
        *  sent only when exactly one node is selected, and what lets the answer be
        *  an in-place `edit`/`replace` instead of an appended chain. */
       selectedSpec?: string
+      /** The selected step's operator id, so the prompt can spell out that
+       *  operator's real parameter shape even when the offer abridged it. */
+      selectedBlockId?: string
       /** See workflows.run.windowId — the page may only be read in that window. */
       windowId?: number
       /** The user's "don't read the page" override. Reading is on otherwise: a

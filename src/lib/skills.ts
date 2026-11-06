@@ -18,9 +18,12 @@ export interface SkillProblem {
 /**
  * Longest instruction text accepted. 8000 covered every guide until the
  * workflow generator's list-collection recipe arrived; 9000 keeps the same
- * storage safety margin with room for the next paragraph.
+ * storage safety margin with room for the next paragraph. Raised 9400 → 9500
+ * when the guide row for data-mapping started naming the keys its form and
+ * executor actually read (dataSource / varSourceName / sources / assignVariable
+ * / variableName) instead of advertising the dead `mapping` expression.
  */
-export const MAX_INSTRUCTIONS_LENGTH = 9400
+export const MAX_INSTRUCTIONS_LENGTH = 9500
 /** Longest skill name accepted. */
 export const MAX_NAME_LENGTH = 60
 

@@ -161,7 +161,7 @@ get-secret 的代价是每次运行都要用户存着那条凭证。只对密码
 | 滚动 / 悬停 / 上传 | element-scroll / hover-element / upload-file | interaction | selector+scrollIntoView 或 scrollX/scrollY |
 | 判断元素在不在、按条件分支 | element-exists / conditions | conditions | selector / 表达式 |
 | 等待（导航后、等页面稳定） | delay / wait-connections | general | time / timeout（毫秒） |
-| 存变量、拼接、正则、累加 | set-variable / data-mapping / slice-variable / regex-variable / increase-variable | data | set-variable 用 variables:[{name,value}] 一次写多个（自上而下，可引用前一条）；其余 variableName, value；读变量直接写 \`{{变量名}}\` |
+| 存变量、拼接、正则、累加 | set-variable / data-mapping / slice-variable / regex-variable / increase-variable | data | set-variable 用 variables:[{name,value}] 一次写多个（自上而下，可引用前一条）；data-mapping 读 dataSource/varSourceName，sources 改名，assignVariable+variableName 输出；其余 variableName, value；读变量直接写 \`{{变量名}}\` |
 | 解析 Excel/CSV 为数据 | parse-excel | data | sourceMode, fileVariable 或运行时选择；variableName, rawVariableName |
 | 排序 / 重排数据 | sort-data | data | — |
 | 遍历数据/元素、重复 N 次、条件循环 | loop-data / loop-elements / repeat-task / while-loop | conditions | — |

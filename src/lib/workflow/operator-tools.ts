@@ -729,11 +729,38 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
     key: { type: 'number', description: 'Row index (0-based) to delete.' },
   },
   'data-mapping': {
-    mapping: {
+    dataSource: {
       type: 'string',
-      description: 'Per-row JS expression over `item`/`index`. Required.',
+      enum: ['table', 'variable'],
+      description: 'table (default) | variable.',
     },
-    variableName: { type: 'string', description: 'Output variable (default mappedData).' },
+    varSourceName: {
+      type: 'string',
+      description: 'Source variable name, no {{ }}; needs dataSource "variable".',
+    },
+    sources: {
+      type: 'array',
+      description: 'Field renames; empty renames nothing.',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          destinations: {
+            type: 'array',
+            items: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+          },
+        },
+        required: ['name', 'destinations'],
+      },
+    },
+    assignVariable: {
+      type: 'boolean',
+      description: 'Write the result into variableName.',
+    },
+    variableName: {
+      type: 'string',
+      description: 'Output variable (default mappedData); needs assignVariable.',
+    },
   },
   'sort-data': {
     field: { type: 'string', description: 'Column to sort by. Required.' },
@@ -798,7 +825,6 @@ const SCHEMA_OMIT: Readonly<Record<string, readonly string[]>> = {
   // `variables` rows (see SCHEMA_OVERRIDES); advertising both shapes invites a
   // node that sets only one of the two.
   'set-variable': ['variableName', 'value'],
-  'data-mapping': ['dataSource', 'sources', 'varSourceName'],
   'sort-data': ['sortByProperty', 'itemProperties', 'dataSource', 'varSourceName', 'variableName'],
   'log-data': ['workflowId', 'variableName'],
   'tab-url': ['type', 'qTitle', 'qMatchPatterns'],

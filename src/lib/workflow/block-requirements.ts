@@ -537,7 +537,24 @@ const REQUIREMENTS: Readonly<Record<string, RequirementSet>> = {
     ],
   },
   'data-mapping': {
-    params: [{ key: 'mapping', message: '必须给 mapping（映射表达式，用 item 引用每行）' }],
+    params: [
+      {
+        key: 'varSourceName',
+        message: '必须给 varSourceName（dataSource 为 variable 时要读取的变量名，不带 {{ }}）',
+        when: (data) => data['dataSource'] === 'variable',
+      },
+    ],
+    // The editor writes `sources` rows and the executor renames fields from
+    // them. This used to require `mapping`, a JS-expression key neither the form
+    // nor the executor reads — so a node the model "filled" was still a no-op.
+    check: (data) =>
+      filledList(data, 'sources')
+        ? null
+        : {
+            key: 'sources',
+            message: '必须给 sources（至少一条字段改名：name 与 destinations）',
+            severity: 'warning',
+          },
   },
   'sort-data': {
     params: [{ key: 'field', message: '必须给 field（按哪个列排序）' }],

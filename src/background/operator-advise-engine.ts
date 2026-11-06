@@ -98,6 +98,9 @@ export interface OperatorAdviseInput {
    *  Present only when the editor has exactly one node selected — it is what
    *  makes an `edit`/`replace` answer possible at all. */
   selectedSpec?: string
+  /** The selected step's operator id: the prompt then spells out that block's
+   *  full parameter shape, which is what an in-place edit is written against. */
+  selectedBlockId?: string
   /** The editor's host window: the page to read lives there, and a read is
    *  never allowed to reach into another window. */
   windowId?: number
@@ -370,6 +373,7 @@ async function advise(
     ...(page ? { page } : {}),
     ...(input.pickedElements?.length ? { pickedElements: input.pickedElements } : {}),
     ...(input.selectedSpec ? { selectedSpec: input.selectedSpec } : {}),
+    ...(input.selectedBlockId ? { selectedBlockId: input.selectedBlockId } : {}),
     maxOperators,
   }
   const prompt = buildOperatorAdvisePrompt(promptInput)

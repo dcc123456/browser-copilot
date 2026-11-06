@@ -138,9 +138,15 @@ const MAX_CATALOG_CHARS = 32_300
  * Keeping them in the catalog default data is what lets a generated workflow
  * prune its own node's capabilities, and `migrateNodeData` fills them for old
  * nodes. Raised 62_800 → 63_200 for the semi-auto approval rule in the shared
- * prompt (measured 63_046).
+ * prompt (measured 63_046). Raised 63_200 → 63_700 for the corrected
+ * data-mapping schema (measured 63_580): the old override advertised a dead
+ * `mapping` expression while SCHEMA_OMIT hid dataSource / varSourceName /
+ * sources, so the model could describe an edit the form never drew. The new
+ * keys are the price of a contract that matches EditDataMapping and the
+ * executor; nested descriptions were dropped and the guide row compacted
+ * first.
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 63_200
+const MAX_WORKFLOW_ROUND1_CHARS = 63_700
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~37.6k; the smallest (`general`)
@@ -177,9 +183,10 @@ const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_750
  * measured 62_610).
  * Raised 62_700 → 62_800 with the round-1 budget (the `ai-agent` capability
  * keys — measured 62_676). Raised 62_800 → 63_200 with the round-1 budget (the
- * semi-auto approval rule — measured 63_046).
+ * semi-auto approval rule — measured 63_046). Raised 63_200 → 63_700 with the
+ * round-1 budget (the corrected data-mapping schema — measured 63_580).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 63_200
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 63_700
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
@@ -203,9 +210,11 @@ const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 63_200
  * no `vars`/`refData` global exists; measured 64_666). The escape schema is the
  * only place the model reads the contract while writing the body, so this is
  * where the correction has to live; the always-loaded guide line was fixed
- * within its own budget headroom.
+ * within its own budget headroom. Raised 64_700 → 65_300 for the corrected
+ * data-mapping schema (measured 65_254 — the same operator contract as the
+ * round-1 budget; nested descriptions were dropped first).
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 64_700
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 65_300
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
  * now deliberately carries EVERY operator schema, so workflow runs several

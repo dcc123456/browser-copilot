@@ -790,9 +790,9 @@ function schemaPropertyNames(schema: Record<string, unknown>): string[] {
 /**
  * The row shapes a compact offer would otherwise hide: `variables` is an array of
  * `{name, value}` objects, and a model that only reads the parameter name invents
- * a different shape (one object, a string, an array of strings). Only leaf rows
- * are named — a nested group (`conditions.conditions`) says nothing useful in a
- * one-line offer.
+ * a different shape (one object, a string, an array of strings). Nested rows are
+ * described too (`sources: [name, destinations: [name]]`), because a block whose
+ * rows hold their own rows (`data-mapping`) otherwise shows only the outer key.
  */
 function schemaRowShapes(schema: Record<string, unknown>): string[] {
   const properties = schema['properties']
@@ -804,18 +804,40 @@ function schemaRowShapes(schema: Record<string, unknown>): string[] {
     if (property['type'] !== 'array') continue
     const items = property['items']
     if (!items || typeof items !== 'object') continue
-    const itemProperties = (items as Record<string, unknown>)['properties']
-    if (!itemProperties || typeof itemProperties !== 'object') continue
-    const fields = Object.values(itemProperties as Record<string, unknown>)
-    const isLeafRow = fields.every((field) => {
-      if (!field || typeof field !== 'object') return true
-      const type = (field as Record<string, unknown>)['type']
-      return type === undefined || type === 'string' || type === 'number' || type === 'boolean'
-    })
-    if (!isLeafRow) continue
-    shapes.push(`${key}: [${Object.keys(itemProperties as Record<string, unknown>).join(', ')}]`)
+    const fields = rowFieldsOf(items as Record<string, unknown>, 1)
+    if (fields !== '') shapes.push(`${key}: [${fields}]`)
   }
   return shapes
+}
+
+/** How deep a row shape is spelled out: the outer row and one level of rows it
+ *  holds. Deeper nesting only makes the one-line offer unreadable. */
+const ROW_SHAPE_DEPTH = 2
+
+/** The field names of one row schema, with a nested array described in place. */
+function rowFieldsOf(schema: Record<string, unknown>, depth: number): string {
+  const properties = schema['properties']
+  if (!properties || typeof properties !== 'object') return ''
+  const fields: string[] = []
+  for (const [key, value] of Object.entries(properties as Record<string, unknown>)) {
+    const property = value && typeof value === 'object' ? (value as Record<string, unknown>) : null
+    const items = property?.['items']
+    if (
+      depth < ROW_SHAPE_DEPTH &&
+      property !== null &&
+      property['type'] === 'array' &&
+      items &&
+      typeof items === 'object'
+    ) {
+      const nested = rowFieldsOf(items as Record<string, unknown>, depth + 1)
+      if (nested !== '') {
+        fields.push(`${key}: [${nested}]`)
+        continue
+      }
+    }
+    fields.push(key)
+  }
+  return fields.join(', ')
 }
 
 /**
@@ -860,6 +882,11 @@ export interface OperatorAdvisePromptInput {
   /** The step the user selected, with every current parameter, from
    *  {@link selectedOperatorSpecOf}. Empty or absent when nothing is selected. */
   selectedSpec?: string
+  /** The selected step's operator id. With it the prompt can spell out that
+   *  block's full parameter shape even when the offer abridged it — an in-place
+   *  edit is written against those key names, and a key the block does not
+   *  declare changes nothing the user can see. */
+  selectedBlockId?: string
   /** What the page the user is looking at offers, from a read-only snapshot.
    *  Absent when there was no page to read or the user asked not to read it —
    *  then the model must guess, and the reply says so. */
@@ -880,6 +907,11 @@ export interface OperatorAdvisePromptInput {
 export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): string {
   const maxOperators = input.maxOperators ?? OPERATOR_ADVISE_MAX_OPERATORS
   const selected = input.selectedSpec?.trim() ?? ''
+  // The offer abridges its tail to parameter names; an in-place edit needs the
+  // real shape of the ONE step it may change, so that block is spelled out.
+  const selectedCandidate = input.selectedBlockId
+    ? input.candidates.find((candidate) => candidate.blockId === input.selectedBlockId)
+    : undefined
   const page = input.page
   const picked = (input.pickedElements ?? []).filter((element) => element.selector.trim() !== '')
   const screenshot = input.screenshot
@@ -914,6 +946,18 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     ...(selected === ''
       ? []
       : ['', '## The step the user selected (with its current parameters)', selected]),
+    ...(selectedCandidate && !selectedCandidate.detailed
+      ? [
+          '',
+          '## The parameter shape of the selected step',
+          `- ${selectedCandidate.blockId} — ${selectedCandidate.name}`,
+          `  params: ${capModelPayload(selectedCandidate.schema)}`,
+          ...(selectedCandidate.required.length > 0
+            ? [`  required: ${selectedCandidate.required.join(', ')}`]
+            : []),
+          'An in-place edit writes these key names.',
+        ]
+      : []),
     ...(page === undefined
       ? []
       : [
@@ -977,7 +1021,7 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
       : [
           '- "append" (default, also when omitted): your operators are added as a new chain right AFTER the selected step.',
           '- "prepend": your operators are inserted IN FRONT of the selected step: they run first, then the selected step runs unchanged. Choose by WHEN the new work happens — "prepend" for what must precede the selected step (wait for an element, close a popup, set a variable it reads), "append" for what follows it.',
-          '- "edit": change the selected step in place. Return EXACTLY ONE proposal, with the SAME operator id as that step, and put in "data" only the parameters to change — every other parameter of the node stays untouched.',
+          '- "edit": change the selected step in place. Return EXACTLY ONE proposal, with the SAME operator id as that step, and put in "data" only the parameters to change — every other parameter of the node stays untouched. Write only key names that operator declares; a stray key ("mapping" on data-mapping, which renames through "sources") changes nothing the editor shows.',
           '- "replace": turn the selected step into a different operator. Return EXACTLY ONE proposal with the new operator id (it must differ from the selected step\'s) and the parameters it should carry.',
           '- Never name a node id: the editor only ever acts on the step the user selected.',
           '- "prepend" needs a single path arriving at the selected step; the editor refuses the batch when the step is the trigger, is not wired, or several paths join there.',
@@ -988,6 +1032,7 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     '- Use only ids from the list above. Never invent an id; never return an operator the canvas already has unless the user asks for another one.',
     '- "blockId" is the operator id exactly as listed (e.g. "data-mapping"), not an instance id with a number on the end ("data-mapping-1"); two steps of the same operator are two rows with that same id.',
     '- Fill every value the user stated (URLs, text, selectors) and omit the rest — the catalog default is applied for you.',
+    '- A value the form only draws once its flag is on is inert alone: return the flag with it (an output variable needs assignVariable: true, a saved table column needs saveData: true, a variable source needs dataSource: "variable").',
     '- Where a value should come from an earlier step, reference it as {{variableName}} using a name the digest shows that step produces.',
     '- Prefer stable locators (#id, [data-testid], [name]) over generated classes or nth-child chains.',
     `- At most ${maxOperators} operators (one for "edit"/"replace"). Return an empty "proposals" array when nothing on the list fits or the user is only asking a question — then "reply" must say why.`,
@@ -1059,6 +1104,14 @@ function proposalRowsOf(value: unknown): unknown[] {
 }
 
 /**
+ * Keys the editor reads as a BARE variable name rather than as a value with
+ * `{{references}}`. A model told to "reference an earlier step as {{name}}" also
+ * writes that shape here, and `ctx.variables['{{jobsData}}']` is a variable
+ * literally named with braces — so a whole-value reference is unwrapped.
+ */
+const BARE_VARIABLE_NAME_KEYS: readonly string[] = ['varSourceName', 'variableName']
+
+/**
  * The parameters one row carries. A named operator whose `data` is missing or
  * unreadable still lands: the catalog defaults apply and the missing-parameter
  * row names the gap, which is what the prompt promises the model ("omit what
@@ -1073,7 +1126,14 @@ function proposalDataOf(value: unknown): Record<string, unknown> {
       return {}
     }
   }
-  return sanitizeNodeData(source) ?? {}
+  const data = sanitizeNodeData(source) ?? {}
+  for (const key of BARE_VARIABLE_NAME_KEYS) {
+    const raw = data[key]
+    if (typeof raw !== 'string') continue
+    const match = /^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/.exec(raw)
+    if (match) data[key] = match[1]
+  }
+  return data
 }
 
 /**

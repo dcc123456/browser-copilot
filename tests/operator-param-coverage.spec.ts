@@ -246,6 +246,23 @@ describe('operator parameter coverage', () => {
     ).toEqual([])
   })
 
+  it('advertises data-mapping through the keys its form and executor actually use', () => {
+    // The override used to advertise a `mapping` JS expression and OMIT the three
+    // keys `EditDataMapping` writes. The model filled `mapping` + `variableName`,
+    // the executor renamed nothing and the form showed no change — the assistant
+    // reported an edit that configured nothing.
+    const keys = advertisedKeys('data-mapping')
+    expect(keys).toEqual(expect.arrayContaining(['dataSource', 'varSourceName', 'sources']))
+    expect(keys).not.toContain('mapping')
+    const schema = dataSchemaFromEntry(PALETTE.find((entry) => entry.id === 'data-mapping')!)
+    const sources = (schema['properties'] as Record<string, unknown>)['sources'] as {
+      items?: { properties?: Record<string, unknown> }
+    }
+    expect(Object.keys(sources.items?.properties ?? {})).toEqual(
+      expect.arrayContaining(['name', 'destinations']),
+    )
+  })
+
   it('re-advertises a UI-only key only when the executor honours it', () => {
     // `dataSchemaFromEntry` filters UI_ONLY_KEYS out, but `SCHEMA_OVERRIDES` is
     // merged in AFTER that filter — so an override that lists a UI-only key

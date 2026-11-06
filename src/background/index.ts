@@ -2838,6 +2838,7 @@ async function handleCommand(
             messages: command.messages,
             graphDigest: command.graphDigest,
             ...(command.selectedSpec ? { selectedSpec: command.selectedSpec } : {}),
+            ...(command.selectedBlockId ? { selectedBlockId: command.selectedBlockId } : {}),
             ...(command.windowId !== undefined ? { windowId: command.windowId } : {}),
             ...(command.skipPageRead ? { skipPageRead: true } : {}),
             ...(command.pickedElements?.length ? { pickedElements: command.pickedElements } : {}),

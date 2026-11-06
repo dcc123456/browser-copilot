@@ -104,6 +104,9 @@ export interface OperatorChatContext {
   graphDigest: string
   /** The single selected step, when there is exactly one. */
   selectedNodeId?: string
+  /** That step's operator id, so the prompt can spell out its real parameter
+   *  shape even when the offer abridged that operator. */
+  selectedBlockId?: string
   /** That step's parameters, already redacted — only sent with a selection. */
   selectedSpec?: string
   /** The window to read a page from; without one nothing is read. */
@@ -635,6 +638,7 @@ export default function OperatorChatDock({
         sessionId,
         messages: history,
         graphDigest: context.graphDigest,
+        ...(context.selectedBlockId ? { selectedBlockId: context.selectedBlockId } : {}),
         ...(context.selectedSpec ? { selectedSpec: context.selectedSpec } : {}),
         ...(context.windowId !== undefined ? { windowId: context.windowId } : {}),
         ...(readPage ? {} : { skipPageRead: true }),

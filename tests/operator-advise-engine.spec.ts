@@ -64,6 +64,26 @@ describe('runOperatorAdvise', () => {
     expect(prompts[0]).not.toContain('"edit": change the selected step')
   })
 
+  it('spells out the selected operator shape even when the offer abridged it', async () => {
+    const prompts: string[] = []
+    const deps = {
+      signal: new AbortController().signal,
+      callModel: async (prompt: string) => {
+        prompts.push(prompt)
+        return '{"reply":"已改好","action":"edit","proposals":[{"blockId":"data-mapping","data":{"sources":[]}}]}'
+      },
+    }
+    await runOperatorAdvise(
+      input({
+        selectedSpec: 'data-mapping Data mapping {"dataSource":"table","sources":[]}',
+        selectedBlockId: 'data-mapping',
+      }),
+      deps,
+    )
+    expect(prompts[0]).toContain('## The parameter shape of the selected step')
+    expect(prompts[0]).toContain('"destinations"')
+  })
+
   it('refuses to call the model when there is no utterance to answer', async () => {
     let called = 0
     const result = await runOperatorAdvise(

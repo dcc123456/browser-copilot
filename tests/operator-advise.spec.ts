@@ -164,6 +164,34 @@ describe('buildOperatorAdvisePrompt', () => {
     expect(prompt).toContain('rows: variables: [name, value]')
   })
 
+  it('spells out a nested row shape for a block whose rows hold rows', () => {
+    const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
+    // data-mapping renames through `sources`, each holding `destinations`. With
+    // only the outer key visible the model invented `mapping`, which the form and
+    // the executor both ignore.
+    expect(prompt).toContain('sources: [name, destinations: [name]]')
+    expect(prompt).not.toContain('"mapping"')
+  })
+
+  it('spells out the selected step shape so an in-place edit names real keys', () => {
+    const prompt = buildOperatorAdvisePrompt({
+      history,
+      graphDigest: '',
+      candidates,
+      selectedSpec: 'data-mapping Data mapping {"dataSource":"table","sources":[]}',
+      selectedBlockId: 'data-mapping',
+    })
+    expect(prompt).toContain('## The parameter shape of the selected step')
+    expect(prompt).toContain('"destinations"')
+    expect(prompt).toContain('assignVariable')
+  })
+
+  it('tells the model that a value gated by a flag needs the flag too', () => {
+    const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
+    expect(prompt).toContain('assignVariable: true')
+    expect(prompt).toContain('dataSource: "variable"')
+  })
+
   it('forbids the instance ids an exported workflow uses', () => {
     // The reported failure wrote "data-mapping-1"; the offer lists operator ids,
     // and two steps of one operator are two rows — not two differently named ids.
@@ -411,6 +439,36 @@ describe('parseOperatorAdviseReply', () => {
       offered,
     )
     expect(parsed?.proposals[0]?.data).toEqual({ url: 'https://b' })
+  })
+
+  it('unwraps a whole reference in a variable-name field, but not in a value', () => {
+    // The prompt asks for earlier-step values as {{name}}; a NAME field must hold
+    // the bare name, or the executor looks up a variable literally named "{{x}}".
+    const parsed = parseOperatorAdviseReply(
+      JSON.stringify({
+        reply: 'ok',
+        proposals: [
+          {
+            blockId: 'data-mapping',
+            data: {
+              dataSource: 'variable',
+              varSourceName: '{{jobsData}}',
+              assignVariable: true,
+              variableName: ' {{jobDetails}} ',
+            },
+          },
+          { blockId: 'set-variable', data: { variables: [{ name: 'x', value: '{{jobsData}}' }] } },
+        ],
+      }),
+      ['data-mapping', 'set-variable'],
+    )
+    expect(parsed?.proposals[0]?.data).toMatchObject({
+      varSourceName: 'jobsData',
+      variableName: 'jobDetails',
+    })
+    expect(parsed?.proposals[1]?.data).toEqual({
+      variables: [{ name: 'x', value: '{{jobsData}}' }],
+    })
   })
 
   it('resolves a differently spelled offered id, and still refuses the rest', () => {
@@ -1039,6 +1097,56 @@ describe('applyOperatorAction edit', () => {
     })
     expect(patch.edges).toEqual(canvas.edges)
     expect(patch.pruned).toEqual([])
+  })
+
+  it('applies a data-mapping answer to the fields its form reads', () => {
+    // The reported failure: the reply "changed" `mapping` + `variableName`, but
+    // data-mapping renames through `sources` and only shows an output name when
+    // `assignVariable` is on — so the canvas looked untouched.
+    const canvas = graph(
+      [
+        node('t', 'trigger'),
+        node('m', 'data-mapping', {
+          dataSource: 'table',
+          sources: [],
+          assignVariable: false,
+          variableName: '',
+        }),
+      ],
+      [edge('t', 'm')],
+    )
+    const parsed = parseOperatorAdviseReply(
+      JSON.stringify({
+        reply: '已配置',
+        action: 'edit',
+        proposals: [
+          {
+            blockId: 'data-mapping',
+            data: {
+              dataSource: 'variable',
+              varSourceName: '{{loopItem}}',
+              sources: [{ name: 'name', destinations: [{ name: 'name' }] }],
+              assignVariable: true,
+              variableName: 'jobDetails',
+            },
+            rationale: '',
+          },
+        ],
+      }),
+      ['data-mapping'],
+    )
+    const patch = applyOperatorAction(canvas, 'm', 'edit', parsed!.proposals)
+    expect(patch.problem).toBeUndefined()
+    expect(patch.nodes.find((n) => n.id === 'm')?.data).toMatchObject({
+      dataSource: 'variable',
+      varSourceName: 'loopItem',
+      assignVariable: true,
+      variableName: 'jobDetails',
+      sources: [{ name: 'name', destinations: [{ name: 'name' }] }],
+    })
+    expect(patch.changed.map((change) => change.key)).toEqual(
+      expect.arrayContaining(['dataSource', 'varSourceName', 'sources', 'assignVariable']),
+    )
   })
 
   it('records the node and its lines, deep-copied, for undo', () => {
