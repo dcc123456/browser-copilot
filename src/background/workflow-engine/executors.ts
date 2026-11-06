@@ -171,6 +171,12 @@ export interface WorkflowExecCtx {
     prompt: import('../../lib/workflow/run-input').RunInputPrompt,
   ) => Promise<import('../../lib/workflow/run-input').RunInputAnswer>
   /**
+   * Values the workflow panel already saved for `parameter-prompt` inputs,
+   * keyed by parameter name and already coerced to the declared type. A prompt
+   * does not ask for these again: they are a stored answer, not a question.
+   */
+  presetInputs?: Readonly<Record<string, unknown>>
+  /**
    * The tab this run is acting on. Undefined until resolved; navigation blocks
    * update it when they open/switch tabs so later steps follow the right page
    * instead of the extension popup that launched the run.
@@ -1979,13 +1985,17 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
 
   // Prefer the in-page harness (Automa helpers + console capture + page DOM).
   let run: Awaited<ReturnType<typeof execWorkflowJsOnActiveTab>> | null = null
-  let triedPage = false
+  // Why the page bridge itself could not run (no injectable tab, injection
+  // blocked, aborted tab). Kept instead of discarded: the local fallback below
+  // always fails under MV3 with a CSP error, and reporting THAT hides the real
+  // cause — the user was told "eval is forbidden" when the actual problem was
+  // "there was no http(s) tab to run in".
+  let pageFailure: string | null = null
   // `chrome.scripting` exists in the real extension; in the pure-engine/tests it
   // does not, so we fall back to a local evaluation (see below).
   const hasPageBridge =
     typeof chrome !== 'undefined' && !!(chrome as { scripting?: unknown }).scripting
   if (hasPageBridge) {
-    triedPage = true
     try {
       run = await execWorkflowJsOnActiveTab(
         code,
@@ -1995,8 +2005,9 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
         ctx.tabId,
         ctx.scope,
       )
-    } catch {
-      run = null
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') throw error
+      pageFailure = error instanceof Error ? error.message : String(error)
     }
   }
 
@@ -2037,7 +2048,11 @@ const javascriptCode: BlockExecutor = async (data, ctx) => {
   if (!local.ok) {
     // Thrown: a code node that did not run leaves every variable it was supposed
     // to produce unset, and the rest of the workflow then runs on stale data.
-    throw new Error(`javascript-code: ${triedPage && run && !run.ok ? run.error : local.error}`)
+    // The page bridge's own verdict outranks the local fallback's: under MV3 the
+    // local path can only ever report "eval is not allowed", which says nothing
+    // about why the page half failed.
+    const reason = (run && !run.ok ? run.error : null) ?? pageFailure ?? local.error
+    throw new Error(`javascript-code: ${reason}`)
   }
   for (const [k, v] of Object.entries(local.variables ?? {})) ctx.variables[k] = v
   ctx.variables['lastResult'] = local.result
@@ -3132,33 +3147,41 @@ const parameterPrompt: BlockExecutor = async (data, ctx) => {
   }
 
   if (ctx.requestInput) {
-    const description = interpolate(
-      String(data['description'] ?? ''),
-      ctx.variables,
-      ctx.refData,
-    ).trim()
-    const fields = runInputFieldsOf(parameters, ctx.variables, (fallback) =>
-      interpolate(fallback, ctx.variables, ctx.refData),
-    )
-    ctx.emit('info', '参数输入：等待填写…')
-    const answer = await ctx.requestInput({
-      ...(description !== '' ? { description } : {}),
-      fields,
-      timeoutMs: runInputTimeoutOf(data['timeout']),
-    })
-    if (answer.cancelled) {
-      // Named AbortError so the engine records `cancelled`; a plain Error would
-      // report a failure and attribute it to the block.
-      const stop = new Error('参数输入：已取消运行')
-      stop.name = 'AbortError'
-      throw stop
-    }
-    if (answer.timedOut) {
-      // Automa's contract: a timeout skips the wait and continues with the
-      // defaults / values already in the scope.
-      ctx.emit('info', '参数输入：等待超时，使用默认值继续')
+    // A value saved from the workflow's parameter panel is an ANSWER: asking for
+    // it on every manual run (or timing out in a scheduled one) is exactly what
+    // that panel exists to prevent. Only the remaining inputs are asked.
+    const pending = parameters.filter((param) => ctx.presetInputs?.[param.name] === undefined)
+    if (pending.length === 0) {
+      ctx.emit('info', '参数输入：使用工作流面板已保存的参数值')
     } else {
-      applyRunInputValues(parameters, answer.values, ctx.variables)
+      const description = interpolate(
+        String(data['description'] ?? ''),
+        ctx.variables,
+        ctx.refData,
+      ).trim()
+      const fields = runInputFieldsOf(pending, ctx.variables, (fallback) =>
+        interpolate(fallback, ctx.variables, ctx.refData),
+      )
+      ctx.emit('info', '参数输入：等待填写…')
+      const answer = await ctx.requestInput({
+        ...(description !== '' ? { description } : {}),
+        fields,
+        timeoutMs: runInputTimeoutOf(data['timeout']),
+      })
+      if (answer.cancelled) {
+        // Named AbortError so the engine records `cancelled`; a plain Error would
+        // report a failure and attribute it to the block.
+        const stop = new Error('参数输入：已取消运行')
+        stop.name = 'AbortError'
+        throw stop
+      }
+      if (answer.timedOut) {
+        // Automa's contract: a timeout skips the wait and continues with the
+        // defaults / values already in the scope.
+        ctx.emit('info', '参数输入：等待超时，使用默认值继续')
+      } else {
+        applyRunInputValues(pending, answer.values, ctx.variables)
+      }
     }
   }
 

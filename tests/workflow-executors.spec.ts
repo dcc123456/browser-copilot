@@ -150,6 +150,24 @@ describe('workflow executors (browser class)', () => {
     expect(op.value).toBe('Enter')
   })
 
+  it('javascript-code reports why the page bridge failed, not the worker eval CSP error', async () => {
+    // The local fallback can only report "eval is forbidden" under MV3, which
+    // told users their page blocked scripts when the real cause was "no
+    // http(s) tab to run in". The page bridge's own reason must win.
+    chromeRefs.query.mockResolvedValue([])
+    vi.stubGlobal('chrome', {
+      ...(globalThis as unknown as { chrome: Record<string, unknown> }).chrome,
+      windows: {
+        getLastFocused: async () => ({}),
+        getAll: async () => [],
+      },
+    })
+    const { ctx } = makeCtx()
+    await expect(
+      EXECUTORS['javascript-code']!({ code: 'window.location.href' }, ctx),
+    ).rejects.toThrow(/没有可操作的网页/)
+  })
+
   it('press-key reads the fields the catalog and the edit form actually write', async () => {
     // `keys` is the recorder's combo, `keysToPress` the free-text field. The
     // executor used to read only `key`, which neither of them produces, so a

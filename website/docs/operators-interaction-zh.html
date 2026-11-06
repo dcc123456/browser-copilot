@@ -1195,6 +1195,11 @@
               <li>
                 空脚本会报错，抛出异常的脚本也会报错。重试或回退由节点的<strong>出错时</strong>策略决定。
               </li>
+              <li>
+                有些页面的内容安全策略（CSP）禁止 eval。算子会改用扩展的 DevTools
+                通道重试；通道也不可用时，报错会指明是该页面拦截了脚本，而不是扩展自身的 CSP
+                错误。请换到普通 http(s) 页面运行，或改用浏览器操作类算子。
+              </li>
             </ul>
           </section>
           <section data-operator="trigger-event">

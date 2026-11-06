@@ -246,6 +246,7 @@ Runs a JavaScript function body in the page and stores its return value. [Automa
 - The script runs as a function body with `return`, not as a free-standing program. `automaNextBlock()` ends the script early and overrides the return value.
 - **Execution context**, **Execute in every new tab**, **Run before page loaded**, and **Preload scripts** are stored for compatibility but are not applied by this build; the script runs in the current page.
 - An empty script is an error, and so is a script that throws. Retry or fallback behavior comes from the node's **On error** policy.
+- Some pages forbid evaluating code (a Content Security Policy without `unsafe-eval`). The operator then retries through the extension's DevTools channel; if that is also unavailable, the failure names the blocked page instead of the extension's own CSP error. Switch to a regular http(s) page or use browser-action operators there.
 
 <!-- operator:trigger-event -->
 

@@ -232,8 +232,13 @@ async function resolveAutomationTabUncached(
     .catch(() => undefined)
   if (lastNormal && typeof lastNormal.id === 'number') {
     const active = lastNormal.tabs?.find((t) => t.active)
-    const candidate = active ?? lastNormal.tabs?.find((t) => isInjectablePage(t.url))
-    if (candidate && isInjectablePage(candidate.url)) return candidate
+    if (active && isInjectablePage(active.url)) return active
+    // The window's active tab may be its new-tab / settings page: the harness
+    // window itself is focused, but the user's actual work sits on another tab
+    // of the same window. Prefer any injectable tab there over falling through
+    // to the "remembered page" guess.
+    const fallback = lastNormal.tabs?.find((t) => isInjectablePage(t.url))
+    if (fallback) return fallback
   }
 
   // Fallback: search normal windows (most recently focused first) for their
@@ -1181,7 +1186,22 @@ async function runWorkflowJsInMainWorld(
     // CSP blocked the MAIN-world compile → run the same harness via CDP.
     if (value.error && isCspBlocked(value.error)) {
       const cdp = await runWorkflowJsViaCdp(tab.id, op)
-      if (cdp) return { ...base, ok: true, data: cdp }
+      if (cdp?.ok) {
+        return {
+          ...base,
+          ok: true,
+          data: { result: cdp.result, variables: cdp.variables, logs: cdp.logs },
+        }
+      }
+      return {
+        ...base,
+        // Name the fallback's own failure; "the page forbids eval" alone reads
+        // as a permanent page limitation and hides DevTools-attach problems.
+        error: cdp
+          ? explainWorkflowCspFailure(value.error, cdp.error)
+          : explainJsError(value.error),
+        data: { logs: value.logs ?? [] },
+      }
     }
     return {
       ...base,
@@ -1193,21 +1213,45 @@ async function runWorkflowJsInMainWorld(
     const message = error instanceof Error ? error.message : String(error)
     if (isCspBlocked(message)) {
       const cdp = await runWorkflowJsViaCdp(tab.id, op)
-      if (cdp) return { ...base, ok: true, data: cdp }
+      if (cdp?.ok) {
+        return {
+          ...base,
+          ok: true,
+          data: { result: cdp.result, variables: cdp.variables, logs: cdp.logs },
+        }
+      }
+      if (cdp) return { ...base, error: explainWorkflowCspFailure(message, cdp.error) }
     }
     return { ...base, error: explainJsError(message) }
   }
+}
+
+/**
+ * A page's CSP forbids eval AND the DevTools fallback did not work either.
+ * Workflow-specific wording: the caller is a saved block, not the assistant's
+ * `run_javascript` tool, so "retry with another tool" advice would be wrong.
+ */
+function explainWorkflowCspFailure(cspError: string, fallbackError: string): string {
+  return (
+    `这个页面的内容安全策略（CSP）禁止 eval，扩展的 DevTools 回退也失败了（${fallbackError}）。` +
+    `请换到普通 http(s) 页面运行，或改用浏览器操作块。原始错误：${cspError}`
+  )
 }
 
 /** CSP fallback: run the async `runWorkflowJs` harness through CDP. */
 async function runWorkflowJsViaCdp(
   tabId: number,
   op: Op,
-): Promise<{
-  result?: unknown
-  variables?: Record<string, unknown>
-  logs: { level: string; message: string }[]
-} | null> {
+): Promise<
+  | {
+      ok: true
+      result?: unknown
+      variables?: Record<string, unknown>
+      logs: { level: string; message: string }[]
+    }
+  | { ok: false; error: string }
+  | null
+> {
   if (!chrome?.debugger) return null
   try {
     const value = (await callHarnessViaCdp(
@@ -1225,14 +1269,14 @@ async function runWorkflowJsViaCdp(
           variables?: Record<string, unknown>
           logs?: { level: string; message: string }[]
         }
-      | { ok: false }
+      | { ok: false; error?: string }
       | undefined
     if (value && value.ok) {
-      return { result: value.data, variables: value.variables, logs: value.logs ?? [] }
+      return { ok: true, result: value.data, variables: value.variables, logs: value.logs ?? [] }
     }
-    return null
-  } catch {
-    return null
+    return { ok: false, error: value?.error ?? 'the DevTools channel returned no result' }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
 }
 

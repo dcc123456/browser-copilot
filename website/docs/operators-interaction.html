@@ -1284,6 +1284,13 @@
                 An empty script is an error, and so is a script that throws. Retry or fallback
                 behavior comes from the node&#39;s <strong>On error</strong> policy.
               </li>
+              <li>
+                Some pages forbid evaluating code (a Content Security Policy without
+                <code>unsafe-eval</code>). The operator then retries through the extension&#39;s
+                DevTools channel; if that is also unavailable, the failure names the blocked page
+                instead of the extension&#39;s own CSP error. Switch to a regular http(s) page or
+                use browser-action operators there.
+              </li>
             </ul>
           </section>
           <section data-operator="trigger-event">

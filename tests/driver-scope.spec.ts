@@ -146,10 +146,20 @@ function makeBrowser(opts: {
         b.windows.delete(id)
         return undefined
       }),
-      getLastFocused: vi.fn(async (_opts?: unknown) => {
+      getLastFocused: vi.fn(async (opts?: unknown) => {
         b.calls.getLastFocused += 1
         const w = b.windows.get(b.lastFocusedWindowId)
-        return w ? { id: w.id, type: w.type } : ({} as chrome.windows.Window)
+        if (!w) return {} as chrome.windows.Window
+        const populated = (opts as { populate?: boolean } | undefined)?.populate === true
+        return {
+          id: w.id,
+          type: w.type,
+          ...(populated
+            ? {
+                tabs: [...b.tabs.values()].filter((t) => t.windowId === w.id).map(toTab),
+              }
+            : {}),
+        } as chrome.windows.Window
       }),
       getAll: vi.fn(async (opts?: unknown) => {
         b.calls.getAll.push(opts)
@@ -269,6 +279,28 @@ describe('driver panel-window scope', () => {
 
     const tab = await driver.resolveAutomationTab(undefined, scope)
     expect(tab?.id).toBe(5)
+  })
+
+  it('unscoped resolution uses another injectable tab when the focused window shows chrome://', async () => {
+    // Regression: `active` always won the candidate pick, so a new-tab page in
+    // the focused window hid a perfectly injectable sibling tab — and the run
+    // escalated to "the page forbids eval" after the off-page fallback failed.
+    const b = makeBrowser({
+      tabs: [
+        { id: 10, windowId: 1, url: 'chrome://newtab/', active: true, title: 'New tab' },
+        { id: 11, windowId: 1, url: 'https://kept.example/page', active: false, title: 'Kept' },
+        { id: 12, windowId: 2, url: 'https://other.example/', active: true, title: 'Other' },
+      ],
+      windows: [
+        { id: 1, type: 'normal' },
+        { id: 2, type: 'normal' },
+      ],
+      lastFocusedWindowId: 1,
+    })
+    ;(globalThis as unknown as { __browser: Browser }).__browser = b
+
+    const tab = await driver.resolveAutomationTab()
+    expect(tab?.id).toBe(11)
   })
 
   it('scoped resolution returns undefined instead of crossing into another window', async () => {
