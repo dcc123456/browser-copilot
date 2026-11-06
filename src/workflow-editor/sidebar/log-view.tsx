@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronUp,
   CirclePlay,
+  Copy,
   Flag,
   Info,
   Locate,
@@ -26,7 +27,8 @@ import {
   TriangleAlert,
   type LucideIcon,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { copyText } from '../../lib/clipboard'
 import CodeEditor from '../ui/CodeEditor'
 import { useEditorLocale } from '../locale-context'
 
@@ -219,6 +221,51 @@ function preview(value: unknown): string {
   }
 }
 
+/**
+ * Per-card copy control in the GUI variable view. Each card owns its own
+ * confirmation so the user sees WHICH value landed on the clipboard — the
+ * icon turns into a check for a moment, matching the header's Copy logs.
+ */
+function VariableCopyButton({ value }: { value: unknown }) {
+  const { bt } = useEditorLocale()
+  const [state, setState] = useState<'idle' | 'ok' | 'failed'>('idle')
+
+  useEffect(() => {
+    if (state === 'idle') return
+    const timer = setTimeout(() => setState('idle'), 2000)
+    return () => clearTimeout(timer)
+  }, [state])
+
+  const copy = async () => {
+    try {
+      await copyText(preview(value))
+      setState('ok')
+    } catch {
+      setState('failed')
+    }
+  }
+
+  const label =
+    state === 'ok' ? bt('Copied') : state === 'failed' ? bt('Copy failed') : bt('Copy value')
+  return (
+    <button
+      type="button"
+      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted hover:bg-hover hover:text-ink"
+      title={label}
+      aria-label={label}
+      onClick={() => void copy()}
+    >
+      {state === 'ok' ? (
+        <Check size={13} />
+      ) : state === 'failed' ? (
+        <TriangleAlert size={13} className="text-err" />
+      ) : (
+        <Copy size={13} />
+      )}
+    </button>
+  )
+}
+
 /** The variables-at-block viewer: GUI (name/value cards) + Raw JSON tabs. */
 export function VariablesInspector({
   vars,
@@ -267,7 +314,10 @@ export function VariablesInspector({
           {entries.map(([k, v]) => (
             <div key={k} className="wf-var-card">
               <label>{k}</label>
-              <input readOnly value={preview(v)} />
+              <div className="flex items-center gap-1">
+                <input readOnly value={preview(v)} className="min-w-0 flex-1" />
+                <VariableCopyButton value={v} />
+              </div>
             </div>
           ))}
         </div>
