@@ -283,7 +283,8 @@ describe('replay resolves the recorded references', () => {
     await executeWorkflow(workflowWithInput('iPhone'), { source: 'manual' })
     const opts = engine.runWorkflow.mock.calls[0]![1] as { variables?: Record<string, unknown> }
     // Without this the whole graph would resolve `{{keyword}}` to nothing.
-    expect(opts.variables).toEqual({ keyword: 'iPhone' })
+    // The bag also carries run-wide settings (jobBlacklist), so match the seed.
+    expect(opts.variables).toMatchObject({ keyword: 'iPhone' })
   })
 
   it('lets a caller-supplied value override the default', async () => {
@@ -293,7 +294,7 @@ describe('replay resolves the recorded references', () => {
       variables: { keyword: 'Android' },
     })
     const opts = engine.runWorkflow.mock.calls[0]![1] as { variables?: Record<string, unknown> }
-    expect(opts.variables).toEqual({ keyword: 'Android' })
+    expect(opts.variables).toMatchObject({ keyword: 'Android' })
   })
 })
 

@@ -28,6 +28,7 @@ import { jsonBytes } from './persist-budget'
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
 import { normalizeThinkingProfile } from './thinking'
+import { normalizeJobBlacklist } from './job-blacklist'
 import { DEFAULT_FREE_PROVIDER_ID, defaultFreeProvider } from './free-provider-default'
 import { BUILT_IN_SKILLS } from './builtin-skills'
 import { BUILT_IN_AGENTS } from './builtin-agents'
@@ -130,6 +131,7 @@ export const DEFAULT_SETTINGS: Settings = {
   elementPickerEnabled: false,
   elementPickerFormat: 'html',
   elementPickerSelectOnly: false,
+  jobBlacklist: { companies: [], headhunterPositions: [], excludeHeadhunters: false },
 }
 
 /**
@@ -293,6 +295,7 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     elementPickerFormat: normalizeElementPickerFormat(value.elementPickerFormat),
     elementPickerSelectOnly:
       typeof value.elementPickerSelectOnly === 'boolean' ? value.elementPickerSelectOnly : false,
+    jobBlacklist: normalizeJobBlacklist(value.jobBlacklist),
   }
 }
 

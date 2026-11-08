@@ -61,6 +61,7 @@ function settingsWith(model: string, baseUrl: string): Settings {
     elementPickerEnabled: false,
     elementPickerFormat: 'html',
     elementPickerSelectOnly: false,
+    jobBlacklist: { companies: [], headhunterPositions: [], excludeHeadhunters: false },
   } as Settings
 }
 

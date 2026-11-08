@@ -20,6 +20,7 @@ import {
   DEFAULT_FREE_PROVIDER_MODEL,
   DEFAULT_FREE_PROVIDER_PRESET_ID,
 } from './free-provider-default'
+import { normalizeJobBlacklist, type JobBlacklist } from './job-blacklist'
 import { LOCALES, type LocaleSetting, type Messages } from './i18n'
 import { normalizeLocalAgentBindings } from './storage'
 import { normalizeThinkingProfile, type ThinkingLevel } from './thinking'
@@ -629,6 +630,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   elementPickerEnabled: boolean
   elementPickerFormat: ElementPickerFormat
   elementPickerSelectOnly: boolean
+  jobBlacklist: JobBlacklist
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -732,5 +734,6 @@ export function normalizeSettingsPayload(raw: unknown): {
     elementPickerFormat: normalizeElementPickerFormat(value.elementPickerFormat),
     elementPickerSelectOnly:
       typeof value.elementPickerSelectOnly === 'boolean' ? value.elementPickerSelectOnly : false,
+    jobBlacklist: normalizeJobBlacklist(value.jobBlacklist),
   }
 }
