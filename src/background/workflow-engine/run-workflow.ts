@@ -567,7 +567,7 @@ export async function executeWorkflow(
         onPause: (pause) => {
           const label = nodeLabel(workflow, pause.nodeId)
           updateRunDebug(runId, { nodeId: pause.nodeId, label, at: pause.at })
-          recordSnapshot(runId, pause.nodeId, label, pause.variables)
+          recordSnapshot(runId, pause.nodeId, pause.variables)
           addStep(runId, 'status', `已暂停在「${label}」/ Paused at "${label}"`, {
             nodeId: pause.nodeId,
             label,
@@ -961,7 +961,7 @@ export async function executeWorkflow(
       },
       onSnapshot: opts.debug
         ? (nodeId, _blockId, variables) => {
-            recordSnapshot(runId, nodeId, nodeLabel(workflow, nodeId), variables)
+            recordSnapshot(runId, nodeId, variables)
           }
         : undefined,
       // M4 checkpoints: one entry per settled node, persisted to

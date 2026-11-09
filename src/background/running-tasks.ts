@@ -17,6 +17,13 @@
  * @module background/running-tasks
  */
 
+import {
+  capPersistedStrings,
+  jsonBytes,
+  MAX_PERSISTED_STRING,
+  shedBulkDataUrls,
+} from '../lib/persist-budget'
+
 /** Where a run was triggered from. */
 export type RunSource = 'chat' | 'schedule' | 'feishu' | 'manual'
 
@@ -32,7 +39,11 @@ export interface RunStep {
   nodeId?: string
   /** Resolved block label, for tool/block lines. */
   label?: string
-  /** Debug-mode variable snapshot for this block (keyed variable map). */
+  /**
+   * Debug-mode variables at this block, bounded (see {@link boundedVariables}).
+   * Only the newest finished runs keep them, so the live board cannot hoard
+   * every screenshot a debug session captured.
+   */
   vars?: Record<string, unknown>
 }
 
@@ -91,12 +102,6 @@ export interface RunningTask {
   windowId?: number
   /** Whether that window is the shared plugin window or this run's own. */
   runWindowKind?: RunWindowKind
-  /**
-   * Debug-mode per-block variable snapshots, in execution order: node id →
-   * { label, at, variables }. Populated only when a workflow runs with debug
-   * mode on; the logs viewer reads them to inspect values at each block.
-   */
-  snapshots?: { nodeId: string; label: string; at: number; variables: Record<string, unknown> }[]
   /** Shared abort signal; call abort() to request cancellation. */
   controller: AbortController
   /** Invoked once when the run is cancelled from the board. */
@@ -129,8 +134,6 @@ export interface FinishedTask {
   windowId?: number
   /** Whether that window was shared or the run's own dedicated one. */
   runWindowKind?: RunWindowKind
-  /** Debug-mode per-block variable snapshots (see RunningTask.snapshots). */
-  snapshots?: { nodeId: string; label: string; at: number; variables: Record<string, unknown> }[]
   /**
    * How the run recovered (an AI repair, a checkpoint resume, a takeover), and
    * the category of the failure it overcame. `finishRun` fills these from its
@@ -149,6 +152,83 @@ const runs = new Map<string, RunningTask>()
 /** Recent finished runs, newest first. Bounded to keep memory tiny. */
 const finished: FinishedTask[] = []
 const MAX_FINISHED = 30
+
+/**
+ * Longest step list kept per run. A loop over a paginated list can emit
+ * thousands of lines, and the board re-serializes every step on each poll; the
+ * newest lines are what a live log or a post-mortem needs, so the oldest are
+ * shed once the cap is reached.
+ */
+const MAX_RUN_STEPS = 500
+
+/**
+ * Finished runs whose debug variables stay inspectable. The logs viewer polls
+ * the whole board, so older runs keep their trace but drop the (much larger)
+ * variable bags — after a restart they have none anyway, since the durable run
+ * log never stores them.
+ */
+const KEEP_FINISHED_VAR_RUNS = 3
+
+/** JSON budget for one block's variables — enough to inspect, bounded to survive. */
+const MAX_RUN_VARS_CHARS = 32 * 1024
+
+/** Top-level variable names kept before the rest are summarized by a count. */
+const MAX_RUN_VAR_KEYS = 200
+
+/**
+ * Bounds a debug variable bag before it is attached to a step.
+ *
+ * Debug mode hands over the run's WHOLE variable map after every block, which
+ * is how a screenshot or a generated image (a multi-megabyte data URL) ends up
+ * retained per block and re-cloned to the editor on every 800 ms poll. Bulk data
+ * URLs go first, then over-long strings are truncated, then a per-bag budget
+ * keeps the inspector from turning one huge array into the new problem. Skipped
+ * values keep a self-describing marker so the inspector stays honest.
+ */
+function boundedVariables(variables: Record<string, unknown>): Record<string, unknown> {
+  const trimmed = capPersistedStrings(
+    shedBulkDataUrls(variables),
+    MAX_PERSISTED_STRING,
+    'truncated',
+  ) as Record<string, unknown>
+  if (jsonBytes(trimmed) <= MAX_RUN_VARS_CHARS) return trimmed
+
+  const out: Record<string, unknown> = {}
+  let remaining = MAX_RUN_VARS_CHARS
+  let omittedKeys = 0
+  for (const [name, value] of Object.entries(trimmed)) {
+    if (Object.keys(out).length >= MAX_RUN_VAR_KEYS) {
+      omittedKeys += 1
+      continue
+    }
+    const size = jsonBytes(value)
+    if (size <= remaining) {
+      out[name] = value
+      remaining -= size
+    } else {
+      out[name] = `[value omitted from the run log: ${size} chars]`
+    }
+  }
+  if (omittedKeys > 0) out['__omittedVariables'] = `${omittedKeys} more variables`
+  return out
+}
+
+/** Appends a step, shedding the oldest line once the per-run cap is reached. */
+function appendStep(task: RunningTask, step: RunStep): void {
+  task.steps.push(step)
+  if (task.steps.length > MAX_RUN_STEPS) task.steps.shift()
+}
+
+/** Drops the variable bags of finished runs past {@link KEEP_FINISHED_VAR_RUNS}. */
+function shedVarsFromOlderFinished(): void {
+  for (let index = KEEP_FINISHED_VAR_RUNS; index < finished.length; index += 1) {
+    const run = finished[index]
+    if (!run) continue
+    for (const step of run.steps) {
+      if (step.vars !== undefined) delete step.vars
+    }
+  }
+}
 
 /**
  * Hook invoked when a run settles. The background script registers it to
@@ -220,36 +300,39 @@ export function addStep(
 ): void {
   const task = runs.get(runId)
   if (!task) return
-  task.steps.push({
+  appendStep(task, {
     at: Date.now(),
     kind,
-    text,
+    // A page read or an error can be hundreds of kilobytes of text; the log
+    // line keeps its head and a size marker instead of the whole payload.
+    text: capPersistedStrings(text, MAX_PERSISTED_STRING, 'truncated') as string,
     ...(extra?.nodeId ? { nodeId: extra.nodeId } : {}),
     ...(extra?.label ? { label: extra.label } : {}),
-    ...(extra?.vars ? { vars: extra.vars } : {}),
+    ...(extra?.vars ? { vars: boundedVariables(extra.vars) } : {}),
   })
 }
 
 /**
- * Records a debug-mode per-block variable snapshot. Also mirrored onto the
- * matching "tool" step so step rows can reveal the variables at that block.
+ * Records the debug-mode variables at a block onto that block's "tool" step —
+ * the one row the inspector opens from. There is no parallel snapshot array:
+ * duplicating the same bag in two shapes doubles what the board ships to the
+ * editor on every poll.
+ *
+ * A snapshot always arrives after its block's tool step (the engine emits the
+ * block marker on entry), so a missing one is a dropped or capped step, not a
+ * reason to invent a second anchor.
  */
 export function recordSnapshot(
   runId: string,
   nodeId: string,
-  label: string,
   variables: Record<string, unknown>,
 ): void {
   const task = runs.get(runId)
   if (!task) return
-  const entry = { nodeId, label, at: Date.now(), variables }
-  if (!task.snapshots) task.snapshots = []
-  task.snapshots.push(entry)
-  // Attach to the most recent step for this node (the block's tool header).
   for (let i = task.steps.length - 1; i >= 0; i--) {
     const step = task.steps[i]
     if (step && step.nodeId === nodeId && step.kind === 'tool') {
-      step.vars = variables
+      step.vars = boundedVariables(variables)
       break
     }
   }
@@ -346,18 +429,28 @@ export function finishRun(runId: string, options?: FinishOptions): void {
     ...(typeof task.windowId === 'number' ? { windowId: task.windowId } : {}),
     ...(task.runWindowKind ? { runWindowKind: task.runWindowKind } : {}),
     outcome: options?.outcome ?? (task.controller.signal.aborted ? 'cancelled' : 'ok'),
-    summary: options?.summary,
-    ...(options?.error ? { error: options.error } : {}),
+    ...(options?.summary
+      ? {
+          summary: capPersistedStrings(
+            options.summary,
+            MAX_PERSISTED_STRING,
+            'truncated',
+          ) as string,
+        }
+      : {}),
+    ...(options?.error
+      ? { error: capPersistedStrings(options.error, MAX_PERSISTED_STRING, 'truncated') as string }
+      : {}),
     steps: task.steps,
     ...(options?.failureCategory ? { failureCategory: options.failureCategory } : {}),
     ...(options?.resumed ? { resumed: true } : {}),
     ...(options?.repaired ? { repaired: true } : {}),
     ...(options?.takeover ? { takeover: true } : {}),
     ...(options?.outputs ? { outputs: options.outputs } : {}),
-    ...(task.snapshots && task.snapshots.length ? { snapshots: task.snapshots } : {}),
   }
   finished.unshift(entry)
   if (finished.length > MAX_FINISHED) finished.length = MAX_FINISHED
+  shedVarsFromOlderFinished()
   // Persist asynchronously; failures must never break the in-memory board.
   if (persistFinished) {
     try {
@@ -426,7 +519,7 @@ export function cancelRun(runId: string): boolean {
   // Record immediate feedback so the board shows the termination was accepted
   // before the in-flight work (an LLM request, a page action, a tab load) has
   // actually unwound — otherwise the terminate button looks unresponsive.
-  task.steps.push({ at: Date.now(), kind: 'status', text: 'Cancelling…' })
+  appendStep(task, { at: Date.now(), kind: 'status', text: 'Cancelling…' })
   task.controller.abort()
   if (task.onCancel) {
     try {
@@ -438,7 +531,8 @@ export function cancelRun(runId: string): boolean {
   return true
 }
 
-/** Test helper: clears all tracked runs. */
+/** Test helper: clears all tracked runs and the finished board. */
 export function _resetRunningForTests(): void {
   runs.clear()
+  finished.length = 0
 }

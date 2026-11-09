@@ -1043,16 +1043,18 @@ export default function EditorApp() {
           setDebugPause((current) => (current === null ? current : null))
           return
         }
-        const snapshot = active.snapshots
-          ? [...active.snapshots].reverse().find((entry) => entry.nodeId === paused.nodeId)
-          : undefined
+        // The pause's variables ride on that block's tool step; the board no
+        // longer ships a second, duplicate snapshot array.
+        const vars = [...active.steps]
+          .reverse()
+          .find((step) => step.nodeId === paused.nodeId && step.vars)?.vars
         setDebugPause((current) => {
           if (
             current &&
             current.runId === active.runId &&
             current.nodeId === paused.nodeId &&
             current.at === paused.at &&
-            (current.variables !== undefined || snapshot === undefined)
+            (current.variables !== undefined || vars === undefined)
           ) {
             return current
           }
@@ -1061,7 +1063,7 @@ export default function EditorApp() {
             nodeId: paused.nodeId,
             label: paused.label,
             at: paused.at,
-            ...(snapshot ? { variables: snapshot.variables } : {}),
+            ...(vars ? { variables: vars } : {}),
           }
         })
       } catch {

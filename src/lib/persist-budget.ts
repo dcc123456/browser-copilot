@@ -62,12 +62,20 @@ function mapPersistedStrings(
  * `limit` is lowered by callers persisting a *narrow* budget — the cross-task
  * handoff bag, where a whole article body is not the payload — so the same
  * walker and depth rules apply instead of a second truncation implementation.
+ *
+ * `reason` names why the value was cut. The default describes a persisted key
+ * that dropped it; the run board passes a different word because those values
+ * stay in memory and are only bounded, never written.
  */
-export function capPersistedStrings(value: unknown, limit: number = MAX_PERSISTED_STRING): unknown {
+export function capPersistedStrings(
+  value: unknown,
+  limit: number = MAX_PERSISTED_STRING,
+  reason = 'not persisted',
+): unknown {
   return mapPersistedStrings(value, (text) =>
     text.length <= limit
       ? text
-      : `${text.slice(0, Math.min(PREFIX_CHARS, limit))}… (${text.length} chars, not persisted)`,
+      : `${text.slice(0, Math.min(PREFIX_CHARS, limit))}… (${text.length} chars, ${reason})`,
   )
 }
 

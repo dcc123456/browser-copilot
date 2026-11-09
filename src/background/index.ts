@@ -1299,7 +1299,6 @@ function runningBoardsView(workflowIdFilter?: string): {
     summary: r.summary,
     error: r.error,
     steps: r.steps,
-    ...(r.snapshots ? { snapshots: r.snapshots } : {}),
   })
   const matches = <T extends { workflowId?: string }>(r: T): boolean =>
     !workflowIdFilter || r.workflowId === workflowIdFilter
@@ -1316,7 +1315,6 @@ function runningBoardsView(workflowIdFilter?: string): {
         steps: r.steps,
         ...(typeof r.windowId === 'number' ? { windowId: r.windowId } : {}),
         ...(r.runWindowKind ? { runWindowKind: r.runWindowKind } : {}),
-        ...(r.snapshots ? { snapshots: r.snapshots } : {}),
         ...(r.testing ? { testing: true } : {}),
         ...(r.debug ? { debug: r.debug } : {}),
       })),

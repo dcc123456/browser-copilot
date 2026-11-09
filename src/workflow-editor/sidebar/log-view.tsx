@@ -44,13 +44,6 @@ export interface Step {
   vars?: Record<string, unknown>
 }
 
-export interface Snapshot {
-  nodeId: string
-  label: string
-  at: number
-  variables: Record<string, unknown>
-}
-
 export interface RunView {
   runId: string
   label: string
@@ -61,7 +54,6 @@ export interface RunView {
   summary?: string
   error?: string
   steps: Step[]
-  snapshots?: Snapshot[]
 }
 
 export function clock(ts: number): string {
@@ -95,13 +87,12 @@ export interface TraceEntry {
 }
 
 /**
- * Flatten a run's steps + snapshots into Automa-style timeline entries. The
- * "tool" step marks a block boundary; its following output lines attach to it.
+ * Flatten a run's steps into Automa-style timeline entries. The "tool" step
+ * marks a block boundary; its following output lines attach to it, and debug
+ * variables ride on that same step.
  */
 export function buildTrace(run: RunView): TraceEntry[] {
   const entries: TraceEntry[] = []
-  const varsByNode = new Map<string, Record<string, unknown>>()
-  for (const s of run.snapshots ?? []) varsByNode.set(s.nodeId, s.variables)
 
   let current: TraceEntry | null = null
 
@@ -123,7 +114,7 @@ export function buildTrace(run: RunView): TraceEntry[] {
         description: '',
         at: step.at,
         lines: [],
-        vars: step.vars ?? (step.nodeId ? varsByNode.get(step.nodeId) : undefined),
+        vars: step.vars,
       }
     } else if (current) {
       current.lines.push({ kind: step.kind, text: step.text })

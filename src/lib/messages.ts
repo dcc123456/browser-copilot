@@ -113,8 +113,6 @@ export interface RunningTaskView {
   testing?: boolean
   /** Breakpoint pause of a testing run; absent while it executes. */
   debug?: { paused: { nodeId: string; label: string; at: number } }
-  /** Debug-mode per-block variable snapshots (the pause's Data view reads one). */
-  snapshots?: { nodeId: string; label: string; at: number; variables: Record<string, unknown> }[]
 }
 
 /** A recently completed task as shown on the Tasks tab board. */

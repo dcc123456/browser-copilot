@@ -24,10 +24,16 @@ const run: RunView = {
   finishedAt: START + 900,
   outcome: 'ok',
   steps: [
-    { at: START, kind: 'tool', nodeId: 'n1', label: '读取列表', text: '读取列表' },
+    {
+      at: START,
+      kind: 'tool',
+      nodeId: 'n1',
+      label: '读取列表',
+      text: '读取列表',
+      vars: { rows: [{ a: 1 }] },
+    },
     { at: START + 10, kind: 'result', nodeId: 'n1', text: '读取完成' },
   ],
-  snapshots: [{ nodeId: 'n1', label: '读取列表', at: START + 10, variables: { rows: [{ a: 1 }] } }],
 }
 
 describe('run detail opens on the trace', () => {
