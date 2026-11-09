@@ -667,6 +667,11 @@ export interface Messages {
   chatReattached: string
   chatConnectionDropped: string
   /**
+   * Replay annotation on a conversation whose turn was cut off by a crash or
+   * an abnormal exit (the stored state still claimed a running turn).
+   */
+  chatTurnInterrupted: string
+  /**
    * Status line while a dropped stream is being retried. `retry`/`retries`
    * count attempts after the failure; `seconds` is the wait before the next;
    * `continuing` says the reply resumes from what was already written.
@@ -2495,6 +2500,8 @@ const en: Messages = {
   chatReattached: 'Still working — reattached to the run.',
   chatConnectionDropped:
     'The connection dropped mid-reply. Any answer was saved to this conversation — send another message to continue.',
+  chatTurnInterrupted:
+    'The previous turn was interrupted (the extension crashed or exited before it finished). Everything saved so far is shown above — send another message to continue.',
   chatReconnecting: ({ retry, retries, seconds, continuing }) =>
     continuing
       ? `Connection lost. Reconnecting in ${seconds}s (${retry}/${retries}) — continuing the reply where it stopped…`
@@ -4253,6 +4260,8 @@ const zhCN: Messages = {
   chatAttachmentTotalTooLarge: '附件总大小超出限制（8 MB）',
   chatReattached: '任务仍在进行，已重新接入。',
   chatConnectionDropped: '回复过程中连接中断。已生成的内容已保存到本次对话——再发一条消息即可继续。',
+  chatTurnInterrupted:
+    '上一轮任务被中断（扩展在完成前崩溃或异常退出），上方是已经保存的内容——再发一条消息即可继续。',
   chatReconnecting: ({ retry, retries, seconds, continuing }) =>
     continuing
       ? `连接中断，${seconds}s 后自动重连（第 ${retry}/${retries} 次）——从已输出的内容继续…`

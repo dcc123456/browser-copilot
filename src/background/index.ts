@@ -153,6 +153,7 @@ import {
   readTokenUsage,
 } from '../lib/storage'
 import { compactConversationOnRequest, runAgentTurn } from './agent'
+import { createProgressCheckpoint } from '../lib/progress-checkpoint'
 import {
   clearDraft,
   composeWorkflowFromDraft,
@@ -3667,6 +3668,16 @@ chrome.runtime.onConnect.addListener((port) => {
         // This is the full conversation the user saw, not a redacted summary,
         // so continuing a thread shows exactly where it left off.
         const messages = toRestoreMessages(history)
+        // A turn mark that says "running" with no live channel is the residue
+        // of a crash, OOM kill or extension reload: `finally` never retired it.
+        // No turn can still be running without a channel, so the mark is stale
+        // and the panel gets told the thread was cut off mid-answer.
+        const interrupted = state?.running === true && channel === undefined
+        if (interrupted) {
+          // Retire it before answering: a reconnect that lands mid-write must
+          // not report the same interruption twice.
+          await setTurnState({ conversationId, running: false, at: Date.now() }).catch(() => {})
+        }
 
         send({
           type: 'restore',
@@ -3674,6 +3685,7 @@ chrome.runtime.onConnect.addListener((port) => {
           // Trust the live registry over stored state: if the worker was evicted
           // and respawned, no turn can actually still be running.
           running: channel !== undefined,
+          ...(interrupted ? { interrupted: true } : {}),
         })
         // Then take over the stream: this connection becomes the turn's sink and
         // gets the lines emitted after the transcript snapshot above, so a panel
@@ -3749,8 +3761,21 @@ chrome.runtime.onConnect.addListener((port) => {
       source: 'chat',
       controller: turnController,
     })
+    // The transcript is shared with the progress checkpointer below: it holds
+    // this same array while the turn appends to it.
+    let history: WireMessage[] = []
+    // A crash or OOM kill skips the turn's `finally`, so the one save there is
+    // no save at all for the conversation that was mid-answer (and a first turn
+    // leaves a history entry whose transcript does not exist). Checkpoints keep
+    // the in-flight work durable at a bounded write rate.
+    const progress = createProgressCheckpoint((messages) =>
+      saveConversation(conversationId, messages),
+    )
     const sendWithTracking = (msg: AgentServerMessage): void => {
       emitToPanel(turnChannel, msg)
+      // `phase` carries no transcript content; every other line is a point
+      // where the user-visible conversation has grown.
+      if (msg.type !== 'phase') progress.schedule(history)
       if (msg.type === 'tool.start') recordStep('tool', `→ ${msg.name}`, trackedRun.runId)
       else if (msg.type === 'tool.result')
         recordStep('result', `← ${msg.summary}`, trackedRun.runId)
@@ -3763,7 +3788,6 @@ chrome.runtime.onConnect.addListener((port) => {
     void setTurnState({ conversationId, running: true, at: Date.now() })
 
     void (async () => {
-      let history: WireMessage[] = []
       let failure: string | undefined
       try {
         sendWithTracking({ type: 'phase', phase: 'preparing' })
@@ -3853,6 +3877,9 @@ chrome.runtime.onConnect.addListener((port) => {
         // Persist metadata so the conversation appears in the history list;
         // fall back to an attachment-derived label for files-only messages.
         await touchConversation(conversationId, message.text || attachmentLabel)
+        // The user's own message becomes durable before the model is asked
+        // anything: the first write is immediate, later ones are throttled.
+        progress.schedule(history)
 
         // Slash-command interception: `/run <workflow>` executes a saved
         // workflow directly instead of feeding the message to the model. On a
@@ -3934,6 +3961,9 @@ chrome.runtime.onConnect.addListener((port) => {
         failure = (await localizeLlmFailure(error)).message
         sendWithTracking({ type: 'error', message: failure })
       } finally {
+        // Cancel a pending checkpoint and wait for one already in flight, so
+        // the authoritative save below is the last write for this key.
+        await progress.flush()
         // Persist whatever was accumulated, including partial tool exchanges, so
         // an interrupted turn does not lose the conversation. A failed save is
         // surfaced rather than silently swallowed: losing a transcript the user

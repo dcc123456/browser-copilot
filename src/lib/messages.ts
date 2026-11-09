@@ -1160,6 +1160,12 @@ export type AgentServerMessage =
         skillName?: string
       }[]
       running: boolean
+      /**
+       * The stored turn state still said "running" but no live turn exists —
+       * the previous turn was cut off (crash, OOM kill, reload). The transcript
+       * is whatever was checkpointed; the panel explains why it stops.
+       */
+      interrupted?: boolean
     }
 
 /** Typed `sendMessage` wrapper; rejects when the worker reports a failure. */

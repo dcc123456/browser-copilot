@@ -2339,7 +2339,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
             // `messages` is defensively defaulted because a stale worker from a
             // previous version may not send it, and mapping undefined would
             // crash the whole panel.
-            const restored = (message.messages ?? []).map((entry) => {
+            const restored: Entry[] = (message.messages ?? []).map((entry) => {
               if (entry.role === 'tool') {
                 // Replay lines are preformatted `← name: summary`; recover the
                 // structured fields so historical turns render the same card
@@ -2363,6 +2363,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 ...(entry.role === 'user' && entry.skillName ? { skillName: entry.skillName } : {}),
               }
             })
+            // The stored turn state still claimed a running turn but no worker
+            // owns it: the previous turn died mid-answer. Say so at the seam,
+            // or the transcript just stops with no explanation.
+            if (message.interrupted) {
+              restored.push({
+                id: nextId(),
+                role: 'status',
+                text: tRef.current.chatTurnInterrupted,
+              })
+            }
             setEntries(restored)
             // A supplement injected while this panel was away announced itself on
             // the connection that had just closed, so reconcile against the
