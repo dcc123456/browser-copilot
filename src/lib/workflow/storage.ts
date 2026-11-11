@@ -17,6 +17,7 @@ import { withKeyLock } from '../key-lock'
 import { shedBulkDataUrls } from '../persist-budget'
 import { isMarketplaceRef } from '../marketplace/meta'
 import { migrateWorkflow } from './migrate'
+import { deleteOperatorChatSessionsForWorkflow } from './operator-chat-sessions'
 import { normalizeGoalVerification } from './goal-verification-record'
 import { normalizeTrialRun } from './trial-run'
 import { pageContextOf } from './page-context'
@@ -313,7 +314,14 @@ export async function deleteWorkflow(id: string): Promise<void> {
   await deleteWorkflows([id])
 }
 
-/** Removes several workflows in one write; unknown ids are ignored. */
+/**
+ * Removes several workflows in one write; unknown ids are ignored.
+ *
+ * This is the only delete funnel (single, bulk and group deletes all land
+ * here), so it is also where workflow-scoped data is cascaded: the editor AI
+ * assistant keeps its saved chats under `operatorChat:<id>`, which must not
+ * outlive the workflow the user deleted.
+ */
 export async function deleteWorkflows(ids: string[]): Promise<void> {
   if (ids.length === 0) return
   await withKeyLock(KEY_WORKFLOWS, async () => {
@@ -323,6 +331,9 @@ export async function deleteWorkflows(ids: string[]): Promise<void> {
       [KEY_WORKFLOWS]: list.filter((workflow) => !wanted.has(workflow.id)),
     })
   })
+  // Outside the workflows lock: the chat keys have their own locks, so nesting
+  // here would only widen the critical section without adding atomicity.
+  for (const id of ids) await deleteOperatorChatSessionsForWorkflow(id)
 }
 
 /**

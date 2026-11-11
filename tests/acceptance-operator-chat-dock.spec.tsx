@@ -218,6 +218,9 @@ const render = async (): Promise<void> => {
     root.render(
       createElement(OperatorChatDock, {
         t,
+        // Unsaved workflow: no stable id, so chat history is inert here. The
+        // persistence path has its own tests below.
+        workflowId: null,
         getContext: () => context,
         onApply: (request) => {
           requests.push(request)

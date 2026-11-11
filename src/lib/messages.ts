@@ -523,6 +523,18 @@ export type Command =
   | { type: 'workflows.resumePoint'; id: string }
   | { type: 'workflows.running'; workflowId?: string }
 
+  // --- Editor AI assistant chat history (per workflow) ---
+  /** All saved chats of one workflow, most recently active first. */
+  | { type: 'operatorChat.sessions'; workflowId: string }
+  /** Whole-session upsert; the dock sends a JSON snapshot of its transcript. */
+  | {
+      type: 'operatorChat.sessions.save'
+      workflowId: string
+      session: import('./workflow/operator-chat-sessions').OperatorChatSession
+    }
+  /** Forget one saved chat of a workflow. */
+  | { type: 'operatorChat.sessions.delete'; workflowId: string; sessionId: string }
+
   // --- Workflow recovery protocol (spec §11 · Commit 10) ---
   /**
    * Single-entry recovery protocol. Carries an envelope with a unique request
@@ -870,6 +882,12 @@ export type CommandResult =
     }
   | { type: 'workflows.takeoverDiscard' }
   | { type: 'workflows.running'; runs: RunningTaskView[]; finished: FinishedTaskView[] }
+  | {
+      type: 'operatorChat.sessions'
+      sessions: import('./workflow/operator-chat-sessions').OperatorChatSession[]
+    }
+  | { type: 'operatorChat.sessions.save'; ok: boolean }
+  | { type: 'operatorChat.sessions.delete'; ok: boolean }
   | { type: 'workflows.runInputAnswer'; ok: boolean }
   | { type: 'record.start'; recording: boolean }
   | {

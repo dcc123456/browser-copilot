@@ -1983,6 +1983,7 @@ export default function EditorApp() {
             onApply={applyOperatorsFromAi}
             onUndo={undoAiBatch}
             t={t}
+            workflowId={workflowId}
           />
 
           {debugPause && (

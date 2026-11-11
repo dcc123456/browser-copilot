@@ -190,6 +190,11 @@ import {
   setWorkflowGroup,
 } from '../lib/workflow/storage'
 import {
+  deleteOperatorChatSession,
+  listOperatorChatSessions,
+  saveOperatorChatSession,
+} from '../lib/workflow/operator-chat-sessions'
+import {
   deleteWorkflowGroup,
   listWorkflowGroups,
   reorderWorkflowGroups,
@@ -1906,6 +1911,20 @@ async function handleCommand(
       await deleteWorkflow(command.id)
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.delete' }
+
+    // Editor AI assistant chat history. The dock owns the transcript; the
+    // worker owns the durable copy so file-backed storage stays in one context.
+    case 'operatorChat.sessions':
+      return {
+        type: 'operatorChat.sessions',
+        sessions: await listOperatorChatSessions(command.workflowId),
+      }
+    case 'operatorChat.sessions.save':
+      await saveOperatorChatSession(command.workflowId, command.session)
+      return { type: 'operatorChat.sessions.save', ok: true }
+    case 'operatorChat.sessions.delete':
+      await deleteOperatorChatSession(command.workflowId, command.sessionId)
+      return { type: 'operatorChat.sessions.delete', ok: true }
 
     case 'workflows.parameterValues': {
       const workflow = await getWorkflow(command.id)

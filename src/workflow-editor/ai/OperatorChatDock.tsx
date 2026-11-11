@@ -9,9 +9,12 @@
  * the source of truth). The model's own output streams in over
  * `workflows.operatorAdviseEvent` while it writes and is kept behind a disclosure
  * afterwards. Undo removes exactly the last landed batch or restores exactly the
- * snapshot the last in-place change took. Nothing is verified by running, and the
- * transcript lives only in this component's state
- * (specs/2026-10-19-editor-operator-ai-chat-design.md,
+ * snapshot the last in-place change took. Nothing is verified by running.
+ * The transcript is kept in state while the dock is open and persisted as one
+ * of the workflow's saved chats (`operatorChat:<workflowId>`), so it survives a
+ * reload of the editor and disappears with the workflow
+ * (specs/2026-11-11-workflow-editor-improvements-design.md §2,
+ * specs/2026-10-19-editor-operator-ai-chat-design.md,
  * specs/2026-10-19-operator-ai-observe-and-edit-design.md §4,
  * specs/2026-10-22-operator-assistant-thinking-output-vocabulary-and-pending-picks-design.md §3).
  *
@@ -29,16 +32,19 @@ import {
   GripHorizontal,
   History,
   Loader2,
+  MessagesSquare,
   MousePointerClick,
   RotateCcw,
   Send,
   Square,
   SquarePen,
+  Trash2,
   X,
 } from 'lucide-react'
 import { sendCommand } from '../../lib/messages'
 import { isNearBottom } from '../../lib/scroll'
 import { toast } from '../../ui/toast'
+import { confirmDialog } from '../../ui/confirm'
 import {
   isObservableBlock,
   isOperatorChainAction,
@@ -61,6 +67,7 @@ import type {
   OperatorTargetProblem,
   PickedElement,
 } from '../../lib/workflow/operator-advise'
+import type { OperatorChatSession } from '../../lib/workflow/operator-chat-sessions'
 import { useEditorLocale } from '../locale-context'
 import { describePickFailure, requestElementPick } from '../blocks/shared/element-pick'
 import type { EditorStringKey, TranslateFn } from '../i18n'
@@ -118,6 +125,9 @@ export interface OperatorChatContext {
 
 export interface OperatorChatDockProps {
   t: TranslateFn
+  /** Saved chats are scoped to a workflow. `null` (unsaved workflow) disables
+   *  history entirely — there is no stable id to bind the records to. */
+  workflowId: string | null
   /** Read at send time: the canvas may have moved on since the dock rendered. */
   getContext: () => OperatorChatContext
   /** Land the answer on the canvas and report what happened. */
@@ -185,6 +195,74 @@ interface PendingOffer {
 function makeSessionId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
   return `operator-advise-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * A stored transcript is untrusted JSON at this boundary: it may come from an
+ * older build or a hand-edited data file. Keep only fields a row can render,
+ * and drop the two interactive states on purpose — a pending page `offer`
+ * cannot be resumed after reload (it would block the composer), and a `landing`
+ * would show an Undo button whose canvas snapshot no longer exists.
+ */
+function hydrateTurns(value: unknown[]): Turn[] {
+  const rows: Turn[] = []
+  for (const entry of value) {
+    if (!isRecord(entry)) continue
+    if (entry.role !== 'user' && entry.role !== 'assistant') continue
+    if (typeof entry.content !== 'string') continue
+    const turn: Turn = { role: entry.role, content: entry.content }
+    if (typeof entry.raw === 'string') turn.raw = entry.raw
+    if (typeof entry.reasoning === 'string') turn.reasoning = entry.reasoning
+    if (typeof entry.thinkingSkippedModel === 'string')
+      turn.thinkingSkippedModel = entry.thinkingSkippedModel
+    if (typeof entry.observed === 'string') turn.observed = entry.observed
+    if (entry.failed === true) turn.failed = true
+    if (entry.lastRunMissing === true) turn.lastRunMissing = true
+    if (
+      isRecord(entry.page) &&
+      typeof entry.page.url === 'string' &&
+      typeof entry.page.title === 'string'
+    )
+      turn.page = { url: entry.page.url, title: entry.page.title }
+    if (isRecord(entry.lastRun) && typeof entry.lastRun.outcome === 'string')
+      turn.lastRun = {
+        outcome: entry.lastRun.outcome,
+        ...(typeof entry.lastRun.finishedAt === 'number'
+          ? { finishedAt: entry.lastRun.finishedAt }
+          : {}),
+      }
+    if (isRecord(entry.screenshot) && typeof entry.screenshot.taken === 'boolean')
+      turn.screenshot = {
+        route: entry.screenshot.route === 'described' ? 'described' : 'inline',
+        taken: entry.screenshot.taken,
+        ...(typeof entry.screenshot.error === 'string' ? { error: entry.screenshot.error } : {}),
+      }
+    if (Array.isArray(entry.proposals)) {
+      const proposals = entry.proposals
+        .filter(isRecord)
+        .filter((p) => typeof p.blockId === 'string' && isRecord(p.data))
+        .map((p) => ({
+          blockId: p.blockId as string,
+          data: p.data as Record<string, unknown>,
+          rationale: typeof p.rationale === 'string' ? p.rationale : '',
+        }))
+      if (proposals.length > 0) turn.proposals = proposals
+    }
+    rows.push(turn)
+  }
+  return rows
+}
+
+/** The list label comes from the first thing the user actually asked. */
+function titleOfTurns(rows: readonly Turn[], fallback: string): string {
+  const first = rows.find((row) => row.role === 'user' && row.content.trim())
+  const text = (first?.content ?? '').replace(/\s+/g, ' ').trim()
+  if (!text) return fallback
+  return text.length > 40 ? `${text.slice(0, 39)}…` : text
 }
 
 /** How tall the user may drag the composer: tall enough for a long ask, short
@@ -400,6 +478,7 @@ function Offer({
 
 export default function OperatorChatDock({
   t,
+  workflowId,
   getContext,
   onApply,
   onUndo,
@@ -409,6 +488,10 @@ export default function OperatorChatDock({
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [atBottom, setAtBottom] = useState(true)
+  // --- Saved chats, scoped to `workflowId` ---
+  const [sessions, setSessions] = useState<OperatorChatSession[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
   // Grounding is on by default — reading a page has no side effects, and a
   // parameter taken from the page is the whole point of asking in the editor.
   const [readPage, setReadPage] = useState(true)
@@ -436,6 +519,87 @@ export default function OperatorChatDock({
     | null
   >(null)
   const logRef = useRef<HTMLDivElement>(null)
+  /** Ref mirrors so the save path never goes stale between render and response. */
+  const sessionsRef = useRef<OperatorChatSession[]>([])
+  const activeSessionIdRef = useRef<string | null>(null)
+  /** The exact array replaced by a load/switch/new-chat. Identity-matched so a
+   *  transcript we just restored is not written straight back to storage. */
+  const skipSaveTurnsRef = useRef<Turn[] | null>(null)
+  /** Invalidates a history load that finishes after the workflow changed. */
+  const loadGenerationRef = useRef(0)
+  /** The load effect must not re-run when the locale resolves a moment later. */
+  const tRef = useRef(t)
+  tRef.current = t
+  /** Current workflow for async save replies that outlive a workflow switch. */
+  const workflowIdRef = useRef(workflowId)
+  workflowIdRef.current = workflowId
+  /**
+   * Synchronous gate: on a workflow switch the load effect flips this to false
+   * BEFORE the save effect of that same commit runs. A state flag would still
+   * read its stale `true` value there and file the old transcript under the new
+   * workflow.
+   */
+  const historyReadyRef = useRef(false)
+  /** One save at a time, in transcript order. */
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve())
+
+  /**
+   * Load the workflow's saved chats and restore the most recently active one.
+   * An empty history creates no record: the first sent message is what mints a
+   * session, so opening the dock never litters the list with empty chats.
+   */
+  useEffect(() => {
+    loadGenerationRef.current += 1
+    const generation = loadGenerationRef.current
+    historyReadyRef.current = false
+    sessionsRef.current = []
+    setSessions([])
+    // Clear synchronously: the old workflow's chat must not stay on screen (or
+    // be usable as history for a new send) while the new one's list is loading.
+    resetTranscript([], null)
+    if (!workflowId) return
+    let live = true
+    void (async () => {
+      try {
+        const result = await sendCommand({ type: 'operatorChat.sessions', workflowId })
+        if (!live || generation !== loadGenerationRef.current) return
+        const list = result.type === 'operatorChat.sessions' ? result.sessions : []
+        sessionsRef.current = list
+        setSessions(list)
+        const newest = list[0]
+        const restored = hydrateTurns(newest?.turns ?? [])
+        skipSaveTurnsRef.current = restored
+        setTurns(restored)
+        if (newest) {
+          activeSessionIdRef.current = newest.id
+          setActiveSessionId(newest.id)
+        }
+      } catch {
+        if (live && generation === loadGenerationRef.current) {
+          const empty: Turn[] = []
+          skipSaveTurnsRef.current = empty
+          setTurns(empty)
+          toast(tRef.current('operatorAiHistoryLoadFailed'), 'error')
+        }
+      } finally {
+        if (live && generation === loadGenerationRef.current) historyReadyRef.current = true
+      }
+    })()
+    return () => {
+      live = false
+    }
+  }, [workflowId])
+
+  /** Persist a snapshot on every transcript change. Empty transcripts are never
+   *  saved, so deleting the last row of a chat does not recreate it. */
+  useEffect(() => {
+    if (skipSaveTurnsRef.current === turns) {
+      skipSaveTurnsRef.current = null
+      return
+    }
+    if (!workflowId || !historyReadyRef.current || turns.length === 0) return
+    queueSave(workflowId, turns)
+  }, [turns, workflowId])
 
   // The model's own output, live. The background batches deltas (~80 ms), so this
   // appends a chunk at a time rather than per token; the final answer arrives
@@ -513,19 +677,116 @@ export default function OperatorChatDock({
     setPicked((current) => current.filter((_element, position) => position !== index))
   }
 
-  /** Clear the transcript and abandon anything still in flight. The canvas is
-   *  left exactly as it is: the conversation and the flow are separate. */
-  function startNewSession(): void {
+  /** Abandon anything in flight and swap in another transcript. Bumping the
+   *  generation keeps a late reply out of the new chat, and marking the exact
+   *  array keeps a restored transcript from being written straight back. The
+   *  canvas is left exactly as it is: the conversation and the flow are separate. */
+  function resetTranscript(rows: Turn[], sessionId: string | null): void {
     if (busy) stop()
     sessionGenerationRef.current += 1
     activeSessionRef.current = null
     inFlightRef.current = null
-    setTurns([])
+    activeSessionIdRef.current = sessionId
+    setActiveSessionId(sessionId)
+    skipSaveTurnsRef.current = rows
+    setTurns(rows)
     setInput('')
     setPicked([])
     setStream(null)
     setBusy(false)
     setAtBottom(true)
+    setHistoryOpen(false)
+  }
+
+  /** Clearing the transcript now starts a NEW saved chat. No record is created
+   *  until the first message lands, so an unused "new chat" leaves no litter. */
+  function startNewSession(): void {
+    resetTranscript([], null)
+  }
+
+  /**
+   * Upsert one chat. Saves are serialized: the dock saves on every transcript
+   * change, and two overlapping writes could otherwise settle out of order and
+   * leave an older snapshot in storage.
+   */
+  async function writeSession(wfId: string, rows: Turn[], id: string): Promise<void> {
+    const now = Date.now()
+    const previous = sessionsRef.current.find((session) => session.id === id)
+    const session: OperatorChatSession = {
+      id,
+      workflowId: wfId,
+      title: titleOfTurns(rows, t('operatorAiSessionUntitled')),
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: Math.max(now, (previous?.updatedAt ?? 0) + 1),
+      turns: rows as unknown[],
+    }
+    const result = await sendCommand({
+      type: 'operatorChat.sessions.save',
+      workflowId: wfId,
+      session,
+    })
+    if (result.type !== 'operatorChat.sessions.save') return
+    if (wfId !== workflowIdRef.current) return
+    const next = [session, ...sessionsRef.current.filter((entry) => entry.id !== id)].sort(
+      (a, b) => b.updatedAt - a.updatedAt,
+    )
+    sessionsRef.current = next
+    setSessions(next)
+  }
+
+  function queueSave(wfId: string, rows: Turn[]): void {
+    let id = activeSessionIdRef.current
+    if (!id) {
+      id = makeSessionId()
+      activeSessionIdRef.current = id
+      setActiveSessionId(id)
+    }
+    const sessionId = id
+    saveChainRef.current = saveChainRef.current
+      .then(() => writeSession(wfId, rows, sessionId))
+      .catch(() => {
+        /* history is best-effort: a failed save must not break the chat */
+      })
+  }
+
+  /** Restore a saved chat. The transcript is display-only from this point:
+   *  interactive states (offers, undo receipts) were dropped on hydration. */
+  function openSession(id: string): void {
+    if (id === activeSessionIdRef.current) {
+      setHistoryOpen(false)
+      return
+    }
+    const target = sessionsRef.current.find((session) => session.id === id)
+    if (!target) return
+    const restored = hydrateTurns(target.turns)
+    resetTranscript(restored, target.id)
+  }
+
+  /** Delete one saved chat; when it is the open one, fall back to a blank chat. */
+  async function removeSession(id: string): Promise<void> {
+    if (!workflowId) return
+    const confirmed = await confirmDialog({
+      title: t('operatorAiSessionDelete'),
+      message: t('operatorAiSessionDeleteConfirm'),
+      confirmText: t('delete'),
+      cancelText: t('cancel'),
+      danger: true,
+    })
+    if (confirmed !== true) return
+    // Let any queued snapshot of this chat land first, so a delete ordered
+    // after it cannot be undone by a late write.
+    await saveChainRef.current
+    const wfId = workflowId
+    try {
+      await sendCommand({ type: 'operatorChat.sessions.delete', workflowId: wfId, sessionId: id })
+    } catch {
+      return
+    }
+    if (wfId !== workflowIdRef.current) return
+    const next = sessionsRef.current.filter((session) => session.id !== id)
+    sessionsRef.current = next
+    setSessions(next)
+    if (activeSessionIdRef.current === id) resetTranscript([], null)
   }
 
   /** Drag the composer taller by its top edge; the footer grows and the
@@ -870,9 +1131,20 @@ export default function OperatorChatDock({
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
         <h2 className="flex-1 text-[13px] font-semibold text-ink">{t('operatorAiTitle')}</h2>
         <button
+          aria-label={t('operatorAiHistory')}
+          aria-pressed={historyOpen}
+          className={`wf-icon-btn ${historyOpen ? 'text-accent' : ''}`}
+          disabled={!workflowId}
+          onClick={() => setHistoryOpen((current) => !current)}
+          title={t('operatorAiHistory')}
+          type="button"
+        >
+          <MessagesSquare size={14} aria-hidden="true" />
+        </button>
+        <button
           aria-label={t('operatorAiNewSession')}
           className="wf-icon-btn"
-          disabled={turns.length === 0 && !busy}
+          disabled={turns.length === 0 && !busy && sessions.length === 0}
           onClick={startNewSession}
           title={t('operatorAiNewSession')}
           type="button"
@@ -889,6 +1161,49 @@ export default function OperatorChatDock({
           <X size={14} aria-hidden="true" />
         </button>
       </header>
+
+      {historyOpen && (
+        <div className="max-h-[190px] shrink-0 overflow-y-auto border-b border-border px-2 py-1.5">
+          {sessions.length === 0 ? (
+            <p className="px-1 py-2 text-[11px] leading-snug text-faint">
+              {t('operatorAiHistoryEmpty')}
+            </p>
+          ) : (
+            <ul className="space-y-0.5">
+              {sessions.map((session) => (
+                <li
+                  className={`flex items-center gap-1 rounded-md px-1.5 py-1 ${
+                    session.id === activeSessionId ? 'bg-accent-soft' : 'hover:bg-hover'
+                  }`}
+                  key={session.id}
+                >
+                  <button
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => openSession(session.id)}
+                    type="button"
+                  >
+                    <span className="block truncate text-[11.5px] leading-snug text-ink">
+                      {session.title || t('operatorAiSessionUntitled')}
+                    </span>
+                    <span className="block text-[10px] leading-snug text-faint">
+                      {new Date(session.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en')}
+                    </span>
+                  </button>
+                  <button
+                    aria-label={t('operatorAiSessionDelete')}
+                    className="shrink-0 rounded p-1 text-faint hover:bg-hover hover:text-err"
+                    onClick={() => void removeSession(session.id)}
+                    title={t('operatorAiSessionDelete')}
+                    type="button"
+                  >
+                    <Trash2 size={12} aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div
         className="flex-1 space-y-2 overflow-y-auto px-3 py-2"
