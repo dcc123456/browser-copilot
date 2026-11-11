@@ -53,7 +53,6 @@ import WorkflowParametersDialog, {
   type WorkflowParametersDialogLabels,
 } from '../ui/WorkflowParametersDialog'
 import { beginRunInputSession, endRunInputSession } from '../ui/run-input-session'
-import { FailureCenterDialog } from './FailureCenter'
 import { WorkflowHealthView } from './WorkflowHealthView'
 import PublishWorkflowDialog from './PublishWorkflowDialog'
 import { installFromCard, type InstallSource } from './marketplace-install'
@@ -555,16 +554,6 @@ export default function WorkflowsTab() {
       setBusy(false)
     }
   }
-
-  /**
-   * Single-entry failure center (spec §11 · Commit 11): the workflow + run the
-   * AI repair dialog is open for; null when the dialog is closed.
-   */
-  const [failureCenter, setFailureCenter] = useState<{
-    workflowId: string
-    runId: string
-    revision?: number
-  } | null>(null)
 
   /** Workflow whose publish dialog is open; null when closed. */
   const [publishTarget, setPublishTarget] = useState<Workflow | null>(null)
@@ -1722,25 +1711,6 @@ export default function WorkflowsTab() {
                               {t.workflowsResume}
                             </button>
                           )}
-                          {/* Single-entry AI repair (spec §11): opens the Failure
-                      Center, which runs diagnose → proposal automatically and
-                      pauses at the two human confirmation points. Shown only
-                      when the last run failed. */}
-                          {last && !last.ok && !last.skipped && (
-                            <button
-                              className="text-accent! border-accent!"
-                              disabled={busy}
-                              onClick={() =>
-                                setFailureCenter({
-                                  workflowId: wf.id,
-                                  runId: last.runId,
-                                })
-                              }
-                              type="button"
-                            >
-                              {t.failureCenterAiRepair}
-                            </button>
-                          )}
                           <button disabled={busy} onClick={() => openEditor(wf.id)} type="button">
                             {t.workflowsEdit}
                           </button>
@@ -1861,18 +1831,6 @@ export default function WorkflowsTab() {
           parameters={parameterPromptInputsOf(parametersTarget.drawflow.nodes)}
           values={parametersTarget.parameterValues ?? {}}
           workflowName={parametersTarget.name}
-        />
-      )}
-
-      {failureCenter && (
-        <FailureCenterDialog
-          runId={failureCenter.runId}
-          workflowId={failureCenter.workflowId}
-          workflowRevision={failureCenter.revision}
-          onClose={() => {
-            setFailureCenter(null)
-            void load()
-          }}
         />
       )}
 
