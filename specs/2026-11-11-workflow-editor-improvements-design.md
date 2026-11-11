@@ -30,11 +30,11 @@
 
 ### 选型与证据
 
-| 候选 | 结论 |
-|---|---|
-| A. 只删按钮 + 其 state/import/dialog 渲染 + 该按钮专用的 i18n key | **采用** |
-| B. 连 `FailureCenter.tsx`、`workflows.recovery` 协议、后台 handler 一并删除 | 否决 |
-| C. 保留按钮但置灰 | 否决：用户要求「删除」，置灰仍占位置且会引发「为什么不能点」的疑问 |
+| 候选                                                                        | 结论                                                               |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| A. 只删按钮 + 其 state/import/dialog 渲染 + 该按钮专用的 i18n key           | **采用**                                                           |
+| B. 连 `FailureCenter.tsx`、`workflows.recovery` 协议、后台 handler 一并删除 | 否决                                                               |
+| C. 保留按钮但置灰                                                           | 否决：用户要求「删除」，置灰仍占位置且会引发「为什么不能点」的疑问 |
 
 否决 B 的理由：
 
@@ -71,11 +71,11 @@
 
 ### 选型与证据
 
-| 候选 | 结论 |
-|---|---|
+| 候选                                                                                                                                                            | 结论     |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | A. 新建 `src/lib/workflow/operator-chat-sessions.ts`，按 `operatorChat:<workflowId>` 存会话数组，UI 经 `sendCommand` 读写，`deleteWorkflows` 级联 `area.remove` | **采用** |
-| B. UI 组件直接 import 该存储模块读写 | 否决 |
-| C. 复用侧边栏 `conv:<id>` / `conversations` 会话体系 | 否决 |
+| B. UI 组件直接 import 该存储模块读写                                                                                                                            | 否决     |
+| C. 复用侧边栏 `conv:<id>` / `conversations` 会话体系                                                                                                            | 否决     |
 
 否决 B：仓库所有 UI→持久化访问（ChatTab、HistoryTab、WorkflowsTab）都走 `sendCommand`；
 `fileStorageArea` 的文件句柄 / outbox 由后台持有，UI 页面各起一个 `sharedArea` 会让同一 key 的写入
@@ -144,11 +144,11 @@ operatorChat.sessions.delete  { workflowId, sessionId }   → ok
 
 ### 选型与证据
 
-| 候选 | 结论 |
-|---|---|
-| A. 仅对 `boards.finished` 开放多选与删除，复用 `tasks.finished.delete` + `confirmDialog` | **采用** |
-| B. 允许删除运行中的 run | 否决 |
-| C. 新增「清空全部」按钮 | 否决：需求只要单个 + 批量，不做超出需求的功能（§5.5） |
+| 候选                                                                                     | 结论                                                  |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| A. 仅对 `boards.finished` 开放多选与删除，复用 `tasks.finished.delete` + `confirmDialog` | **采用**                                              |
+| B. 允许删除运行中的 run                                                                  | 否决                                                  |
+| C. 新增「清空全部」按钮                                                                  | 否决：需求只要单个 + 批量，不做超出需求的功能（§5.5） |
 
 否决 B：调研确认 `forgetFinished` 只清 `finished[]`，在途 run 结束时 `finishRun` 会重新
 `unshift` 并经 `persistFinished` 写回 `scheduledTaskRuns`，出现「删了又回来」；要根治得引入
@@ -185,11 +185,11 @@ tombstone 集合，属于新建状态设施（§5.6）且没有必要。运行�
 
 ### 选型与证据
 
-| 候选 | 结论 |
-|---|---|
+| 候选                                                                                                                                                                                   | 结论     |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | A. 修 prompt（助手 Rules + 强制 detailed + schema/guide 补规则 + `outputVariables` 声明），落图写 `data.outputVariables`；`producedVariableNames` 认识脚本节点并从 code 静态提取变量名 | **采用** |
-| B. 执行器兜底：对 `data.outputVariables` 里未设置的变量用脚本返回值填充 | 否决 |
-| C. 落图时把模型写的 `return X` 字符串改写成 `automaSetVariable('name', X)` | 否决 |
+| B. 执行器兜底：对 `data.outputVariables` 里未设置的变量用脚本返回值填充                                                                                                                | 否决     |
+| C. 落图时把模型写的 `return X` 字符串改写成 `automaSetVariable('name', X)`                                                                                                             | 否决     |
 
 否决 B：改 `src/background/workflow-engine/executors.ts` 触发收尾自检 ③（`bench:debug` before/after），
 且 `server/src/executors.ts` 是镜像实现（§5.6），双侧都要改与测；更重要的是它会让「脚本声明了变量但
@@ -245,11 +245,11 @@ tombstone 集合，属于新建状态设施（§5.6）且没有必要。运行�
 
 ### 选型与证据
 
-| 候选 | 结论 |
-|---|---|
-| A. 新增 `tasks.cancelWorkflow { workflowId }`，后台用 `listRunning()` 找到该工作流的 run 并复用 `cancelRun` | **采用** |
-| B. UI 先发 `workflows.running` 查 `runId` 再发 `tasks.cancel` | 否决：两次往返，短任务可能在查询返回前结束；查询与取消之间存在竞态 |
-| C. 改 `workflows.run` 让后台在开始时先回一个 `runId` | 否决：破坏长 Promise 的单返回值协议，牵动所有调用方与消息类型 |
+| 候选                                                                                                        | 结论                                                               |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| A. 新增 `tasks.cancelWorkflow { workflowId }`，后台用 `listRunning()` 找到该工作流的 run 并复用 `cancelRun` | **采用**                                                           |
+| B. UI 先发 `workflows.running` 查 `runId` 再发 `tasks.cancel`                                               | 否决：两次往返，短任务可能在查询返回前结束；查询与取消之间存在竞态 |
+| C. 改 `workflows.run` 让后台在开始时先回一个 `runId`                                                        | 否决：破坏长 Promise 的单返回值协议，牵动所有调用方与消息类型      |
 
 A 复用既有 `cancelRun`，不新增取消设施；`RunningTask.workflowId` 已是现成字段，无需改引擎。
 
@@ -267,24 +267,24 @@ A 复用既有 `cancelRun`，不新增取消设施；`RunningTask.workflowId` �
 `src/workflow-editor/i18n.ts` 的 `EDITOR_STRINGS`（注意：该文件不受 `Messages` 封闭类型保护，
 必须人工核对 en/zh 两侧同时补齐）：
 
-| key | en | zh |
-|---|---|---|
-| `stopRun` | Stop run | 终止运行 |
-| `stoppingRun` | Stopping… | 正在终止… |
-| `runStopped` | Run stopped | 运行已终止 |
-| `runStopFailed` | Could not stop the run | 终止运行失败 |
-| `logsDeleteOne` | Delete this log | 删除这条日志 |
-| `logsDeleteSelected` | Delete selected ({count}) | 删除所选（{count}） |
-| `logsSelectAll` | Select all | 全选 |
-| `logsDeleteTitle` | Delete run logs | 删除运行日志 |
-| `logsDeleteConfirm` | Delete {count} run log(s)? This cannot be undone. | 确定删除 {count} 条运行日志？此操作不可撤销。 |
-| `logsDeleted` | {count} run log(s) deleted | 已删除 {count} 条运行日志 |
-| `operatorAiHistory` | Chat history | 会话记录 |
-| `operatorAiHistoryEmpty` | No saved chats yet | 还没有保存的会话 |
-| `operatorAiSessionUntitled` | New chat | 新会话 |
-| `operatorAiSessionDelete` | Delete this chat | 删除该会话 |
-| `operatorAiSessionDeleteConfirm` | Delete this chat and all its messages? | 删除该会话及其全部消息？ |
-| `operatorAiHistoryLoadFailed` | Could not load chat history | 会话记录加载失败 |
+| key                              | en                                                | zh                                            |
+| -------------------------------- | ------------------------------------------------- | --------------------------------------------- |
+| `stopRun`                        | Stop run                                          | 终止运行                                      |
+| `stoppingRun`                    | Stopping…                                         | 正在终止…                                     |
+| `runStopped`                     | Run stopped                                       | 运行已终止                                    |
+| `runStopFailed`                  | Could not stop the run                            | 终止运行失败                                  |
+| `logsDeleteOne`                  | Delete this log                                   | 删除这条日志                                  |
+| `logsDeleteSelected`             | Delete selected ({count})                         | 删除所选（{count}）                           |
+| `logsSelectAll`                  | Select all                                        | 全选                                          |
+| `logsDeleteTitle`                | Delete run logs                                   | 删除运行日志                                  |
+| `logsDeleteConfirm`              | Delete {count} run log(s)? This cannot be undone. | 确定删除 {count} 条运行日志？此操作不可撤销。 |
+| `logsDeleted`                    | {count} run log(s) deleted                        | 已删除 {count} 条运行日志                     |
+| `operatorAiHistory`              | Chat history                                      | 会话记录                                      |
+| `operatorAiHistoryEmpty`         | No saved chats yet                                | 还没有保存的会话                              |
+| `operatorAiSessionUntitled`      | New chat                                          | 新会话                                        |
+| `operatorAiSessionDelete`        | Delete this chat                                  | 删除该会话                                    |
+| `operatorAiSessionDeleteConfirm` | Delete this chat and all its messages?            | 删除该会话及其全部消息？                      |
+| `operatorAiHistoryLoadFailed`    | Could not load chat history                       | 会话记录加载失败                              |
 
 `src/lib/i18n.ts`：删除 `failureCenterAiRepair` 的声明 + en + zh（`Messages` 封闭类型会机检两侧对齐）。
 

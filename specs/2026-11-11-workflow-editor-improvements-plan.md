@@ -15,6 +15,7 @@
 ## 阶段 1 · 下线 AI 修复按钮 · `fix(sidepanel): remove the AI repair entry from workflow cards`
 
 文件：
+
 - `src/sidepanel/WorkflowsTab.tsx`：删 `FailureCenterDialog` import（:56）、`failureCenter` state（:563-567）、
   按钮块（:1725-1743）、dialog 渲染（:1867-1877）。
 - `src/lib/i18n.ts`：删 `failureCenterAiRepair` 声明（:796）、en（:2588）、zh（:4327）。
@@ -24,6 +25,7 @@
 ## 阶段 2 · AI 助手多会话历史 · `feat(workflow): persist AI assistant chats per workflow`
 
 文件：
+
 - 新增 `src/lib/workflow/operator-chat-sessions.ts`：`OperatorChatSession` 类型、
   `listOperatorChatSessions` / `saveOperatorChatSession` / `deleteOperatorChatSession` /
   `deleteOperatorChatSessionsForWorkflow`，key `operatorChat:<workflowId>`，`withKeyLock` 串行写。
@@ -41,6 +43,7 @@
 ## 阶段 3 · 日志删除 · `feat(workflow): allow deleting run logs individually and in bulk`
 
 文件：
+
 - `src/workflow-editor/sidebar/LogsModal.tsx`：checkbox（仅 finished）、全选、单条删除、
   批量删除、`confirmDialog`、删除后 `load()`。
 - `src/workflow-editor/i18n.ts`：`logs*` 删除相关 key（en + zh）。
@@ -50,6 +53,7 @@
 ## 阶段 4 · 脚本变量进入斜杠补全 · `fix(workflow): expose script-produced variables to slash suggestions`
 
 文件：
+
 - 新增 `src/lib/workflow/script-outputs.ts`：`scriptOutputVariableNames()` /
   `mergeScriptOutputNames()`。
 - `src/lib/workflow/producer-completeness.ts`：`producedVariableNames()` 与 `producesVariable()`
@@ -63,6 +67,7 @@
 ## 阶段 5 · 修复 AI 助手生成脚本不设置变量 · `fix(workflow): make the AI assistant emit script output variables`
 
 文件：
+
 - `src/lib/workflow/blocks/catalog.ts`：`javascript-code` 默认 data 增 `outputVariables: []`。
 - `src/lib/workflow/operator-tools.ts`：`SCHEMA_OVERRIDES[JAVASCRIPT_BLOCK_ID]` 增
   `outputVariables`，改写 `code` 描述（明确 `return` ≠ 具名变量）。
@@ -77,6 +82,7 @@
 ## 阶段 6 · 运行态终止按钮 · `feat(workflow): replace the run button with a stop control while running`
 
 文件：
+
 - `src/lib/messages.ts`：`tasks.cancelWorkflow` 命令与 result。
 - `src/background/index.ts`：新 case，`listRunning()` 按 `workflowId` 找 run → `cancelRun()`。
 - `src/workflow-editor/toolbar/TopToolbar.tsx`：`cancelling` / `onStop` props，running 时换
