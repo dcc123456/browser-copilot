@@ -35,6 +35,11 @@ through a whole checkout or setup flow — while you watch or stay hands-off.
   even an AI-agent step — then launch it by hand, on a schedule, at startup,
   with a keyboard shortcut, from a context menu, or when a matching page is
   opened.
+- 🧾 **The runs you launch stay manageable.** The editor's AI assistant keeps chat history
+  per workflow, the Run button turns into **Stop run** while a run is live, and run logs
+  delete one at a time or in bulk and copy out as text. A workflow that declares parameters
+  asks for them in a **Parameters required** dialog before it runs — or you store the values
+  on the workflow itself, so neither scheduled nor manual runs get interrupted.
 - 🛍️ **Share workflows through a marketplace.** Publish any workflow to the
   public marketplace or a private team repository as a pull request; browse,
   search and sort what others published; apply a listing with its triggers
@@ -441,7 +446,11 @@ unacceptable.
   card; an unpacked install can also open its source folder from there.
 - **History.** The clock icon opens past conversations — continue, preview,
   rename, or delete. Threads persist on this machine (newest 200 messages
-  each) — as real files once a storage folder is set.
+  each) — as real files once a storage folder is set. **More → Settings →
+  History retention** caps each section separately — **Conversations**, **Workflow runs**,
+  **Task runs**, **Operations** (50 records by default, 1–500 allowed); lowering a limit
+  trims older records immediately, and deleting history keeps its button in a loading state
+  until the work is done.
 - **Feedback.** **More → Settings** ends with **Feedback & suggestions**: write
   a report, optionally attach diagnostics (extension version, build, browser
   and UI language — no page URLs or credentials), and create a public GitHub
@@ -522,8 +531,23 @@ auto-lays-out the graph; `Ctrl+S` saves, `Ctrl+Enter` runs from the editor.
 from what is on disk, a bottom bar offers undo / redo / auto-layout, and a
 **Data table** tab lists every run-scoped variable's writers and readers with
 jump-to-node links. The canvas also has an AI assistant that writes operators
-from a prompt and shows its reasoning; a workflow can declare a goal, and a
-verification run reports whether it was reached without AI takeover.
+from a prompt and shows its reasoning; its **Chat history** is stored per
+workflow, so each workflow opens its own threads (new, switch, delete — and
+deleting the workflow cleans its sessions up), and a footer **Last run log**
+switch sends this workflow's newest finished run with the request so a failing
+step does not have to be described by hand. While a run is live the bar's run
+button is replaced by **Stop run** in the same place and returns when the
+record finishes. A workflow can declare a goal, and a verification run reports
+whether it was reached without AI takeover.
+
+A JavaScript code step hands its result to later blocks only through **named
+variables**: `return`, a bare expression and `automaNextBlock()` fill
+`{{lastResult}}`, so the body has to call `automaSetVariable('name', value)`
+(or assign `variables.name = …`) and list each name in the block's
+`outputVariables`. That declaration is what makes the editor count a script
+node as a variable producer — the `/` menu offers those names and the
+completeness check stops flagging them as dangling. Assistant proposals
+backfill it automatically.
 
 **One special block: AI agent.** It hands that step to the same agent loop the
 chat uses — in read-only mode it reads the page (or a specific element) and
@@ -538,7 +562,9 @@ AI-agent block.
 
 **Launching.** A workflow runs when its trigger fires:
 
-- **Manual** — the Run button in the editor or the Workflows tab;
+- **Manual** — the Run button in the editor or the Workflows tab; a workflow
+  that declares parameters opens the **Parameters required** dialog first (see
+  _Workflow parameters_ under [Scheduled tasks](#scheduled-tasks));
 - **Scheduled** — same schedule options as [scheduled tasks](#scheduled-tasks)
   (once, every N minutes, daily, weekdays, chosen weekdays, or a five-field
   cron expression);
@@ -549,7 +575,14 @@ AI-agent block.
 **Watching runs.** The History tab's activity board shows running and finished
 runs for workflows and tasks alike — live progress, per-block logs, debug
 mode, and mid-run cancellation. The Workflows tab shows each workflow's
-last-run status, and a failed run deep-links straight to its log.
+last-run status, and a failed run deep-links straight to its log. The editor's
+**Logs** panel deletes records one at a time (checkboxes plus a batch bar with
+select-all and delete-selected; running rows stay read-only), copies the whole
+log out as text, and its variable viewer is readable, resettable and
+expandable — the run inspector copies a single variable's value too. Debug runs
+no longer keep a full variable bag per block: bulk data URLs are shed, long
+strings and oversized bags are truncated, a run caps at 500 steps, and finished
+runs older than the newest three drop their variables.
 
 **Failure retry.** Two levels:
 
@@ -680,9 +713,20 @@ another scheduled run:
 
 The panel's task dialog has no parameter field: it neither lists nor edits `variables`. It
 does save the whole task record, so what the agent wrote survives a rename or a schedule
-change. A workflow launched by its own trigger rather than by a task gets only its declared
-defaults — the schedule itself carries no parameters. The `create_scheduled_task`
-agent tool accepts the same cadences, including `kind: "cron"`.
+change. The `create_scheduled_task` agent tool accepts the same cadences, including
+`kind: "cron"`.
+
+**Workflow parameters: ask once, or not at all.** The bag above belongs to the _task_. When the
+workflow itself declares inputs (a **parameter-prompt** block), a manual launch from the panel or
+the editor opens a **Parameters required** dialog first: fields pre-fill from the run scope,
+secrets stay out of the page and the log, and the block's timeout continues with the declared
+defaults. To skip the interruption entirely, use **Parameters** in the workflow's row action (the
+editor toolbar opens the same **Workflow parameters** dialog), store the values on the workflow and
+**Save values** — a saved value seeds the next run, so scheduled and manual runs of a
+parameterized workflow finish unattended. Blanks still prompt and secrets are never stored;
+downstream fields can insert the declarations from the `/` variable menu. Precedence stays
+caller-first: a trigger payload, a Feishu argument or the task's `variables` bag beats the saved
+values, which in turn beat the declared defaults, and no unattended host ever sees the dialog.
 
 Each run is recorded in **Recent runs** with its start time, outcome, steps, and a
 short summary — and can be terminated mid-flight: while a workflow or task is
@@ -712,6 +756,12 @@ independent ways, configured on the **Tasks** tab:
 
 The Feishu connection is kept alive by a watchdog alarm and auto-reconnects if it
 drops. Without app credentials, notifications still work; inbound commands don't.
+
+Both are configured in the **Feishu integration** collapsible on the Tasks tab: its title
+carries a **Configured** / **Not configured** chip, **Webhook push** and **Bot commands** each
+sit in their own card, the App Secret is masked with a reveal checkbox, and save/test results
+appear inside the card (the buttons also say what is in flight) instead of a toast that
+disappears.
 
 ---
 

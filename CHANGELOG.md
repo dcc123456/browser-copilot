@@ -8,6 +8,93 @@ All notable changes to this project are documented here. The format is based on
 
 _To be released._
 
+## [0.6.19] - 2026-11-12
+
+### Added — The editor's AI assistant keeps a conversation per workflow
+
+Every workflow's editor now has its own assistant thread instead of one shared
+transcript, and deleting the workflow cleans the thread up. A turn that was
+interrupted used to persist nothing — the transcript was written only in the
+turn's `finally`, which never runs when the service worker is killed or the
+extension reloads — so it now checkpoints after the first user message and
+every 5 seconds. A footer switch also sends this workflow's newest finished run
+log with the request, so a step that failed at run time no longer has to be
+described by hand.
+
+### Added — Run logs can be deleted, copied, and stay bounded
+
+The editor's logs panel gained a per-row delete plus a batch bar (running rows
+stay read-only because `finishRun()` would write them straight back), the whole
+log copies as text, and the run inspector copies a single variable's value. The
+variable viewer is readable, resettable and expandable, and the `/` variable
+menu no longer renders under block dialogs. Debug runs stopped keeping a full
+variable bag per block: bulk data URLs are shed, long strings and oversized
+bags are truncated, a run caps at 500 steps, and finished runs older than the
+newest three drop their variables.
+
+### Added — Run becomes Stop while a run is live
+
+While a run is in flight the editor's Run button is replaced by Stop in the same
+place, so cancelling needs no other entry point; it returns to Run when the
+record finishes.
+
+### Added — Parameterized workflows ask once, or not at all
+
+A workflow that declares its inputs in a `parameter-prompt` block pauses an
+attended run and asks for those values in a dialog: fields pre-fill from the
+run scope, secrets stay out of the page and the log, and the block's timeout
+continues with the declared defaults. Unattended hosts (Runner, schedules,
+triggers) keep silent resolution. The values can also be stored on the workflow
+itself through one shared dialog in the panel row action and the editor
+toolbar — saved values seed the next run and the prompt stops asking, which is
+what lets scheduled and manual runs of a parameterized workflow finish
+unattended. Blanks still prompt; secrets are never stored.
+
+### Added — Script nodes declare the variables they produce
+
+The operator guide taught `vars.xxx` / `refData`, which are not the script
+harness: both hosts pass `variables`, `automaNextBlock`, `automaSetVariable`,
+`automaRefData` and `automaResetTimeout` as parameters, so generated nodes
+called phantom globals and produced `undefined`. The guide and the escape-hatch
+`code` schema now name all five. Because `return`, a bare expression and
+`automaNextBlock()` fill only `{{lastResult}}` while a later block reads a
+_NAMED_ variable, a `javascript-code` step declares `outputVariables`: the
+assistant backfills them from the body, the editor counts the step as a
+variable producer, and the `/` menu offers the names instead of flagging the
+reference as dangling. An injection failure reports the bridge's real error
+instead of falling through to the MV3 eval's CSP message, and an unscoped run
+falls back to another injectable tab when the focused window shows an internal
+page.
+
+### Fixed — Variables keep their type and generation findings stop blocking
+
+`set-variable` rendered a whole-value reference with `String()`, so copying an
+object wrote `[object Object]` and `{{copy.a1}}` could not read a field; a
+single-token value now resolves to its raw type, and row-defined variables
+count as producers. The webhook executor interpolates its JSON body with JSON
+context instead of the engine's generic text pre-pass, so a token in value
+position keeps its type and a token inside a string literal is escaped. The
+`data-mapping` schema advertises the keys the form and executor actually read
+(`dataSource` / `varSourceName` / `sources`) rather than the dead `mapping`
+expression. Numbered operator ids read back to their operator, loosely shaped
+assistant answers still land with named refusals, and a draft that fails the
+producer gate offers **Save anyway** with the findings stored as
+`saveWarnings`.
+
+### Changed — Feishu panel, history retention, and two settings gone
+
+The Feishu integration section is regrouped into two cards with an in-panel
+status notice, a masked App Secret with a reveal checkbox, and button labels
+that match what is in flight. Settings gained per-section retention caps
+(conversations, workflow runs, task runs, operation history — default 50,
+1–500) and deleting history now shows a loading state. The **AI 修复** entry was
+removed from workflow cards — it decided on its own instead of driving the
+repair ladder; the engine behind generation validation, the failure center, MCP
+and AI debug is untouched. The two default-off run-time switches (start with AI
+takeover, auto-repair after a failed run) were deleted along with their budget
+helper, and the takeover model picker in Settings → Models stays, because the
+takeover paths still read it.
+
 ## [0.6.18] - 2026-11-05
 
 ### Fixed — Missed click targets no longer pay a dormant 5-second wait
