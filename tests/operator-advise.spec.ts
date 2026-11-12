@@ -113,6 +113,13 @@ describe('adviseCandidates', () => {
     expect(note.detailed).toBe(false)
     expect(JSON.stringify(note.schema)).toContain('fontSize')
   })
+
+  it('always offers the script block with its full schema', () => {
+    // The compact row prints only parameter names, which would hide the
+    // code description that spells out the outputVariables contract.
+    const script = adviseCandidates('写个脚本').find((c) => c.blockId === 'javascript-code')
+    expect(script?.detailed).toBe(true)
+  })
 })
 
 describe('buildOperatorAdvisePrompt', () => {
@@ -402,6 +409,30 @@ describe('buildOperatorAdvisePrompt', () => {
     // The DOM read and the screen both speak; nothing is dropped for the image.
     expect(prompt).toContain('#city')
     expect(prompt).toContain('苏州')
+  })
+
+  it('spells out how a script step hands values downstream', () => {
+    const script = adviseCandidates('写个脚本').find((c) => c.blockId === 'javascript-code')!
+    const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates: [script] })
+    expect(prompt).toContain('outputVariables')
+    expect(prompt).toContain('automaSetVariable')
+  })
+})
+
+describe('operatorDataOfProposal merges script outputs', () => {
+  it('adds code-written names to the declared outputVariables', () => {
+    const data = operatorDataOfProposal('javascript-code', {
+      code: "automaSetVariable('title', document.title)",
+      outputVariables: ['declared'],
+    })
+    expect(data['outputVariables']).toEqual(['declared', 'title'])
+  })
+
+  it('backfills outputVariables when the proposal omits them', () => {
+    const data = operatorDataOfProposal('javascript-code', {
+      code: 'variables.price = 42',
+    })
+    expect(data['outputVariables']).toEqual(['price'])
   })
 })
 

@@ -740,6 +740,9 @@ export const BLOCK_CATALOG: BlockCatalogEntry[] = [
       timeout: 20000,
       context: 'website',
       code: 'console.log("Script started");\nautomaNextBlock()',
+      // Names the script writes for later blocks (mirrors what the model is
+      // told to declare; see SCHEMA_OVERRIDES in operator-tools.ts).
+      outputVariables: [],
       preloadScripts: [],
       everyNewTab: false,
       runBeforeLoad: false,

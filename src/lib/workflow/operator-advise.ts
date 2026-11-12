@@ -50,6 +50,7 @@ import {
 } from './node-goal-contract'
 import { findWorkflowOperators } from './operator-discovery'
 import { JAVASCRIPT_BLOCK_ID, operatorExecClass } from './operator-class'
+import { mergeScriptOutputNames } from './script-outputs'
 import { aiLandingAllowed, allOperators, generationOperators } from './operator-registry'
 import { dataSchemaFromEntry } from './operator-tools'
 import { PROTECTED_PARAMS } from './repair/patch-policy'
@@ -732,12 +733,24 @@ export function operatorDataOfProposal(
 ): Record<string, unknown> {
   const block = BLOCK_BY_ID.get(blockId)
   if (!block) return { ...data, blockId }
-  return withNodeAddedByAi({
+  const merged: Record<string, unknown> = {
     ...structuredClone(block.data),
     description: '',
     ...data,
     blockId: block.id,
-  })
+  }
+  // A script node's published names are what it declares PLUS what its body
+  // visibly writes: the `/` menu and the completeness check read this field,
+  // so a proposal that sets variables in the code without declaring them would
+  // land as a producer the rest of the graph cannot see.
+  if (block.id === JAVASCRIPT_BLOCK_ID) {
+    const declared = Array.isArray(merged['outputVariables']) ? merged['outputVariables'] : []
+    merged['outputVariables'] = mergeScriptOutputNames(
+      declared,
+      typeof merged['code'] === 'string' ? merged['code'] : '',
+    )
+  }
+  return withNodeAddedByAi(merged)
 }
 
 /**
@@ -873,7 +886,12 @@ export function adviseCandidates(stepIntent: string, workflowGoal?: string): Ope
   }
   for (const candidate of candidates) push(candidate.blockId, true)
   for (const entry of generationOperators('core')) push(entry.id, true)
-  for (const entry of allOperators()) push(entry.id, false)
+  // The script block rides the tail as a compact row everywhere else, and a
+  // compact row prints only parameter names — the model would never see the
+  // `code` description that spells out the automaSetVariable/outputVariables
+  // contract. Its full schema is the one place that contract is stated, so it
+  // always rides in detail (the escape-hatch justification rule still applies).
+  for (const entry of allOperators()) push(entry.id, entry.id === JAVASCRIPT_BLOCK_ID)
   return offered
 }
 
@@ -1128,6 +1146,7 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     '- A value the form only draws once its flag is on is inert alone: return the flag with it (an output variable needs assignVariable: true, a saved table column needs saveData: true, a variable source needs dataSource: "variable").',
     '- When the last run log is present, fix the step it blames — a step the log shows working is not the failing one. Quote the log\'s own evidence in "rationale".',
     '- Where a value should come from an earlier step, reference it as {{variableName}} using a name the digest shows that step produces.',
+    "- A later step that must read a value a javascript-code step computes CANNOT use that step's return value: it references {{name}}, so the script body must call automaSetVariable('name', value) (or variables.name = …) for every such name and list each name in the step's outputVariables. return / a bare expression fill only {{lastResult}}.",
     '- Prefer stable locators (#id, [data-testid], [name]) over generated classes or nth-child chains.',
     `- At most ${maxOperators} operators (one for "edit"/"replace"). Return an empty "proposals" array when nothing on the list fits or the user is only asking a question — then "reply" must say why.`,
     '- For "edit", if the step already holds every value the user asked for, return no proposals and say it is unchanged — never report a change your answer does not contain.',

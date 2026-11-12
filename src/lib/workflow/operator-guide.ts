@@ -106,8 +106,14 @@ trigger-event 用 event（非 eventName）。
 代码体可写裸表达式（\`document.title\`、\`await fetch('/api').then(r=>r.json())\`，自动作为节点返回值）
 或语句体（\`return ...\` / \`automaNextBlock(...)\`）。
 
+**脚本产物交给后续算子的唯一方式是具名变量**：\`return\` / 裸表达式 / \`automaNextBlock(...)\`
+只写 \`{{lastResult}}\`。后续节点引用的是 \`{{名字}}\`，所以代码体里必须为每个这样的名字调用
+\`automaSetVariable('<名>', 值)\`（或 \`variables.<名> = ...\`），并把每个名字列进节点的
+\`outputVariables\`（编辑器靠它把脚本节点算作变量生产者——斜杠补全与完整性校验都读它）。
+声明了名字但代码里没赋值，运行时该变量为空。
+
 **脚本产物交给后续算子（生成 canvas 图片再上传）**：代码里用
-\`automaSetVariable('<名>', 值)\` 暴露 data URL，再接 \`wf_op_upload-file\`：
+\`automaSetVariable('<名>', 值)\` 暴露 data URL（同样写进 \`outputVariables\`），再接 \`wf_op_upload-file\`：
 \`sourceMode:'workflow-file'\`、\`fileVariable:'<名>'\`、\`selector\` 指向控件。
 例：\`automaSetVariable('generatedImage', document.querySelector('#chart').toDataURL()); automaNextBlock()\`
 

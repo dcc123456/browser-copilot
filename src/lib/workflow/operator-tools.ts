@@ -453,7 +453,18 @@ const SCHEMA_OVERRIDES: Readonly<Record<string, Record<string, unknown>>> = {
         '`automaSetVariable(name, value)` (writes a variable later blocks read as {{name}}), ' +
         '`automaRefData(keyword, path?)` (variables | table | loopData | prevBlockData | globalData, optional dot path), ' +
         '`automaResetTimeout()` (re-arms the timeout during a long poll). ' +
-        '`{{name}}` is resolved before the body runs; a bare expression is auto-returned.',
+        '`{{name}}` is resolved before the body runs; a bare expression is auto-returned. ' +
+        'return / the bare expression / automaNextBlock only fill lastResult — a LATER block that ' +
+        'needs a NAMED value must read it as {{name}}, so inside the body call ' +
+        "automaSetVariable('name', value) for every such name AND list each name in outputVariables.",
+    },
+    outputVariables: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        'Variable names this script writes via automaSetVariable (or variables.x =) for later ' +
+        'blocks to reference as {{name}}. List every name; a name here without a matching ' +
+        'automaSetVariable in the body stays empty at run time.',
     },
     [SCRIPT_JUSTIFICATION_ARG]: {
       type: 'string',
