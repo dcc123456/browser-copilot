@@ -4,7 +4,6 @@
  * @module lib/types
  */
 
-import type { JobBlacklist } from './job-blacklist'
 import type { LocaleSetting } from './i18n'
 import type { ProviderProfile } from './providers'
 
@@ -268,14 +267,6 @@ export interface Settings {
    * Default off.
    */
   elementPickerSelectOnly: boolean
-  /**
-   * Company and headhunter-posting exclusions for job-search workflows. The
-   * extension cannot recognise a posting on an arbitrary site, so these lists
-   * are injected into every workflow run as the `jobBlacklist` variable and
-   * the site-specific workflow applies them where it knows the company, title
-   * and headhunter flag. See {@link JobBlacklist}.
-   */
-  jobBlacklist: JobBlacklist
 }
 
 /** Payload the on-page element picker writes to the clipboard. */

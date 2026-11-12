@@ -358,7 +358,6 @@ describe('normalizeStoredSettings', () => {
       elementPickerEnabled: false,
       elementPickerFormat: 'html',
       elementPickerSelectOnly: false,
-      jobBlacklist: { companies: [], headhunterPositions: [], excludeHeadhunters: false },
     }
     expect(normalizeStoredSettings(settings)).toEqual(settings)
   })
@@ -412,7 +411,6 @@ describe('normalizeStoredSettings', () => {
       elementPickerEnabled: false,
       elementPickerFormat: 'html',
       elementPickerSelectOnly: false,
-      jobBlacklist: { companies: [], headhunterPositions: [], excludeHeadhunters: false },
     })
   })
 

@@ -1349,18 +1349,6 @@ export interface Messages {
   settingsElementPickerFormatText: string
   settingsElementPickerFormatHtml: string
 
-  // Settings · job blacklist
-  settingsJobBlacklist: string
-  settingsJobBlacklistIntro: string
-  settingsJobBlacklistCompanies: string
-  settingsJobBlacklistCompaniesHint: string
-  settingsJobBlacklistCompaniesPlaceholder: string
-  settingsJobBlacklistHeadhunter: string
-  settingsJobBlacklistHeadhunterHint: string
-  settingsJobBlacklistHeadhunterPlaceholder: string
-  settingsJobBlacklistExcludeHeadhunters: string
-  settingsJobBlacklistVariables: string
-
   // Settings · storage location
   settingsStorage: string
   settingsStorageIntro: string
@@ -3086,21 +3074,6 @@ const en: Messages = {
   settingsElementPickerFormatText: 'Visible text only',
   settingsElementPickerFormatHtml: 'HTML (tags + text)',
 
-  settingsJobBlacklist: 'Job blacklist',
-  settingsJobBlacklistIntro:
-    'Exclusion rules for job-search workflows. The extension cannot recognise a posting on a job site by itself, so every run receives these lists as variables and the workflow applies them where it reads the listing.',
-  settingsJobBlacklistCompanies: 'Company blacklist',
-  settingsJobBlacklistCompaniesHint:
-    'One company name or keyword per line. A posting whose company contains an entry is skipped.',
-  settingsJobBlacklistCompaniesPlaceholder: 'e.g. Acme Corp\nOutsourcing agency',
-  settingsJobBlacklistHeadhunter: 'Headhunter-position blacklist',
-  settingsJobBlacklistHeadhunterHint:
-    'One job-title or headhunter keyword per line. A headhunter posting whose title, company or recruiter contains an entry is skipped.',
-  settingsJobBlacklistHeadhunterPlaceholder: 'e.g. Java developer (outsourced)',
-  settingsJobBlacklistExcludeHeadhunters: 'Skip every headhunter posting',
-  settingsJobBlacklistVariables:
-    'Variables in each run: jobBlacklist.companies, jobBlacklist.headhunterPositions, jobBlacklist.excludeHeadhunters (case-insensitive substring match).',
-
   settingsStorage: 'Storage location',
   settingsStorageIntro:
     'Chats, workflows, history, skills, agents and other data are saved as plain JSON files in a folder you choose. Extension settings (model providers, the folder choice itself) stay in browser storage. While the folder is briefly unreachable, changes queue up and flush into it automatically once access is restored.',
@@ -4777,20 +4750,6 @@ const zhCN: Messages = {
   settingsElementPickerFormatSelector: '仅 CSS 选择器',
   settingsElementPickerFormatText: '仅文本',
   settingsElementPickerFormatHtml: 'HTML（标签 + 文本）',
-
-  settingsJobBlacklist: '岗位黑名单',
-  settingsJobBlacklistIntro:
-    '岗位搜索工作流的排除规则。扩展本身无法识别招聘网站的职位卡片，因此每次运行都会把这两份名单注入为变量，由工作流在读到职位信息时自行过滤。',
-  settingsJobBlacklistCompanies: '公司黑名单',
-  settingsJobBlacklistCompaniesHint: '每行一个公司名或关键词。公司名包含任一词条的职位会被跳过。',
-  settingsJobBlacklistCompaniesPlaceholder: '例如：某某科技\n外包公司',
-  settingsJobBlacklistHeadhunter: '猎头职位黑名单',
-  settingsJobBlacklistHeadhunterHint:
-    '每行一个职位名或猎头关键词。猎头发布的职位若标题、公司或猎头名包含任一词条，会被跳过。',
-  settingsJobBlacklistHeadhunterPlaceholder: '例如：Java 开发（外包）\n某某猎头',
-  settingsJobBlacklistExcludeHeadhunters: '跳过所有猎头职位',
-  settingsJobBlacklistVariables:
-    '每次运行的变量：jobBlacklist.companies、jobBlacklist.headhunterPositions、jobBlacklist.excludeHeadhunters（不区分大小写的子串匹配）。',
 
   settingsStorage: '存储位置',
   settingsStorageIntro:

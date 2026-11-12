@@ -3,7 +3,6 @@ import { sendCommand, type WindowChoice } from '../lib/messages'
 import { LOCALE_LABELS, LOCALES, type LocaleSetting, type Messages } from '../lib/i18n'
 import type { AgentStatus, ElementPickerFormat, UnattendedWindowPolicy } from '../lib/types'
 import { RUN_WINDOW_LIMITS, normalizeRunWindowLimit } from '../lib/types'
-import { parseJobBlacklistLines, type JobBlacklist } from '../lib/job-blacklist'
 import { TOOL_META, TOOL_SECTIONS } from '../lib/tool-catalog'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
@@ -39,10 +38,6 @@ import FeedbackCard from './FeedbackCard'
 import { useSettings } from './hooks/useSettings'
 import { useI18n, useT } from './i18n'
 import Banner from './components/Banner'
-
-/** Shared shape of the two job-blacklist textareas (semantic tokens only). */
-const BLACKLIST_FIELD =
-  'mt-1 block w-full resize-y rounded-md border border-border bg-panel-2 px-2 py-1.5 font-mono text-[12px] leading-relaxed text-ink placeholder:text-faint focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent'
 
 /**
  * Per-connection → window assignment surface, rendered independently in EVERY
@@ -263,10 +258,6 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   // Local text for the system-prompt editor. Empty string is a valid value (the
   // agent falls back to its default when blank); `null` means "not yet loaded".
   const [promptDraft, setPromptDraft] = useState<string | null>(null)
-  // Job-blacklist textareas: `null` follows the persisted lists; while the
-  // user types, the draft wins and blur commits the parsed lines.
-  const [jobCompaniesDraft, setJobCompaniesDraft] = useState<string | null>(null)
-  const [jobHeadhunterDraft, setJobHeadhunterDraft] = useState<string | null>(null)
   const promptRef = useRef<HTMLTextAreaElement | null>(null)
   // The prompt and tools blocks are collapsed by default to keep the card short;
   // the user expands whichever they want to inspect or change.
@@ -732,12 +723,6 @@ export default function SettingsTab({ onLocaleChange }: Props) {
 
   if (!settings) return <div className="pane empty">{t.loading}</div>
 
-  const saveJobBlacklist = (patch: Partial<JobBlacklist>): Promise<void> =>
-    mutate({
-      type: 'settings.set',
-      patch: { jobBlacklist: { ...settings.jobBlacklist, ...patch } },
-    }).then(() => undefined)
-
   // Absolute path of an exported adapter; undefined until export so snippets
   // keep their placeholder.
   const adapterPath = settings.localAgentAdapterPath.trim() || undefined
@@ -963,74 +948,6 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             </select>
           </div>
         )}
-      </div>
-
-      {/* --- Job blacklist --- */}
-      <div className="mb-2.5 rounded-[10px] border border-border bg-panel p-3">
-        <div className="font-semibold">{t.settingsJobBlacklist}</div>
-        <p className="mt-1.5 mb-2.5 text-[11px] leading-relaxed text-muted">
-          {t.settingsJobBlacklistIntro}
-        </p>
-
-        <label className="block text-[12px] font-medium text-ink" htmlFor="job-blacklist-companies">
-          {t.settingsJobBlacklistCompanies}
-        </label>
-        <p className="mt-0.5 mb-1 text-[11px] leading-relaxed text-muted">
-          {t.settingsJobBlacklistCompaniesHint}
-        </p>
-        <textarea
-          className={BLACKLIST_FIELD}
-          id="job-blacklist-companies"
-          onBlur={() => {
-            const companies = parseJobBlacklistLines(
-              jobCompaniesDraft ?? settings.jobBlacklist.companies.join('\n'),
-            )
-            // Keep the typed text until the save lands, so the field does not
-            // flash back to the previous list while the round trip runs.
-            void saveJobBlacklist({ companies }).then(() => setJobCompaniesDraft(null))
-          }}
-          onChange={(event) => setJobCompaniesDraft(event.target.value)}
-          placeholder={t.settingsJobBlacklistCompaniesPlaceholder}
-          rows={3}
-          spellCheck={false}
-          value={jobCompaniesDraft ?? settings.jobBlacklist.companies.join('\n')}
-        />
-
-        <label
-          className="mt-2.5 block text-[12px] font-medium text-ink"
-          htmlFor="job-blacklist-headhunter"
-        >
-          {t.settingsJobBlacklistHeadhunter}
-        </label>
-        <p className="mt-0.5 mb-1 text-[11px] leading-relaxed text-muted">
-          {t.settingsJobBlacklistHeadhunterHint}
-        </p>
-        <textarea
-          className={BLACKLIST_FIELD}
-          id="job-blacklist-headhunter"
-          onBlur={() => {
-            const headhunterPositions = parseJobBlacklistLines(
-              jobHeadhunterDraft ?? settings.jobBlacklist.headhunterPositions.join('\n'),
-            )
-            void saveJobBlacklist({ headhunterPositions }).then(() => setJobHeadhunterDraft(null))
-          }}
-          onChange={(event) => setJobHeadhunterDraft(event.target.value)}
-          placeholder={t.settingsJobBlacklistHeadhunterPlaceholder}
-          rows={3}
-          spellCheck={false}
-          value={jobHeadhunterDraft ?? settings.jobBlacklist.headhunterPositions.join('\n')}
-        />
-
-        <div className="mt-2.5">
-          <Switch
-            checked={settings.jobBlacklist.excludeHeadhunters}
-            label={t.settingsJobBlacklistExcludeHeadhunters}
-            onChange={(excludeHeadhunters) => void saveJobBlacklist({ excludeHeadhunters })}
-          />
-        </div>
-        <p className="mt-2 text-[11px] leading-relaxed text-faint">
-          {t.settingsJobBlacklistVariables}
-        </p>
       </div>
 
       {/* --- Unattended window policy --- */}

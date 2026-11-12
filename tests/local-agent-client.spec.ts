@@ -152,7 +152,6 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     localAgentBindings: {},
     unattendedWindowPolicy: 'latest',
     maxConcurrentRunWindows: 3,
-    jobBlacklist: { companies: [], headhunterPositions: [], excludeHeadhunters: false },
     ...overrides,
   }
 }

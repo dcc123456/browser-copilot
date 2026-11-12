@@ -17,7 +17,6 @@ import {
   seedFromTrigger,
 } from '../../lib/workflow/workflow-inputs'
 import type { RunInputPrompt } from '../../lib/workflow/run-input'
-import { getSettings } from '../../lib/storage'
 import {
   createChromeCheckpointStore,
   findNewestPersistedRunId,
@@ -818,28 +817,6 @@ export async function executeWorkflow(
       preflightBlockers[blocker.nodeId] = seen
         ? `${seen}\n${blocker.issue.message}`
         : blocker.issue.message
-    }
-    // Job blacklists live in Settings rather than in the graph: a saved
-    // workflow must follow the user's CURRENT lists, and a resumed run must not
-    // replay the snapshot stored in its checkpoint. Injected here, after the
-    // trigger and resume merges, so the settings win over both. A JavaScript
-    // block reads it as `variables.jobBlacklist`.
-    variables = {
-      ...(variables ?? {}),
-      jobBlacklist: await getSettings()
-        .then((settings) => settings.jobBlacklist)
-        .catch((error) => {
-          // A storage hiccup must not abort a job run that could still work
-          // with the workflow's own filters.
-          addStep(
-            runId,
-            'error',
-            `岗位黑名单读取失败，本次按空名单运行 / Could not read job blacklists; running with empty lists: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          )
-          return { companies: [], headhunterPositions: [], excludeHeadhunters: false }
-        }),
     }
     // --- Trace node state machine ----------------------------------------
     // The engine reports 'tool' (node entered), 'info' (retrying),
