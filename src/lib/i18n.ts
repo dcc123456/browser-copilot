@@ -233,6 +233,21 @@ export interface Messages {
   tasksFeishuTest: string
   tasksFeishuTestOk: string
   tasksFeishuBotWarn: string
+  /** Sub-group headings of the Feishu panel. */
+  tasksFeishuWebhookGroup: string
+  tasksFeishuWebhookGroupHint: string
+  tasksFeishuBotGroup: string
+  /** Whether any Feishu target is filled in, shown on the folded summary. */
+  tasksFeishuConfigured: string
+  tasksFeishuNotConfigured: string
+  /** In-flight labels, so a slow round trip does not look like a dead button. */
+  tasksFeishuSaving: string
+  tasksFeishuTesting: string
+  /** Result lines shown inside the panel instead of the page-level banner. */
+  tasksFeishuSaved: string
+  tasksFeishuTestFailed: string
+  tasksFeishuReveal: string
+  tasksFeishuWarnTitle: string
   taskTemplateGithubName: string
 
   // Workflows
@@ -2107,6 +2122,17 @@ const en: Messages = {
   tasksFeishuTestOk: 'Test message sent.',
   tasksFeishuBotWarn:
     'While the browser is fully idle or the machine is asleep, the extension cannot be reached; it reconnects within about a minute of waking. For truly always-on remote control, add a small relay server.',
+  tasksFeishuWebhookGroup: 'Webhook push',
+  tasksFeishuWebhookGroupHint: 'Run results are posted to a Feishu group custom bot.',
+  tasksFeishuBotGroup: 'Bot commands',
+  tasksFeishuConfigured: 'Configured',
+  tasksFeishuNotConfigured: 'Not configured',
+  tasksFeishuSaving: 'Saving…',
+  tasksFeishuTesting: 'Sending…',
+  tasksFeishuSaved: 'Feishu settings saved.',
+  tasksFeishuTestFailed: 'Test message failed.',
+  tasksFeishuReveal: 'Show secret',
+  tasksFeishuWarnTitle: 'Note',
   taskTemplateGithubName: 'PRs to review',
 
   workflowsEmpty: 'No workflows yet. Create one to start automating.',
@@ -3880,6 +3906,17 @@ const zhCN: Messages = {
   tasksFeishuTestOk: '测试消息已发送。',
   tasksFeishuBotWarn:
     '浏览器完全空闲或电脑睡眠时扩展无法被触达，唤醒后约一分钟内会自动重连。若需要真正始终在线的远程控制，建议增加一个小型中继服务。',
+  tasksFeishuWebhookGroup: 'Webhook 推送',
+  tasksFeishuWebhookGroupHint: '任务结果推送到飞书群自定义机器人。',
+  tasksFeishuBotGroup: '机器人触发',
+  tasksFeishuConfigured: '已配置',
+  tasksFeishuNotConfigured: '未配置',
+  tasksFeishuSaving: '保存中…',
+  tasksFeishuTesting: '发送中…',
+  tasksFeishuSaved: '飞书配置已保存。',
+  tasksFeishuTestFailed: '测试消息发送失败。',
+  tasksFeishuReveal: '显示密钥',
+  tasksFeishuWarnTitle: '注意',
   taskTemplateGithubName: '待我 review 的 PR',
 
   workflowsEmpty: '还没有工作流，创建一个开始自动化。',

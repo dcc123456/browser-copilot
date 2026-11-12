@@ -12,6 +12,7 @@
  * @module sidepanel/TasksTab
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AlertTriangle } from 'lucide-react'
 import { sendCommand } from '../lib/messages'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
 import { onStoreChanged } from '../lib/store-events'
@@ -26,9 +27,27 @@ import { useT } from './i18n'
 import Banner from './components/Banner'
 import { confirmDialog } from '../ui/confirm'
 import { Switch } from '../ui/Switch'
+import { PRIMARY_BUTTON, SECONDARY_BUTTON } from '../ui/button-styles'
 
 /** Editable form state. */
 type Draft = ScheduledTask
+
+/**
+ * Result line of a Feishu action. The panel renders it in place, next to the
+ * control that produced it, rather than in the page-level banner far above the
+ * folded section.
+ */
+type FeishuOutcome = { kind: 'ok' | 'error'; text: string }
+
+/**
+ * Whether anything is actually wired up. Shared by the collapsed summary and
+ * the card badge so the two can never disagree.
+ */
+function isFeishuConfigured(config: FeishuConfig): boolean {
+  const webhook = config.webhookUrl.trim() !== ''
+  const bot = config.appId.trim() !== '' && config.appSecret.trim() !== ''
+  return webhook || (config.botEnabled && bot)
+}
 
 function emptyTask(): Draft {
   // Every new task is a free-form agent prompt. The built-in GitHub review task
@@ -177,35 +196,34 @@ export default function TasksTab() {
     }
   }
 
-  const saveFeishu = async (config: FeishuConfig): Promise<void> => {
+  const saveFeishu = async (config: FeishuConfig): Promise<FeishuOutcome> => {
     setBusy(true)
     try {
       await sendCommand({ type: 'feishu.save', config })
       setFeishu(config)
-      setBanner({ kind: 'ok', text: t.save })
+      return { kind: 'ok', text: t.tasksFeishuSaved }
     } catch (error) {
-      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+      return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
     } finally {
       setBusy(false)
     }
   }
 
-  const testFeishu = async (): Promise<void> => {
-    if (!feishu) return
+  const testFeishu = async (): Promise<FeishuOutcome> => {
+    if (!feishu) return { kind: 'error', text: t.tasksFeishuTestFailed }
     setBusy(true)
     try {
       // Save first so the worker tests the values the user just typed.
       await sendCommand({ type: 'feishu.save', config: feishu })
       const result = await sendCommand({ type: 'feishu.test' })
       if (result.type === 'feishu.test') {
-        setBanner(
-          result.ok
-            ? { kind: 'ok', text: t.tasksFeishuTestOk }
-            : { kind: 'error', text: result.message ?? 'failed' },
-        )
+        return result.ok
+          ? { kind: 'ok', text: t.tasksFeishuTestOk }
+          : { kind: 'error', text: result.message ?? t.tasksFeishuTestFailed }
       }
+      return { kind: 'error', text: t.tasksFeishuTestFailed }
     } catch (error) {
-      setBanner({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
+      return { kind: 'error', text: error instanceof Error ? error.message : String(error) }
     } finally {
       setBusy(false)
     }
@@ -389,6 +407,9 @@ export default function TasksTab() {
         <details className="collapsible">
           <summary>
             <span className="collapsible-title">{t.tasksFeishuSection}</span>
+            {/* The panel is folded by default, so the summary has to say
+                whether anything is wired up at all. */}
+            <ConfiguredBadge configured={isFeishuConfigured(feishu)} />
           </summary>
           <FeishuSection
             config={feishu}
@@ -415,79 +436,180 @@ function FeishuSection({
   config: FeishuConfig
   disabled: boolean
   onChange: (config: FeishuConfig) => void
-  onSave: (config: FeishuConfig) => void
-  onTest: () => void
+  onSave: (config: FeishuConfig) => Promise<FeishuOutcome>
+  onTest: () => Promise<FeishuOutcome>
 }) {
   const t = useT()
-  const dirty = config.webhookUrl || config.appId || config.appSecret || config.webhookSecret
+  /** Which of this card's own actions is in flight; `disabled` is tab-wide. */
+  const [pending, setPending] = useState<'save' | 'test' | null>(null)
+  /** Outcome of the last action, shown next to the controls that caused it. */
+  const [notice, setNotice] = useState<FeishuOutcome | null>(null)
+  const [revealSecret, setRevealSecret] = useState(false)
+
+  const busy = disabled || pending !== null
+  // One save for the whole card: both groups write the same config object, so
+  // a button per group only let one of them claim to have saved the other.
+  const canSave =
+    config.webhookUrl !== '' ||
+    config.webhookSecret !== '' ||
+    config.appId !== '' ||
+    config.appSecret !== '' ||
+    config.botEnabled
+
+  const submit = async (
+    kind: 'save' | 'test',
+    action: () => Promise<FeishuOutcome>,
+  ): Promise<void> => {
+    if (busy) return
+    setPending(kind)
+    setNotice(null)
+    try {
+      setNotice(await action())
+    } finally {
+      setPending(null)
+    }
+  }
+
   return (
-    <div className="card">
-      <h3>{t.tasksFeishuTitle}</h3>
-
-      <label className="field">
-        <span>{t.tasksFeishuWebhook}</span>
-        <input
-          disabled={disabled}
-          onChange={(event) => onChange({ ...config, webhookUrl: event.target.value })}
-          placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…"
-          value={config.webhookUrl}
-        />
-      </label>
-      <label className="field">
-        <span>{t.tasksFeishuWebhookSecret}</span>
-        <input
-          disabled={disabled}
-          onChange={(event) => onChange({ ...config, webhookSecret: event.target.value })}
-          value={config.webhookSecret}
-        />
-      </label>
-      <p className="hint">{t.tasksFeishuSecretHint}</p>
-
-      <div className="actions">
-        <button disabled={disabled || !dirty} onClick={() => void onSave(config)} type="button">
-          {t.save}
-        </button>
-        <button disabled={disabled || !config.webhookUrl} onClick={onTest} type="button">
-          {t.tasksFeishuTest}
-        </button>
+    <div className="flex flex-col gap-2.5 rounded-[10px] border border-border bg-panel p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+        <span className="font-semibold text-ink">{t.tasksFeishuTitle}</span>
+        <ConfiguredBadge configured={isFeishuConfigured(config)} />
       </div>
 
-      <hr />
+      {/* --- Outgoing webhook --- */}
+      <div className="flex flex-col gap-2 rounded-lg border border-border bg-panel-2 p-2.5">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[12px] font-semibold text-ink">{t.tasksFeishuWebhookGroup}</span>
+          <span className="text-[11px] leading-relaxed text-muted">
+            {t.tasksFeishuWebhookGroupHint}
+          </span>
+        </div>
+        <label className="flex flex-col gap-1 text-[12px] text-ink">
+          <span>{t.tasksFeishuWebhook}</span>
+          <input
+            disabled={busy}
+            onChange={(event) => onChange({ ...config, webhookUrl: event.target.value })}
+            placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/…"
+            value={config.webhookUrl}
+          />
+        </label>
+        <div className="flex flex-col gap-1 text-[12px] text-ink">
+          <label className="flex flex-col gap-1" htmlFor="feishu-webhook-secret">
+            <span>{t.tasksFeishuWebhookSecret}</span>
+            <input
+              disabled={busy}
+              id="feishu-webhook-secret"
+              onChange={(event) => onChange({ ...config, webhookSecret: event.target.value })}
+              type={revealSecret ? 'text' : 'password'}
+              value={config.webhookSecret}
+            />
+          </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-muted">
+            <input
+              checked={revealSecret}
+              className="w-auto!"
+              disabled={busy}
+              onChange={(event) => setRevealSecret(event.target.checked)}
+              type="checkbox"
+            />
+            {t.tasksFeishuReveal}
+          </label>
+          <span className="text-[11px] leading-relaxed text-muted">{t.tasksFeishuSecretHint}</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            className={SECONDARY_BUTTON}
+            disabled={busy || config.webhookUrl === ''}
+            onClick={() => void submit('test', onTest)}
+            type="button"
+          >
+            {pending === 'test' ? t.tasksFeishuTesting : t.tasksFeishuTest}
+          </button>
+        </div>
+      </div>
 
-      <Switch
-        checked={config.botEnabled}
-        disabled={disabled}
-        label={<strong>{t.tasksFeishuBot}</strong>}
-        onChange={(botEnabled) => onChange({ ...config, botEnabled })}
-      />
-      {config.botEnabled && (
-        <>
-          <label className="field">
-            <span>{t.tasksFeishuAppId}</span>
-            <input
-              disabled={disabled}
-              onChange={(event) => onChange({ ...config, appId: event.target.value })}
-              value={config.appId}
-            />
-          </label>
-          <label className="field">
-            <span>{t.tasksFeishuAppSecret}</span>
-            <input
-              disabled={disabled}
-              onChange={(event) => onChange({ ...config, appSecret: event.target.value })}
-              type="password"
-              value={config.appSecret}
-            />
-          </label>
-          <p className="hint">{t.tasksFeishuBotHint}</p>
-          <p className="hint banner-error-inline">{t.tasksFeishuBotWarn}</p>
-          <div className="actions">
-            <button disabled={disabled} onClick={() => void onSave(config)} type="button">
-              {t.save}
-            </button>
-          </div>
-        </>
+      {/* --- Inbound bot --- */}
+      <div className="flex flex-col gap-2 rounded-lg border border-border bg-panel-2 p-2.5">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[12px] font-semibold text-ink">{t.tasksFeishuBotGroup}</span>
+          <Switch
+            checked={config.botEnabled}
+            disabled={busy}
+            label={t.tasksFeishuBot}
+            onChange={(botEnabled) => onChange({ ...config, botEnabled })}
+          />
+        </div>
+        {config.botEnabled && (
+          <>
+            <label className="flex flex-col gap-1 text-[12px] text-ink">
+              <span>{t.tasksFeishuAppId}</span>
+              <input
+                disabled={busy}
+                onChange={(event) => onChange({ ...config, appId: event.target.value })}
+                value={config.appId}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[12px] text-ink">
+              <span>{t.tasksFeishuAppSecret}</span>
+              <input
+                disabled={busy}
+                onChange={(event) => onChange({ ...config, appSecret: event.target.value })}
+                type="password"
+                value={config.appSecret}
+              />
+            </label>
+            <p className="text-[11px] leading-relaxed text-muted">{t.tasksFeishuBotHint}</p>
+            <div className="flex items-start gap-1.5 rounded-lg border border-warn/30 bg-warn-surface px-2.5 py-2 text-[11.5px] leading-relaxed text-warn">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 shrink-0" size={13} />
+              <span>
+                <strong className="font-semibold">{t.tasksFeishuWarnTitle}</strong>{' '}
+                {t.tasksFeishuBotWarn}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {notice && (
+        <div
+          className={[
+            'break-words rounded-lg px-3 py-2 text-[12px] leading-relaxed',
+            notice.kind === 'ok'
+              ? 'border border-ok/30 bg-ok-surface text-ok'
+              : 'border border-err bg-err-surface text-err',
+          ].join(' ')}
+          role={notice.kind === 'error' ? 'alert' : 'status'}
+        >
+          {notice.text}
+        </div>
       )}
+
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          className={PRIMARY_BUTTON}
+          disabled={busy || !canSave}
+          onClick={() => void submit('save', () => onSave(config))}
+          type="button"
+        >
+          {pending === 'save' ? t.tasksFeishuSaving : t.save}
+        </button>
+      </div>
     </div>
+  )
+}
+
+/** 'Configured' / 'Not configured' chip, shared by the summary and the card. */
+function ConfiguredBadge({ configured }: { configured: boolean }) {
+  const t = useT()
+  return (
+    <span
+      className={[
+        'rounded-full border px-2 py-0.5 text-[11px]',
+        configured ? 'border-ok/30 bg-ok-surface text-ok' : 'border-border bg-panel-2 text-muted',
+      ].join(' ')}
+    >
+      {configured ? t.tasksFeishuConfigured : t.tasksFeishuNotConfigured}
+    </span>
   )
 }
