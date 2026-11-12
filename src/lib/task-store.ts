@@ -8,7 +8,7 @@
  * @module lib/task-store
  */
 
-import { newId } from './storage'
+import { getSettings, newId } from './storage'
 import { fileStorageArea } from './fs-store'
 import { withKeyLock } from './key-lock'
 import { capPersistedStrings, jsonBytes } from './persist-budget'
@@ -24,6 +24,7 @@ import {
   type TaskRunStep,
 } from './scheduler-types'
 import { normalizeSchedule, normalizeScheduleList } from './schedule'
+import { normalizeHistoryLimit } from './types'
 
 /** Clamps a per-task tool-round budget to a sane positive range. Exported so
  * the agent's `create_scheduled_task` tool applies the same clamp as storage. */
@@ -42,9 +43,6 @@ const KEY_FEISHU = 'feishuConfig'
  * otherwise the `chrome.storage.local` mirror (see `lib/fs-store.ts`).
  */
 const area = fileStorageArea()
-
-/** Hard cap so a daily task running for years cannot grow storage unbounded. */
-export const MAX_RUN_LOGS = 100
 
 /**
  * Byte budget for the whole `scheduledTaskRuns` key. The count cap cannot bound
@@ -319,6 +317,16 @@ function asRun(value: unknown): TaskRunLog | null {
   }
 }
 
+/**
+ * Workflow runs are the UI/chat-initiated sources; schedule and Feishu
+ * sources are task runs. Both live in one array but have independent
+ * retention caps, so the split is shared by the storage trim and the two
+ * History tab filters.
+ */
+export function isWorkflowRunSource(source: TaskRunLog['source'] | undefined): boolean {
+  return source === 'manual' || source === 'chat'
+}
+
 export async function listRuns(taskId?: string): Promise<TaskRunLog[]> {
   const stored = await area.get(KEY_RUNS)
   const list = stored[KEY_RUNS]
@@ -348,10 +356,20 @@ export async function listRuns(taskId?: string): Promise<TaskRunLog[]> {
  * lose every run it held.
  */
 async function persistRuns(list: TaskRunLog[]): Promise<void> {
+  const settings = await getSettings()
+  const workflowLimit = normalizeHistoryLimit(settings.historyLimitWorkflowRuns)
+  const taskLimit = normalizeHistoryLimit(settings.historyLimitTaskRuns)
+  let workflowCount = 0
+  let taskCount = 0
+  // Both history sections share one array, so cap them independently by source
+  // while keeping the original newest-first order for the byte-budget pass.
   const runs = list
     .map(asRun)
     .filter((run): run is TaskRunLog => run !== null)
-    .slice(0, MAX_RUN_LOGS)
+    .filter((run) => {
+      if (isWorkflowRunSource(run.source)) return ++workflowCount <= workflowLimit
+      return ++taskCount <= taskLimit
+    })
   const bytes = runs.map(jsonBytes)
   let total = bytes.reduce((sum, b) => sum + b + 1, 0) // +1 per list separator
   let end = runs.length
@@ -460,6 +478,13 @@ export async function deleteRun(id: string): Promise<void> {
   await withKeyLock(KEY_RUNS, async () => {
     const list = await listRuns()
     await persistRuns(list.filter((run) => run.id !== id))
+  })
+}
+
+/** Re-applies the current workflow/task caps to already stored run records. */
+export async function trimRunsToLimits(): Promise<void> {
+  await withKeyLock(KEY_RUNS, async () => {
+    await persistRuns(await listRuns())
   })
 }
 

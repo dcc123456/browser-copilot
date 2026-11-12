@@ -26,6 +26,7 @@ import { normalizeThinkingProfile, type ThinkingLevel } from './thinking'
 import {
   isRemovedWebProvider,
   normalizeElementPickerFormat,
+  normalizeHistoryLimit,
   normalizeLocalAgentUrl,
   normalizeProviderModels,
   normalizeRunWindowLimit,
@@ -629,6 +630,10 @@ export function normalizeSettingsPayload(raw: unknown): {
   elementPickerEnabled: boolean
   elementPickerFormat: ElementPickerFormat
   elementPickerSelectOnly: boolean
+  historyLimitConversations: number
+  historyLimitWorkflowRuns: number
+  historyLimitTaskRuns: number
+  historyLimitOperations: number
 } {
   const value = (raw ?? {}) as Record<string, unknown>
   const providers = Array.isArray(value.providers)
@@ -732,5 +737,9 @@ export function normalizeSettingsPayload(raw: unknown): {
     elementPickerFormat: normalizeElementPickerFormat(value.elementPickerFormat),
     elementPickerSelectOnly:
       typeof value.elementPickerSelectOnly === 'boolean' ? value.elementPickerSelectOnly : false,
+    historyLimitConversations: normalizeHistoryLimit(value.historyLimitConversations),
+    historyLimitWorkflowRuns: normalizeHistoryLimit(value.historyLimitWorkflowRuns),
+    historyLimitTaskRuns: normalizeHistoryLimit(value.historyLimitTaskRuns),
+    historyLimitOperations: normalizeHistoryLimit(value.historyLimitOperations),
   }
 }

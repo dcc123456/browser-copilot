@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from 'rea
 import { sendCommand, type WindowChoice } from '../lib/messages'
 import { LOCALE_LABELS, LOCALES, type LocaleSetting, type Messages } from '../lib/i18n'
 import type { AgentStatus, ElementPickerFormat, UnattendedWindowPolicy } from '../lib/types'
-import { RUN_WINDOW_LIMITS, normalizeRunWindowLimit } from '../lib/types'
+import {
+  HISTORY_LIMITS,
+  RUN_WINDOW_LIMITS,
+  normalizeHistoryLimit,
+  normalizeRunWindowLimit,
+} from '../lib/types'
 import { TOOL_META, TOOL_SECTIONS } from '../lib/tool-catalog'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
@@ -244,6 +249,13 @@ interface Props {
    */
   onLocaleChange: (locale: LocaleSetting) => void
 }
+
+/** Per-section history retention caps rendered by the history card. */
+type HistoryLimitField =
+  | 'historyLimitConversations'
+  | 'historyLimitWorkflowRuns'
+  | 'historyLimitTaskRuns'
+  | 'historyLimitOperations'
 
 export default function SettingsTab({ onLocaleChange }: Props) {
   const t = useT()
@@ -729,6 +741,16 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   const snippetClaude = buildMcpSnippet('claude', adapterPath)
   const snippetCodex = buildMcpSnippet('codex', adapterPath)
   const snippetTrae = buildMcpSnippet('trae', adapterPath)
+
+  const setHistoryLimit = (field: HistoryLimitField, value: number): Promise<unknown> =>
+    mutate({ type: 'settings.set', patch: { [field]: normalizeHistoryLimit(value) } })
+
+  const historyLimitFields: { field: HistoryLimitField; label: string }[] = [
+    { field: 'historyLimitConversations', label: t.settingsHistoryLimitConversations },
+    { field: 'historyLimitWorkflowRuns', label: t.settingsHistoryLimitWorkflowRuns },
+    { field: 'historyLimitTaskRuns', label: t.settingsHistoryLimitTaskRuns },
+    { field: 'historyLimitOperations', label: t.settingsHistoryLimitOperations },
+  ]
 
   return (
     <div className="pane">
@@ -1238,6 +1260,37 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             style={{ maxWidth: 96 }}
             value={settings.maxToolRounds}
           />
+        </div>
+      </div>
+
+      {/* --- History retention --- */}
+      <div className="mb-2.5 rounded-[10px] border border-border bg-panel p-3">
+        <div className="font-semibold text-ink">{t.settingsHistoryRetentionTitle}</div>
+        <p className="mt-1.5 mb-2.5 text-[11px] leading-relaxed text-muted">
+          {t.settingsHistoryRetentionHint}
+        </p>
+        <div className="flex flex-col gap-2">
+          {historyLimitFields.map(({ field, label }) => (
+            <label
+              className="flex items-center justify-between gap-3 text-[12px] text-muted"
+              key={field}
+            >
+              <span>{label}</span>
+              {/* The shared <input> is deliberately unstyled and fills its
+                  parent, so the slot width lives on this wrapper. */}
+              <span className="w-24 shrink-0">
+                <NumberInput
+                  fallback={HISTORY_LIMITS.default}
+                  max={HISTORY_LIMITS.max}
+                  min={HISTORY_LIMITS.min}
+                  onChange={(value) => {
+                    void setHistoryLimit(field, value)
+                  }}
+                  value={settings[field]}
+                />
+              </span>
+            </label>
+          ))}
         </div>
       </div>
 

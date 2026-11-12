@@ -147,6 +147,8 @@ import {
   setTurnState,
   getSettings,
   setSettings,
+  trimActionHistoryToLimit,
+  trimConversationsToLimit,
   getSkill,
   touchConversation,
   clearTokenUsage,
@@ -178,6 +180,7 @@ import {
   recordFinishedRun,
   saveFeishuConfig,
   saveTask,
+  trimRunsToLimits,
 } from '../lib/task-store'
 import {
   listWorkflows,
@@ -1465,6 +1468,22 @@ async function handleCommand(
       const settings = await setSettings(command.patch)
       // The local-agent bridge reads settings: reconcile the connection now.
       void agentClient.sync()
+      // A lowered retention cap must take effect immediately rather than at
+      // the next write: each store re-applies its own cap once, in the worker
+      // that owns the storage keys.
+      const limitPatch = command.patch
+      if (
+        limitPatch.historyLimitConversations !== undefined ||
+        limitPatch.historyLimitWorkflowRuns !== undefined ||
+        limitPatch.historyLimitTaskRuns !== undefined ||
+        limitPatch.historyLimitOperations !== undefined
+      ) {
+        await Promise.all([
+          trimConversationsToLimit(),
+          trimActionHistoryToLimit(),
+          trimRunsToLimits(),
+        ])
+      }
       if (
         previous.elementPickerEnabled !== settings.elementPickerEnabled ||
         previous.elementPickerFormat !== settings.elementPickerFormat ||

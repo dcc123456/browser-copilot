@@ -61,6 +61,10 @@ function settingsWith(model: string, baseUrl: string): Settings {
     elementPickerEnabled: false,
     elementPickerFormat: 'html',
     elementPickerSelectOnly: false,
+    historyLimitConversations: 50,
+    historyLimitWorkflowRuns: 50,
+    historyLimitTaskRuns: 50,
+    historyLimitOperations: 50,
   } as Settings
 }
 

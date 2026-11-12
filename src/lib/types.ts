@@ -267,6 +267,14 @@ export interface Settings {
    * Default off.
    */
   elementPickerSelectOnly: boolean
+  /** Maximum number of conversation threads retained in the history panel. */
+  historyLimitConversations: number
+  /** Maximum number of workflow-run records retained in the history panel. */
+  historyLimitWorkflowRuns: number
+  /** Maximum number of scheduled/Feishu task-run records retained. */
+  historyLimitTaskRuns: number
+  /** Maximum number of raw action-history entries retained. */
+  historyLimitOperations: number
 }
 
 /** Payload the on-page element picker writes to the clipboard. */
@@ -291,6 +299,20 @@ export const RUN_WINDOW_LIMITS = { default: 3, min: 1, max: 6 } as const
 export function normalizeRunWindowLimit(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return RUN_WINDOW_LIMITS.default
   return Math.min(RUN_WINDOW_LIMITS.max, Math.max(RUN_WINDOW_LIMITS.min, Math.round(value)))
+}
+
+/**
+ * Bounds for the per-section history retention caps. The settings UI renders
+ * its inputs from these, and both settings normalizers clamp stored values
+ * with them. The default is deliberately small: every stored record also owns
+ * a transcript or a step bag, so unbounded history is unbounded disk usage.
+ */
+export const HISTORY_LIMITS = { default: 50, min: 1, max: 500 } as const
+
+/** Clamps any stored value into a legal history retention cap; non-numbers fall back. */
+export function normalizeHistoryLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return HISTORY_LIMITS.default
+  return Math.min(HISTORY_LIMITS.max, Math.max(HISTORY_LIMITS.min, Math.round(value)))
 }
 
 /**

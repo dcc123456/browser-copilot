@@ -18,7 +18,7 @@
  *
  * @module sidepanel/HistoryTab
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Workflow as WorkflowIcon, X } from 'lucide-react'
 import { onReviewLog, sendCommand } from '../lib/messages'
 import { STORAGE_RECONNECTED_EVENT } from '../lib/fs-reconnect'
@@ -32,6 +32,7 @@ import {
 import type { Workflow } from '../lib/workflow/types'
 import type { ConversationMeta, HistoryEntry } from '../lib/types'
 import type { TaskRunLog } from '../lib/scheduler-types'
+import { isWorkflowRunSource } from '../lib/task-store'
 import { useT } from './i18n'
 import Banner from './components/Banner'
 import { confirmDialog } from '../ui/confirm'
@@ -55,6 +56,26 @@ function formatWhen(ms: number): string {
   const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   if (sameDay) return time
   return `${date.toLocaleDateString()} ${time}`
+}
+
+/**
+ * Serializes destructive actions and exposes a busy flag for every delete
+ * control. A ref covers the gap before React re-renders with the new state,
+ * so a double click cannot start two deletions against the same store.
+ */
+function useDeletion(): { deleting: boolean; run: (action: () => Promise<void>) => void } {
+  const [deleting, setDeleting] = useState(false)
+  const busy = useRef(false)
+  const run = useCallback((action: () => Promise<void>): void => {
+    if (busy.current) return
+    busy.current = true
+    setDeleting(true)
+    void action().finally(() => {
+      busy.current = false
+      setDeleting(false)
+    })
+  }, [])
+  return { deleting, run }
 }
 
 /**
@@ -192,7 +213,7 @@ export default function HistoryTab() {
           flash={flash}
           runs={runs}
           reload={reloadRuns}
-          filter={(run) => run.source === 'manual' || run.source === 'chat'}
+          filter={(run) => isWorkflowRunSource(run.source)}
           focusRunId={focusRunId}
           onFocused={() => setFocusRunId(null)}
         />
@@ -269,12 +290,14 @@ interface BatchBarProps {
   onSelectAll: () => void
   onDelete: () => void
   t: ReturnType<typeof useT>
+  /** True while a delete is in flight; disables every destructive control. */
+  deleting: boolean
   /** Optional extra control on the right (e.g. "clear all" for operations). */
   extra?: React.ReactNode
 }
 
 /** Sticky batch-delete toolbar shared by every list section. */
-function BatchBar({ count, total, onSelectAll, onDelete, t, extra }: BatchBarProps) {
+function BatchBar({ count, total, onSelectAll, onDelete, t, deleting, extra }: BatchBarProps) {
   const allSelected = total > 0 && count === total
   const noneSelected = total === 0
   return (
@@ -287,19 +310,24 @@ function BatchBar({ count, total, onSelectAll, onDelete, t, extra }: BatchBarPro
             // Indeterminate when some, but not all, visible items are selected.
             if (el) el.indeterminate = count > 0 && !allSelected
           }}
-          disabled={noneSelected}
+          disabled={noneSelected || deleting}
           onChange={onSelectAll}
           aria-label={t.histSelectAll}
         />
         <span>{t.histSelectAll}</span>
       </label>
       <div className="record-batchbar-count">
-        {count > 0 ? `${count} / ${total}` : total > 0 ? `共 ${total} 条` : ''}
+        {count > 0 ? `${count} / ${total}` : total > 0 ? t.histRecordCount({ count: total }) : ''}
       </div>
       <div className="record-batchbar-actions">
         {extra}
-        <button className="danger" onClick={onDelete} type="button" disabled={count === 0}>
-          {t.histBatchDelete}
+        <button
+          className="danger"
+          onClick={onDelete}
+          type="button"
+          disabled={count === 0 || deleting}
+        >
+          {deleting ? t.histDeleting : t.histBatchDelete}
         </button>
       </div>
     </div>
@@ -318,6 +346,7 @@ interface ConvState {
 }
 
 function ConversationsSection({ t, flash }: SectionProps) {
+  const deletion = useDeletion()
   const [items, setItems] = useState<ConversationMeta[] | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   // One entry per conversation the user has ever expanded. `messages` is
@@ -429,8 +458,9 @@ function ConversationsSection({ t, flash }: SectionProps) {
           count={selected.size}
           total={items.length}
           onSelectAll={() => setSelected((prev) => selectAllToggle(items, prev))}
-          onDelete={() => void removeSelected()}
+          onDelete={() => deletion.run(removeSelected)}
           t={t}
+          deleting={deletion.deleting}
         />
       )}
       {items !== null && items.length === 0 && <div className="empty">{t.histEmpty}</div>}
@@ -468,9 +498,10 @@ function ConversationsSection({ t, flash }: SectionProps) {
               </span>
               <button
                 className="icon-btn danger record-delete"
+                disabled={deletion.deleting}
                 onClick={(e) => {
                   e.stopPropagation()
-                  void removeOne(conv.id)
+                  deletion.run(() => removeOne(conv.id))
                 }}
                 title={t.delete}
                 aria-label={t.delete}
@@ -533,6 +564,7 @@ interface RunsSectionProps extends SectionProps {
 }
 
 function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: RunsSectionProps) {
+  const deletion = useDeletion()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [open, setOpen] = useState<Record<string, boolean>>({})
   // Ids of deep-linked cards currently playing the highlight flash.
@@ -648,10 +680,16 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
           count={selected.size}
           total={items.length}
           onSelectAll={() => setSelected((prev) => selectAllToggle(items, prev))}
-          onDelete={() => void removeSelected()}
+          onDelete={() => deletion.run(removeSelected)}
           t={t}
+          deleting={deletion.deleting}
           extra={
-            <button className="danger ghost" onClick={() => void clearAll()} type="button">
+            <button
+              className="danger ghost"
+              disabled={deletion.deleting}
+              onClick={() => deletion.run(clearAll)}
+              type="button"
+            >
               {t.taskRunsClear}
             </button>
           }
@@ -700,9 +738,10 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
               </span>
               <button
                 className="icon-btn danger record-delete"
+                disabled={deletion.deleting}
                 onClick={(e) => {
                   e.stopPropagation()
-                  void removeOne(run.id)
+                  deletion.run(() => removeOne(run.id))
                 }}
                 title={t.delete}
                 aria-label={t.delete}
@@ -749,6 +788,7 @@ function RunsSection({ t, flash, runs, reload, filter, focusRunId, onFocused }: 
 // --- Operations (action history) --------------------------------------------
 
 function OperationsSection({ t, flash }: SectionProps) {
+  const deletion = useDeletion()
   const [entries, setEntries] = useState<HistoryEntry[] | null>(null)
   const [conversations, setConversations] = useState<ConversationMeta[]>([])
   // Selection is per CONVERSATION/group, never per individual operation row:
@@ -1037,10 +1077,16 @@ function OperationsSection({ t, flash }: SectionProps) {
               prev.size === groups.length ? new Set() : new Set(groups.map((g) => g.key)),
             )
           }
-          onDelete={() => void removeSelected()}
+          onDelete={() => deletion.run(removeSelected)}
           t={t}
+          deleting={deletion.deleting}
           extra={
-            <button className="danger ghost" onClick={() => void clearAll()} type="button">
+            <button
+              className="danger ghost"
+              disabled={deletion.deleting}
+              onClick={() => deletion.run(clearAll)}
+              type="button"
+            >
               {t.dataClearHistory}
             </button>
           }
@@ -1120,9 +1166,10 @@ function OperationsSection({ t, flash }: SectionProps) {
                       </span>
                       <button
                         className="icon-btn danger history-delete"
+                        disabled={deletion.deleting}
                         onClick={(e) => {
                           e.stopPropagation()
-                          void removeOne(entry.id)
+                          deletion.run(() => removeOne(entry.id))
                         }}
                         title={t.delete}
                         aria-label={t.delete}

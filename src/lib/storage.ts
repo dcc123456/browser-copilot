@@ -46,9 +46,11 @@ import type {
 } from './types'
 import {
   DEFAULT_LOCAL_AGENT_URL,
+  HISTORY_LIMITS,
   RUN_WINDOW_LIMITS,
   isRemovedWebProvider,
   normalizeElementPickerFormat,
+  normalizeHistoryLimit,
   normalizeLocalAgentUrl,
   normalizeProviderModels,
   normalizeRunWindowLimit,
@@ -130,6 +132,10 @@ export const DEFAULT_SETTINGS: Settings = {
   elementPickerEnabled: false,
   elementPickerFormat: 'html',
   elementPickerSelectOnly: false,
+  historyLimitConversations: HISTORY_LIMITS.default,
+  historyLimitWorkflowRuns: HISTORY_LIMITS.default,
+  historyLimitTaskRuns: HISTORY_LIMITS.default,
+  historyLimitOperations: HISTORY_LIMITS.default,
 }
 
 /**
@@ -293,6 +299,10 @@ export function normalizeStoredSettings(raw: unknown): Settings {
     elementPickerFormat: normalizeElementPickerFormat(value.elementPickerFormat),
     elementPickerSelectOnly:
       typeof value.elementPickerSelectOnly === 'boolean' ? value.elementPickerSelectOnly : false,
+    historyLimitConversations: normalizeHistoryLimit(value.historyLimitConversations),
+    historyLimitWorkflowRuns: normalizeHistoryLimit(value.historyLimitWorkflowRuns),
+    historyLimitTaskRuns: normalizeHistoryLimit(value.historyLimitTaskRuns),
+    historyLimitOperations: normalizeHistoryLimit(value.historyLimitOperations),
   }
 }
 
@@ -1036,6 +1046,34 @@ export async function getConversationMeta(
 }
 
 /**
+ * Writes the conversation-meta list under the configured retention cap and
+ * deletes the transcripts of threads that fell outside it.
+ *
+ * A transcript can be megabytes on its own, so dropping only the meta row
+ * would leave an orphan file behind and save nothing. Re-sort before slicing:
+ * `touchConversation` appends a new thread to the end of an otherwise
+ * newest-first list, so slicing without re-sorting would evict the thread that
+ * was just created.
+ */
+async function persistConversationMeta(list: ConversationMeta[]): Promise<void> {
+  const settings = await getSettings()
+  const limit = normalizeHistoryLimit(settings.historyLimitConversations)
+  const kept = [...list].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit)
+  const keptIds = new Set(kept.map((meta) => meta.id))
+  for (const meta of list) {
+    if (!keptIds.has(meta.id)) await clearConversation(meta.id)
+  }
+  await area.set({ [KEY_CONVERSATIONS_META]: kept })
+}
+
+/** Re-applies the current conversation cap to already stored records. */
+export async function trimConversationsToLimit(): Promise<void> {
+  await withKeyLock(KEY_CONVERSATIONS_META, async () => {
+    await persistConversationMeta(await listConversations())
+  })
+}
+
+/**
  * Touches a conversation's metadata, creating it on first message.
  *
  * `title` is derived from the first user message and never overwritten, so
@@ -1069,7 +1107,7 @@ export async function touchConversation(
       preview: trimmed.slice(0, 120) || undefined,
     }
     list.push(created)
-    await area.set({ [KEY_CONVERSATIONS_META]: list })
+    await persistConversationMeta(list)
     return created
   })
 }
@@ -1282,9 +1320,6 @@ export async function recordPasswordUse(id: string): Promise<void> {
 
 // --- Action history ---------------------------------------------------------
 
-/** Hard cap so the audit log cannot grow without bound. */
-export const MAX_HISTORY_ENTRIES = 500
-
 function asHistory(value: unknown): HistoryEntry | null {
   if (!value || typeof value !== 'object') return null
   const entry = value as HistoryEntry
@@ -1316,13 +1351,26 @@ export async function listHistory(): Promise<HistoryEntry[]> {
     .sort((a, b) => b.at - a.at)
 }
 
+/** Writes the action-history list under the configured retention cap. */
+async function persistActionHistory(list: HistoryEntry[]): Promise<void> {
+  const settings = await getSettings()
+  const limit = normalizeHistoryLimit(settings.historyLimitOperations)
+  await area.set({ [KEY_HISTORY]: list.slice(0, limit) })
+}
+
 export async function addHistory(entry: HistoryEntry): Promise<void> {
   await withKeyLock(KEY_HISTORY, async () => {
     const list = await listHistory()
     list.unshift(entry)
     // listHistory sorts by time; cap the newest N.
-    const trimmed = list.slice(0, MAX_HISTORY_ENTRIES)
-    await area.set({ [KEY_HISTORY]: trimmed })
+    await persistActionHistory(list)
+  })
+}
+
+/** Re-applies the current action-history cap to already stored records. */
+export async function trimActionHistoryToLimit(): Promise<void> {
+  await withKeyLock(KEY_HISTORY, async () => {
+    await persistActionHistory(await listHistory())
   })
 }
 

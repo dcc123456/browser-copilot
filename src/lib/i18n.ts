@@ -105,6 +105,10 @@ export interface Messages {
   histOperations: string
   histEmpty: string
   histBatchDelete: string
+  /** Shown on the batch-delete button while a deletion is in flight. */
+  histDeleting: string
+  /** Total record count shown in the batch toolbar. */
+  histRecordCount: (params: { count: number }) => string
   histDeleteSelected: string
   histSelectAll: string
   histDeleteConfirm: (params: { count: number }) => string
@@ -1349,6 +1353,14 @@ export interface Messages {
   settingsElementPickerFormatText: string
   settingsElementPickerFormatHtml: string
 
+  // Settings · history retention
+  settingsHistoryRetentionTitle: string
+  settingsHistoryRetentionHint: string
+  settingsHistoryLimitConversations: string
+  settingsHistoryLimitWorkflowRuns: string
+  settingsHistoryLimitTaskRuns: string
+  settingsHistoryLimitOperations: string
+
   // Settings · storage location
   settingsStorage: string
   settingsStorageIntro: string
@@ -1968,6 +1980,8 @@ const en: Messages = {
   histOperations: 'Operations',
   histEmpty: 'No records yet.',
   histBatchDelete: 'Delete selected',
+  histDeleting: 'Deleting…',
+  histRecordCount: ({ count }) => `${count} records`,
   histDeleteSelected: 'Delete selected',
   histSelectAll: 'Select all',
   histDeleteConfirm: ({ count }) =>
@@ -3074,6 +3088,14 @@ const en: Messages = {
   settingsElementPickerFormatText: 'Visible text only',
   settingsElementPickerFormatHtml: 'HTML (tags + text)',
 
+  settingsHistoryRetentionTitle: 'History retention',
+  settingsHistoryRetentionHint:
+    'Each history section keeps at most this many records. Lowering a limit trims older records immediately, including the stored conversation transcripts.',
+  settingsHistoryLimitConversations: 'Conversations',
+  settingsHistoryLimitWorkflowRuns: 'Workflow runs',
+  settingsHistoryLimitTaskRuns: 'Task runs',
+  settingsHistoryLimitOperations: 'Operations',
+
   settingsStorage: 'Storage location',
   settingsStorageIntro:
     'Chats, workflows, history, skills, agents and other data are saved as plain JSON files in a folder you choose. Extension settings (model providers, the folder choice itself) stay in browser storage. While the folder is briefly unreachable, changes queue up and flush into it automatically once access is restored.',
@@ -3738,6 +3760,8 @@ const zhCN: Messages = {
   histOperations: '操作记录',
   histEmpty: '暂无记录',
   histBatchDelete: '批量删除',
+  histDeleting: '删除中…',
+  histRecordCount: ({ count }) => `共 ${count} 条`,
   histDeleteSelected: '删除选中',
   histSelectAll: '全选',
   histDeleteConfirm: ({ count }) => `确认删除选中的 ${count} 条记录？此操作不可撤销。`,
@@ -4750,6 +4774,14 @@ const zhCN: Messages = {
   settingsElementPickerFormatSelector: '仅 CSS 选择器',
   settingsElementPickerFormatText: '仅文本',
   settingsElementPickerFormatHtml: 'HTML（标签 + 文本）',
+
+  settingsHistoryRetentionTitle: '历史记录保留上限',
+  settingsHistoryRetentionHint:
+    '每类历史记录最多保留此数量的记录。调小上限会立即清理较旧的记录，包括已保存的对话内容。',
+  settingsHistoryLimitConversations: '对话记录',
+  settingsHistoryLimitWorkflowRuns: '工作流运行历史',
+  settingsHistoryLimitTaskRuns: '任务运行历史',
+  settingsHistoryLimitOperations: '操作记录',
 
   settingsStorage: '存储位置',
   settingsStorageIntro:
