@@ -35,7 +35,6 @@ import {
 } from '../lib/thinking'
 import { OCR_SUPPORTED } from '../lib/ocr-support'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
-import { Switch } from '../ui/Switch'
 import { useSettings } from './hooks/useSettings'
 import { useT } from './i18n'
 import Banner from './components/Banner'
@@ -1046,30 +1045,6 @@ export default function ModelsTab() {
         <p className="hint">
           {t.settingsImageModelCurrentValue({ value: choiceLabel(settings.takeoverModel) })}
         </p>
-
-        <Switch
-          checked={settings.takeoverOnRun}
-          label={t.settingsTakeoverOnRun}
-          onChange={(takeoverOnRun) =>
-            void mutate({
-              type: 'settings.set',
-              patch: { takeoverOnRun },
-            })
-          }
-        />
-        <p className="hint">{t.settingsTakeoverOnRunIntro}</p>
-
-        <Switch
-          checked={settings.autoRepairOnRun}
-          label={t.settingsAutoRepairOnRun}
-          onChange={(autoRepairOnRun) =>
-            void mutate({
-              type: 'settings.set',
-              patch: { autoRepairOnRun },
-            })
-          }
-        />
-        <p className="hint">{t.settingsAutoRepairOnRunIntro}</p>
 
         <div className="actions">
           <button onClick={openTakeoverDialog} type="button">

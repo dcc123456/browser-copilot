@@ -138,8 +138,6 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     imageModel: { providerId: '', model: '' },
     ocrLanguage: 'eng',
     takeoverModel: { providerId: '', model: '' },
-    takeoverOnRun: false,
-    autoRepairOnRun: false,
     elementPickerEnabled: false,
     elementPickerFormat: 'html',
     elementPickerSelectOnly: false,

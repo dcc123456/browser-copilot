@@ -1151,11 +1151,6 @@ export interface Messages {
   /** AI-takeover debug model card. */
   settingsTakeoverModel: string
   settingsTakeoverModelIntro: string
-  settingsTakeoverOnRun: string
-  settingsTakeoverOnRunIntro: string
-  /** Auto-repair-on-run-failure opt-in (off by default). */
-  settingsAutoRepairOnRun: string
-  settingsAutoRepairOnRunIntro: string
   settingsTakeoverModelProvider: string
   settingsTakeoverModelSelectHint: string
   settingsTakeoverModelSaved: string
@@ -2885,12 +2880,6 @@ const en: Messages = {
   settingsTakeoverModel: 'AI-takeover model (AI 调试)',
   settingsTakeoverModelIntro:
     'Dedicated model for AI debug takeovers — the agent that completes failed workflow steps on the live page. This is a hard multi-round task, so a stronger model here raises the debug success rate. Leave on Auto to use the active chat model.',
-  settingsTakeoverOnRun: 'Also allow AI takeover when a plain run fails (uses model calls)',
-  settingsTakeoverOnRunIntro:
-    'Off by default: plain runs fail fast. When on, a failed node gets one AI takeover episode and any proposed fix lands as pending for your confirmation.',
-  settingsAutoRepairOnRun: 'Start AI auto-repair when a run fails',
-  settingsAutoRepairOnRunIntro:
-    'Off by default: a failed run stays failed and you can start a repair from the failure center. When on, a failed run of a generated workflow enters the auto-repair loop in the background — you can cancel it while it runs.',
   settingsTakeoverModelProvider: 'Provider',
   settingsTakeoverModelSelectHint:
     'Pick a model from the dropdown, or keep the provider default. Fetch the list first if it is empty.',
@@ -4609,12 +4598,6 @@ const zhCN: Messages = {
   settingsTakeoverModel: 'AI 接管模型（AI 调试）',
   settingsTakeoverModelIntro:
     '为 AI 调试接管单独指定模型——负责在页面上完成失败步骤的智能体是“看页面 + 多轮工具调用”的硬任务，用更强的模型能显著提升调试成功率。留空（自动）则使用当前会话模型。',
-  settingsTakeoverOnRun: '普通运行失败时也允许 AI 接管（会消耗模型调用）',
-  settingsTakeoverOnRunIntro:
-    '默认关闭：普通运行失败即失败。开启后失败节点会获得一次 AI 接管机会，产生的修改建议进入待确认列表。',
-  settingsAutoRepairOnRun: '运行失败后自动进入 AI 修复',
-  settingsAutoRepairOnRunIntro:
-    '默认关闭：运行失败就是失败，你可以在失败中心手动发起修复。开启后，AI 生成的工作流运行失败会在后台自动进入修复循环，修复过程中可随时取消。',
   settingsTakeoverModelProvider: '模型服务',
   settingsTakeoverModelSelectHint: '从下拉中选择模型，或保持服务默认。列表为空时请先获取模型列表。',
   settingsTakeoverModelSaved: 'AI 接管模型已保存。',

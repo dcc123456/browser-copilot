@@ -218,7 +218,6 @@ import {
 } from '../lib/workflow/takeover-pending'
 import {
   debugRunLabel,
-  takeoverAutoRunBudget,
   takeoverMaxAttempts,
   takeoverProviderOf,
   type TakeoverReasonKind,
@@ -281,7 +280,6 @@ import type {
   VerificationResult,
   WorkflowPatchSet,
 } from '../lib/workflow/repair/types'
-import { isGeneratedStrict } from '../lib/workflow/reliability'
 // Static imports — same SW dynamic-import crash fix as above.
 import { applySelfHeal } from '../lib/workflow/self-heal'
 import {
@@ -2150,33 +2148,6 @@ async function handleCommand(
       // triggers reach it with graphs that are already known-good, and a newly
       // added rule must not be able to break them.
       const gate = validateWorkflowForRun(workflow)
-      // Optional AI takeover on plain runs (settings.takeoverOnRun, default
-      // off): a failed node gets one agent episode, its fix lands as pending
-      // for user confirmation — same closure as the debug session, without
-      // the verify loop.
-      const settings = await getSettings()
-      let takeover: ReturnType<typeof createAiTakeover> | undefined
-      if (settings.takeoverOnRun) {
-        const provider = takeoverProviderOf(settings)
-        takeover = createAiTakeover({
-          ...(provider ? { provider } : {}),
-          // M1-10(c): an automatic run gets a SINGLE takeover episode (cost
-          // ceiling) — the fix lands as pending for the user to confirm, it
-          // must not loop 3×40 unattended. Overridable via
-          // BC_TAKEOVER_AUTORUN_BUDGET.
-          takeoverBudget: takeoverAutoRunBudget(),
-          onTakeover: (report) => {
-            void recordTakeoverStat({
-              at: Date.now(),
-              workflowId: workflow.id,
-              nodeId: report.nodeId,
-              completed: report.completed,
-              attempts: report.attempts,
-              ...(report.reasonKind ? { reasonKind: report.reasonKind } : {}),
-            })
-          },
-        })
-      }
       const r = await executeWorkflow(workflow, {
         source: 'manual',
         // The gate's findings ride ON THE RUN: they land in the run log and
@@ -2185,7 +2156,6 @@ async function handleCommand(
         startAt: (command as { startAt?: string }).startAt,
         debug: workflow.settings?.debugMode === true,
         ...(command.testing ? { testing: true } : {}),
-        ...(takeover ? { aiTakeover: takeover } : {}),
         // Panel run button: act inside the panel's window (undefined for the
         // editor popup, which is not a normal window).
         ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
@@ -2193,54 +2163,19 @@ async function handleCommand(
         ...(command.promptToken ? { promptToken: command.promptToken } : {}),
       })
 
-      // Auto repair (spec §30 Run defaults): the repair loop is an OPT-IN
-      // (`settings.autoRepairOnRun`, off by default) — a plain run reports its
-      // own outcome and the user can still start a repair from the failure
-      // center. When enabled, the loop runs in the BACKGROUND (like the
-      // recovery path) so `workflows.run` settles with the real run result
-      // instead of blocking for the whole repair; progress streams to the panel
-      // as `workflows.repairEvent`, where the user can watch or cancel it.
-      const generatedRun = isGeneratedStrict(workflow)
+      // A failed plain run stays failed. Repair is always an explicit user
+      // action — from the failure center, the editor or the MCP tools — so
+      // `workflows.run` settles with the real run result and never rewrites the
+      // graph behind the panel's back.
       if (r.outcome === 'failed' && r.trace) rememberFailedRun(workflow.id, r.runId, r.trace)
-      const repairStarted =
-        r.outcome === 'failed' && generatedRun && !takeover && !!r.trace && settings.autoRepairOnRun
-      if (repairStarted) {
-        const repairModelConfig = takeoverProviderOf(settings)
-        void startBackgroundAutoRepair({
-          workflow,
-          runId: r.runId,
-          failure: failureSnapshotForRun(workflow, r.runId),
-          ...(repairModelConfig
-            ? {
-                model: {
-                  apiKey: repairModelConfig.apiKey,
-                  baseUrl: repairModelConfig.baseUrl,
-                  model: repairModelConfig.model,
-                  headers: repairModelConfig.headers,
-                  ...(repairModelConfig.thinkingEffort
-                    ? { thinking: repairModelConfig.thinkingEffort }
-                    : {}),
-                },
-              }
-            : {}),
-          save: { saveWorkflow, getWorkflow },
-          ...(scopeWindowId !== undefined ? { scopeWindowId } : {}),
-          forward: (event) => {
-            void broadcastRepairEvent(event)
-          },
-        }).catch((error: unknown) => {
-          console.warn('[workflows.run] background auto repair failed', error)
-        })
-      }
 
       const runOk = r.outcome === 'ok'
       // SELF-HEAL write-back: a step that had to fall down the locator ladder
       // found a candidate the live page prefers. Rotate it into the graph now,
       // so the NEXT replay starts from what actually works instead of re-running
-      // the same guess every time. Skipped while the auto-repair loop owns the
-      // graph (it writes its own revision), and never blocks the run.
+      // the same guess every time. Never blocks the run.
       let healed = workflow
-      if (r.degradations?.length && !repairStarted) {
+      if (r.degradations?.length) {
         try {
           const result = applySelfHeal(workflow, r.degradations, { runId: r.runId })
           if (result.changes.length > 0) {
@@ -2312,17 +2247,17 @@ async function handleCommand(
         }
       }
       // FIRST-RUN METRIC — the number this whole line of work is measured by.
-      // One record per graph revision, and the record describes THIS attempt:
-      // a run that only worked because autonomous repair took over is logged as
-      // failed with `autoRepaired`, because "the generated graph did not run"
-      // is exactly what we are trying to make rarer.
+      // One record per graph revision, and the record describes THIS attempt.
+      // `autoRepaired` is left unset here: a plain run no longer hands itself to
+      // the repair loop, so it is always the honest `false`. The field still
+      // carries meaning for records written before it was retired, and the
+      // health view reads those.
       observeFirstRunOfRevision(workflow, {
         outcome: r.outcome,
         error: r.error,
         summary: r.summary,
         trace: r.trace,
         degradations: r.degradations,
-        autoRepaired: repairStarted,
       })
       return {
         type: 'workflows.run',

@@ -57,24 +57,6 @@ export function takeoverToolRounds(): number {
 }
 
 /**
- * Cost ceiling on takeover attempts for an AUTOMATIC run (`takeoverOnRun`).
- * Unlike a manual debug session, an unattended run must not loop 3×40 — it
- * gets a single takeover episode, and the fix (if any) lands as pending for
- * the user to confirm. Overridable via `BC_TAKEOVER_AUTORUN_BUDGET` (min 1).
- */
-export function takeoverAutoRunBudget(): number {
-  const raw =
-    typeof process !== 'undefined' && process.env
-      ? process.env.BC_TAKEOVER_AUTORUN_BUDGET
-      : undefined
-  if (raw != null && raw !== '') {
-    const n = Number(raw)
-    if (Number.isFinite(n)) return Math.min(100, Math.max(1, Math.trunc(n)))
-  }
-  return 1
-}
-
-/**
  * A cheap, stable signature of one failure: the failing node id plus a
  * normalized (lowercased, whitespace-collapsed) slice of the error. Used to
  * detect that retrying the SAME failure is hopeless (fast-fail breadth).

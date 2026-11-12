@@ -154,6 +154,7 @@
 - **M1 P0（1–9）**：默认等待、LLM 瞬时重试、快照覆盖、结构化错误上下文、陈旧 ref 引导、verdict 收紧、反思模板、低温默认、尝试间记忆。
 - **M1-10(b) 闭环·服务端 patch 应用**：`server/src/agent/takeover.ts` 在 `BC_TAKEOVER_APPLY_PATCH=1` 时把接管建议的 `paramsPatch` 应用到内存副本（`patchNodeParams`）+ 写审计产物；默认关，不静默改图。
 - **M1-10(a/c) 闭环·扩展端**：`workflows.takeoverApply` 支持 `verify` 选填，应用修复后（仅当存在活动面板窗口）跑一次无接管验证运行并回传 `verified`/`verifySummary`；定时运行（`takeoverOnRun`）`takeoverBudget` 收紧为 `takeoverAutoRunBudget()`（默认 **1** 次接管，成本封顶，`BC_TAKEOVER_AUTORUN_BUDGET` 可覆盖）。
+  - 2026-11-12 更新：`settings.takeoverOnRun` 与 `autoRepairOnRun` 两个默认关闭的开关已随「运行期自动接管/自动修复」入口一起移除（`specs/2026-11-12-remove-takeover-run-switches-plan.md`），`takeoverAutoRunBudget()` 与 `BC_TAKEOVER_AUTORUN_BUDGET` 因此删除。本项口径只对**手动调试会话 / 失败中心修复 / MCP 修复 / 生成桥自测**继续成立，这些路径的预算仍是 `takeoverMaxAttempts()` × `DEFAULT_MAX_ROUNDS`。
 - **M2-11 快速失败扩面**：`failureSignature` + `isRepeatedHopelessFailure`（同节点同错误连续 3 次即早停）；扩展与服务端双循环接入。
 - **M2-12 全局重试预算 + 逃生舱**：`AiTakeoverDeps.takeoverBudget`（= `takeoverMaxAttempts()` × `DEFAULT_MAX_ROUNDS`）接入扩展接管双路径；超出即优雅结束并带原因；服务端对齐。
 - **M2-13 服务端 tab 钉定**：`server/src/agent/takeover.ts` 锁定 `request.tabId` 与运行日志一致（接管前断言）。

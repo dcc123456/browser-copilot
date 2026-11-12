@@ -1,6 +1,5 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { verifyAppliedWorkflow } from '../src/lib/workflow/apply-verify'
-import { takeoverAutoRunBudget } from '../src/lib/workflow/ai-takeover'
 import type { Workflow } from '../src/lib/workflow/types'
 
 const fakeWorkflow = { id: 'w1', name: 'w' } as unknown as Workflow
@@ -27,27 +26,5 @@ describe('verifyAppliedWorkflow (M1-10a)', () => {
       throw new Error('no live tab')
     }
     await expect(verifyAppliedWorkflow(fakeWorkflow, run)).rejects.toThrow('no live tab')
-  })
-})
-
-describe('takeoverAutoRunBudget (M1-10c)', () => {
-  afterEach(() => {
-    delete process.env.BC_TAKEOVER_AUTORUN_BUDGET
-  })
-
-  it('defaults to 1 — a single takeover episode for automatic runs', () => {
-    expect(takeoverAutoRunBudget()).toBe(1)
-  })
-
-  it('honors the BC_TAKEOVER_AUTORUN_BUDGET override', () => {
-    process.env.BC_TAKEOVER_AUTORUN_BUDGET = '2'
-    expect(takeoverAutoRunBudget()).toBe(2)
-  })
-
-  it('clamps non-positive and over-cap values into [1, 100]', () => {
-    process.env.BC_TAKEOVER_AUTORUN_BUDGET = '0'
-    expect(takeoverAutoRunBudget()).toBe(1)
-    process.env.BC_TAKEOVER_AUTORUN_BUDGET = '999'
-    expect(takeoverAutoRunBudget()).toBe(100)
   })
 })

@@ -625,8 +625,6 @@ export function normalizeSettingsPayload(raw: unknown): {
   imageModel: { providerId: string; model: string }
   ocrLanguage: string
   takeoverModel: { providerId: string; model: string }
-  takeoverOnRun: boolean
-  autoRepairOnRun: boolean
   elementPickerEnabled: boolean
   elementPickerFormat: ElementPickerFormat
   elementPickerSelectOnly: boolean
@@ -730,8 +728,6 @@ export function normalizeSettingsPayload(raw: unknown): {
     imageModel,
     ocrLanguage,
     takeoverModel,
-    takeoverOnRun: typeof value.takeoverOnRun === 'boolean' ? value.takeoverOnRun : false,
-    autoRepairOnRun: typeof value.autoRepairOnRun === 'boolean' ? value.autoRepairOnRun : false,
     elementPickerEnabled:
       typeof value.elementPickerEnabled === 'boolean' ? value.elementPickerEnabled : false,
     elementPickerFormat: normalizeElementPickerFormat(value.elementPickerFormat),

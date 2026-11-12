@@ -236,17 +236,6 @@ export interface Settings {
    */
   takeoverModel: VisionConfig
   /**
-   * 普通运行（面板“运行”按钮）失败时也允许 AI 接管。消耗模型调用，
-   * 默认关闭；调试（workflows.debug）始终启用接管，与此开关无关。
-   */
-  takeoverOnRun: boolean
-  /**
-   * 运行失败后是否自动进入 AI 自主修复循环（仅对生成式严格工作流有意义）。
-   * 默认关闭：失败就如实报失败，用户可在失败中心手动发起修复，或在设置里
-   * 开启此项让修复自动开始（修复过程中仍可取消）。
-   */
-  autoRepairOnRun: boolean
-  /**
    * When on, every http(s) page shows a crosshair button that opens the element
    * picker; confirming copies the selected element to the clipboard so the user
    * can paste it into the chat. What gets copied is

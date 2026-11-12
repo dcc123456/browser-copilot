@@ -708,8 +708,9 @@ async function certifyReplayGoal(
  *
  * This is the piece the self test was missing: generation proves a graph once and
  * `verify_workflow` only reports, so a graph whose locator went stale had no path
- * to the repair orchestrator, which lives behind `settings.autoRepairOnRun` on the
- * panel's own run button. Two facts make that loop possible here: the request
+ * to the repair orchestrator, which the panel's run button never starts on its
+ * own (only this bridge, the recovery path and the `workflows.autoRepair`
+ * command do). Two facts make that loop possible here: the request
  * carries the model config the caller resolved from settings (the bridge reads no
  * settings itself), and a failed trial now remembers its trace
  * (`generation-trial.ts`) — repair without that evidence would be handed a

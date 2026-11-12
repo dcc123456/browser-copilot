@@ -56,8 +56,6 @@ function settingsWith(provider: Partial<ProviderProfile>): Settings {
     unattendedWindowPolicy: 'latest',
     maxConcurrentRunWindows: 3,
     takeoverModel: { providerId: '', model: '' },
-    takeoverOnRun: false,
-    autoRepairOnRun: false,
     elementPickerEnabled: false,
     elementPickerFormat: 'html',
     elementPickerSelectOnly: false,

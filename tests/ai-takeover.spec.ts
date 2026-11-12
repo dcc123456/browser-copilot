@@ -288,7 +288,6 @@ describe('takeoverProviderOf', () => {
     ],
     activeProviderId: 'p1',
     takeoverModel: { providerId: '', model: '' },
-    takeoverOnRun: false,
   }
 
   it('returns the active provider when no override is configured', () => {
