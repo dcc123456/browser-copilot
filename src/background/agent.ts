@@ -677,7 +677,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'form_fields',
       description:
-        'List every fillable field of the page (input / textarea / select, with or without a <form> tag): ref, label, type, required, options, current value. Call it before filling, then write the whole form in one `fill_form`; its refs replace the previous snapshot refs.',
+        'List every fillable field (input / textarea / select, with or without a <form> tag): ref, label, type, required, options, current value. When the task needs 3+ values, call it first, then write them all with one `fill_form`; its refs replace the old snapshot refs.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -758,7 +758,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'fill',
       description:
-        'Type text into an input/textarea/contenteditable. Preferred for ALL text entry (handles React inputs and shadow roots). Checkboxes: set_checkbox; dropdowns: select_option.',
+        'Type text into ONE input/textarea/contenteditable (handles React inputs and shadow roots). Checkboxes: set_checkbox; dropdowns: select_option. For 3+ values use fill_form.',
       parameters: {
         type: 'object',
         properties: {
@@ -787,7 +787,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'fill_form',
       description:
-        'Fill many fields in one page pass: a single injection writes them all, then each value is read back and compared. Use it for 2+ fields; the kind comes from the element, never from the call. The result names the `failed` fields — retry only those. Rich-text and file inputs need `fill`.',
+        'Fill many fields in one page pass: a single injection writes them all, then each value is read back and compared. Use it for 3+ field values; the kind comes from the element, never from the call. The result names the `failed` fields — retry only those. Rich-text and file inputs need `fill`.',
       parameters: {
         type: 'object',
         properties: {
@@ -826,7 +826,8 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'select_option',
-      description: 'Choose an option in a <select> dropdown by its visible label or value.',
+      description:
+        'Choose an option in a <select> dropdown by its visible label or value. For 3+ values use fill_form.',
       parameters: {
         type: 'object',
         properties: {
@@ -846,7 +847,8 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'set_checkbox',
-      description: 'Check or uncheck a checkbox, or select a radio button.',
+      description:
+        'Check or uncheck a checkbox, or select a radio button. For 3+ values use fill_form.',
       parameters: {
         type: 'object',
         properties: {

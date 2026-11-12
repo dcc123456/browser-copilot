@@ -46,6 +46,9 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * first form filled. Both are withheld in workflow generation (see
  * WORKFLOW_WITHHELD_TOOLS), where the per-field `wf_op_forms` operator records
  * the node a batch cannot.
+ * Kept at 14_250 for the "3+ values" threshold (measured 14_210): the batch is
+ * now the default above three fields, and `fill` lost its "preferred for ALL
+ * text entry" claim, which is what made models queue up single fills.
  */
 const MAX_ADVERTISED_PAYLOAD_CHARS = 14_250
 /**
@@ -104,9 +107,15 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 14_250
  * their members (~200 chars in the schema; group moves themselves cost nothing
  * — the same schemas, filed differently). Measured 32_229.
  * Raised 32_300 → 33_750 for the batched form pair (`form_fields` +
- * `fill_form`). Measured 33_702.
+ * `fill_form`). Measured 33_709 after the "3+ values" threshold landed in the
+ * `fill` / `form_fields` / `fill_form` descriptions.
+ * Raised 33_750 → 33_800 when `select_option` and `set_checkbox` got the same
+ * pointer (~29 chars each). Without it a mixed form — two text fields, a
+ * dropdown, a checkbox — is four separate calls, which is the ≥3-field case the
+ * threshold exists for. Both tools are in the on-demand `forms` group, so the
+ * advertised round-1 payload does not move (measured 33_767).
  */
-const MAX_CATALOG_CHARS = 33_750
+const MAX_CATALOG_CHARS = 33_800
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the

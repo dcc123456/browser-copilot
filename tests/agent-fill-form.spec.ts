@@ -11,7 +11,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { runAgentTurn } from '../src/background/agent'
+import { runAgentTurn, TOOLS } from '../src/background/agent'
 import type { AgentServerMessage } from '../src/lib/messages'
 import { streamCompletion } from '../src/lib/llm'
 
@@ -324,5 +324,33 @@ describe('fill_form batch write', () => {
         (callArgs) => (callArgs[0] as { action?: string }).action === 'fill_form',
       ),
     ).toHaveLength(0)
+  })
+})
+
+/**
+ * The ≥3-field threshold is only a behaviour because it is in the tool
+ * descriptions — nothing in the code can tell "this task writes 3 values" from
+ * "this page has 3 inputs". These assertions lock the steering text itself: an
+ * edit that drops it silently sends the model back to one `fill` per field.
+ */
+describe('batch threshold in the advertised schemas', () => {
+  function description(name: string): string {
+    const tool = TOOLS.find((entry) => entry.function.name === name)
+    return tool ? tool.function.description : ''
+  }
+
+  it('routes 3+ values to fill_form from both sides of the choice', () => {
+    expect(description('fill_form')).toMatch(/3\+ field values/)
+    expect(description('fill')).toMatch(/For 3\+ values use fill_form/)
+    expect(description('form_fields')).toMatch(/3\+ values/)
+    // A mixed form is the ≥3-field case too: two text fields, a dropdown and a
+    // checkbox must not become four calls.
+    expect(description('select_option')).toMatch(/For 3\+ values use fill_form/)
+    expect(description('set_checkbox')).toMatch(/For 3\+ values use fill_form/)
+  })
+
+  it('no longer calls fill the preferred way to type', () => {
+    expect(description('fill')).not.toMatch(/Preferred for ALL text entry/)
+    expect(description('fill')).toMatch(/ONE/)
   })
 })

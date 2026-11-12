@@ -53,7 +53,8 @@ failed[]     →  只把失败的字段交回模型，下一轮只重试这几�
 | 整表读取复用 `snapshot_page`                          | 否决                         | `forms[]` 要求 `<form>` 父节点（`kernel.ts:1579` `safeQuery('form')`），现代 div 表单直接不在里面；而 snapshot 还带整页正文 prose，读字段时纯属 token 浪费。用户明确要「一个专门的列字段读」。 |
 
 用户裁决记录（2026-11-12）：批量写放内核新 op（A）；**只读回比对，不做工具内自动重试**
-（失败交回模型）；新增专门的列字段读；范围仅对话模式 agent 工具。
+（失败交回模型）；新增专门的列字段读；范围仅对话模式 agent 工具；**一次任务要写 ≥3 个字段值
+就必须用批量工具**（门槛落点见 §4.7）。
 
 ### payload 预算（实测，非估计）
 
@@ -177,6 +178,27 @@ failed[]     →  只把失败的字段交回模型，下一轮只重试这几�
 durable target：这样「从历史生成工作流」与 AI 预填（`lib/workflow/ai-prefill.ts`，靠
 `blockId:'forms'` + `generated` 判定）完全不受影响。工具级 `generated` 布尔照抄 `fill` 的
 语义并广播到每条记录。
+
+### 4.7 触发门槛：一次任务要写 ≥3 个字段就必走批量（裁决 2026-11-12 补充）
+
+「一个页面有 3 个字段」不等于「这次要写 3 个字段」，所以门槛**不能**由代码判定：
+用户只要改一个手机号时，页面上有 20 个字段也该单字段 `fill`。「本次要写几个值」只有模型
+自己知道，因此门槛只写在**模型做选择的那一刻能看到的地方**——四个工具描述：
+
+- `fill_form`：`Use it for 3+ field values;`
+- `form_fields`：`When the task needs 3+ values, call it first, then write them all with one fill_form;`
+- `fill`：删掉原来的 `Preferred for ALL text entry`（这句是反向激励：它明确把模型推回逐字段
+  填写），改成 `Type text into ONE input/textarea/contenteditable … For 3+ values use fill_form.`
+- `select_option` / `set_checkbox`：各加一句 `For 3+ values use fill_form.` 混合表单
+  （两个文本 + 一个下拉 + 一个勾选）正是「≥3 个值」的典型形态，少了这句就退化成 4 次调用。
+
+共享 prompt 的规则 13 不再重复这个门槛（`lib/system-prompt.ts` 文件头的约定：同一条规则不在
+两处解释；且 prompt 每轮全量重发，规则文字会同时顶高工作流的三个天花板）。
+实测代价：首轮 `14_203 → 14_210`（天花板 14_250；`select_option` / `set_checkbox` 在按需
+`forms` 组里，不进首轮菜单），全量目录 `33_702 → 33_800`（实测 33_767，按仓库惯例记录实测后
+上调），工作流首轮 `63_709 / 63_750` 不变。
+门槛文字由 `tests/agent-fill-form.spec.ts` 的 `batch threshold in the advertised schemas`
+锁住——这段文字本身就是行为，被改回去不会有任何测试变红，所以必须有断言。
 
 ## 5. 不做什么（本次切片）
 
