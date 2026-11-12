@@ -49,8 +49,12 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * Kept at 14_250 for the "3+ values" threshold (measured 14_210): the batch is
  * now the default above three fields, and `fill` lost its "preferred for ALL
  * text entry" claim, which is what made models queue up single fills.
+ * Raised 14_250 → 14_300 for the mixed-form read (+59): `form_fields` now names
+ * the `multiple` flag, and `fill_form` says what a value MEANS per kind —
+ * without it a model mirrors a radio's own text into a checkbox and the page
+ * reads that as "leave it unchecked".
  */
-const MAX_ADVERTISED_PAYLOAD_CHARS = 14_250
+const MAX_ADVERTISED_PAYLOAD_CHARS = 14_300
 /**
  * The full catalog (core + every on-demand group) must also stay bounded.
  * Raised 19_500 → 21_500 when the on-demand "delegate" group
@@ -114,8 +118,9 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 14_250
  * dropdown, a checkbox — is four separate calls, which is the ≥3-field case the
  * threshold exists for. Both tools are in the on-demand `forms` group, so the
  * advertised round-1 payload does not move (measured 33_767).
+ * Raised 33_800 → 33_850 for the same mixed-form read (+26; measured 33_826).
  */
-const MAX_CATALOG_CHARS = 33_800
+const MAX_CATALOG_CHARS = 33_850
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the

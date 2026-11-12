@@ -373,6 +373,8 @@ export interface FormFieldEntry {
   placeholder?: string
   /** Visible labels, for `select` controls only. */
   options?: string[]
+  /** True on a `<select multiple>`: its value is a set, so a batch takes a list. */
+  multiple?: boolean
   /** Durable target, so a later batch can resolve the ref. */
   target: Target
 }

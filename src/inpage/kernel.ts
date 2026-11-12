@@ -1224,6 +1224,38 @@ export function runOp(op: Op): OpResult {
     }
   }
 
+  /**
+   * Which checked state a caller asked for on a checkbox or radio.
+   *
+   * Two shapes arrive in practice: a boolean, and the option's OWN text — a model
+   * that mirrors what `form_fields` showed it. The second is unambiguous only for a
+   * radio, whose ref already names the choice. Coercing anything else to `false`
+   * would silently UNCHECK a field, and the read-back compares against that same
+   * value, so the batch would report a field it never filled.
+   */
+  function checkableWanted(
+    element: Element,
+    kind: 'checkbox' | 'radio',
+    value: string | string[] | boolean,
+  ): { checked: boolean } | { error: string } {
+    if (typeof value === 'boolean') return { checked: value }
+    const text = collapse(Array.isArray(value) ? value.join(' ') : String(value ?? ''))
+    if (/^(true|false)$/i.test(text)) return { checked: text.toLowerCase() === 'true' }
+    if (text === '') return { checked: false }
+    if (kind === 'radio') {
+      const name = accessibleName(element)
+      const own = String((element as HTMLInputElement).value ?? '')
+      const choiceName = name || own
+      const lowered = text.toLowerCase()
+      if (lowered === collapse(own).toLowerCase() || lowered === choiceName.toLowerCase())
+        return { checked: true }
+      return {
+        error: `A radio is chosen by its ref: pass true on the ref of the option you want (this ref is "${choiceName}", the value you passed was "${text}").`,
+      }
+    }
+    return { error: `A checkbox wants true or false (the value you passed was "${text}").` }
+  }
+
   /** Which verification rule an element needs, derived from the element itself. */
   function fieldKindOf(
     element: Element,
@@ -1261,8 +1293,13 @@ export function runOp(op: Op): OpResult {
    */
   function fieldMatchesWanted(element: Element, wanted: string | string[] | boolean): boolean {
     const kind = fieldKindOf(element)
-    if (kind === 'checkbox' || kind === 'radio')
-      return (element as HTMLInputElement).checked === (wanted === true || wanted === 'true')
+    if (kind === 'checkbox' || kind === 'radio') {
+      // The SAME rule as the write, so a value the writer refused can never be
+      // "verified" by accident.
+      const desired = checkableWanted(element, kind, wanted)
+      if ('error' in desired) return false
+      return (element as HTMLInputElement).checked === desired.checked
+    }
     const accepted = Array.isArray(wanted) ? wanted.map(String) : [String(wanted ?? '')]
     if (kind === 'select' && element instanceof HTMLSelectElement) {
       const stored = element.multiple
@@ -1319,8 +1356,11 @@ export function runOp(op: Op): OpResult {
         element,
         Array.isArray(value) ? value.map(String) : [String(value ?? '')],
       )
-    if (kind === 'checkbox' || kind === 'radio')
-      return writeCheckControl(element, value === true || value === 'true')
+    if (kind === 'checkbox' || kind === 'radio') {
+      const wanted = checkableWanted(element, kind, value)
+      if ('error' in wanted) return fail(wanted.error)
+      return writeCheckControl(element, wanted.checked)
+    }
     focusElement(element)
     return writeTextControl(
       element,
@@ -2304,6 +2344,10 @@ export function runOp(op: Op): OpResult {
           if (control.options.length > OPTION_CAP)
             options.push(`…+${control.options.length - OPTION_CAP} more`)
           entry.options = options
+          // Without this a `<select multiple>` looks exactly like a single
+          // dropdown whose current value happens to be a list, and a batch
+          // cannot tell one value from a set of them.
+          if (control.multiple) entry.multiple = true
         }
         fields.push(entry)
       }
@@ -2338,6 +2382,18 @@ export function runOp(op: Op): OpResult {
           continue
         }
         const element = resolved.element
+        // Same refusal as `fill` / `select_option`: a disabled control is not
+        // submitted by the browser, so writing it would report a field filled
+        // that the page will never send.
+        if (isDisabled(element)) {
+          results.push({
+            i,
+            ok: false,
+            found: true,
+            error: `${describeElement(element)} is disabled.`,
+          })
+          continue
+        }
         const editable = element.getAttribute('contenteditable')
         if (editable === '' || editable === 'true') {
           // Stateful rich editors are the one thing a batch cannot write: they
@@ -2860,8 +2916,14 @@ export function runOp(op: Op): OpResult {
     }
 
     if (op.action === 'set_checkbox') {
-      const desired = op.value === undefined ? true : op.value === true || op.value === 'true'
-      return withMeta(writeCheckControl(element, desired))
+      // The SAME value rule a batch write uses, so a checkbox or radio means the
+      // same thing whether it arrived alone or inside `fill_form`.
+      const kind = fieldKindOf(element)
+      if (kind !== 'checkbox' && kind !== 'radio')
+        return withMeta(fail(`${describeElement(element)} is not a checkbox or radio.`))
+      const wanted = checkableWanted(element, kind, op.value === undefined ? true : op.value)
+      if ('error' in wanted) return withMeta(fail(wanted.error))
+      return withMeta(writeCheckControl(element, wanted.checked))
     }
 
     if (op.action === 'get_attribute') {

@@ -259,3 +259,42 @@ durable target：这样「从历史生成工作流」与 AI 预填（`lib/workfl
 未取证项：**侧栏 UI 与工具流水显示**（`form_fields` / `fill_form` 两个 chip、半自动确认卡、
 历史记录里落 N 条单字段动作）——这些要真实 LLM 轮次才能触发，本次只由
 `tests/agent-fill-form.spec.ts` 与 `tests/confirm.spec.ts` 离线锁定，人工验证请按上面 1–6 步。
+
+## 8. 混合表单专项复核（2026-11-12 补充）
+
+§7 的 fixture 已经覆盖到 9 控件 / 8 值，但它从头到尾是**同一套 React 受控组件**，
+把「混合」最贵的那部分避开了：单选组（radio group）的互斥、`<select multiple>`、
+禁用控件、以及**模型把读到的选项文本原样回填**这条最常见的事实。
+所以另开一个 spike（`tmp/mixed-form-probe.mjs`，24 条断言全绿，2026-11-12）：
+**原生 HTML 混合表单**——text / email / number / textarea / 单选 select /
+多选 select / 2 个 checkbox / **3 个同组 radio** / disabled 输入 / file / hidden /
+submit / contenteditable，仍然走真实 Chrome + `--load-extension=dist` + 常驻内核跳板。
+
+复核结论：批量写本身没问题，**四类控件的「值到底是什么意思」有问题**。修的四条：
+
+| # | 现象（复核前） | 修法 |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 1 | radio/checkbox 的值走 `value === true \|\| value === 'true'`。模型把读到的选项文本回填（`{ref: e10, value: "female"}`，或 checkbox 传 `"yes"`）会被**静默当成 false**，于是把已经勾上的框取消勾选；而读回比对用的还是同一个被 coerc 后的值，于是这一项还能「验证通过」 | 新增一条 `checkableWanted()` 规则，**批量写、单字段 `set_checkbox`、`verify_fields` 三处共用**：布尔直接用；`'true'/'false'` 字符串解析；空值算 false；radio 的文本**等于它自己的 value 或 label**（即照抄 `form_fields` 的读）判定为「选它」；其余一律**带名字拒绝**，不再猜成 false |
+| 2 | `<select multiple>` 和单选长得一样（都 `tag: select` + `options`），模型无从知道该传一个值还是一组 | `form_fields` 给多选加 `multiple: true` |
+| 3 | 批量会往 `disabled` 控件里写，并报告「已填写」；但禁用控件根本不会随表单提交，等于给了一个服务器永远收不到的「成功」 | `fill_form` 逐字段拒绝禁用控件，措辞与单字段 `fill` 一致 |
+| 4 | ——（复核确认本来就对，记录以免下次重复怀疑）：同组 radio 互斥、select 按 label 命中存储 value、多选按 label 数组、number 收数字串、空白折叠比对、单字段失败不拖垮整批、file/富文本各自明确拒绝 | 不动 |
+
+门禁侧同步：`tests/kernel-fill-form.spec.ts` 新增 6 条（radio 组互斥、镜像回填的选项文本、
+拒绝歧义值且**不改别的字段**、禁用控件拒绝、多选 `multiple` 标记、单字段 `set_checkbox`
+与批量同规则）；`tests/agent-fill-form.spec.ts` 新增 1 条
+`files each field under the operator that actually replays it`——**kind 取自页面而非模型的问法**，
+所以一个用文本形态发起的下拉，存成工作流时仍落成 `select_option`。
+`tests/agent-payload-size.spec.ts` 两处天花板按实测上调（advertised 14_250→14_300，
+catalog 33_800→33_850），增量来自 `form_fields` 多出的 `multiple` 与 `fill_form` 里那句
+「checkbox/radio 传 true/false（radio 的 ref 已经选好是哪个）」。
+
+人工怎么测（混合表单这几类，真实 Chrome）：
+
+1. 找一个带单选组（≥2 个同名 radio）+ 多选下拉 + 一个禁用输入框的表单页。
+2. 「全自动」模式下让它批量填，其中 radio 用 `true`、多选传一组 label。
+   预期：一次 `form_fields`（radio 每个选项单独成行、多选带 `multiple`）+ 一次 `fill_form`，
+   同组 radio 只留一个选中。
+3. 故意让模型把某个 radio 的**选项文本**当值传给**另一个** radio 的 ref。
+   预期：该字段进 `failed`，理由写着「A radio is chosen by its ref …」，**其余字段照常写入**，
+   且不会出现「取消勾选却报成功」。
+4. 给它一个禁用字段。预期：`failed` 里写 `is disabled`，页面上该字段仍是原值。

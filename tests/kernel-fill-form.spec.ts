@@ -78,6 +78,15 @@ function resultsOf<T>(result: OpResult): T[] {
   return (result.data as { results: T[] }).results
 }
 
+/** The two bulk writes, so a case reads as its field list rather than as glue. */
+function fillOp(fields: FormFillField[]): Op {
+  return { action: 'fill_form', fields } as unknown as Op
+}
+
+function checkOp(checks: FieldCheck[]): Op {
+  return { action: 'verify_fields', checks } as unknown as Op
+}
+
 beforeEach(() => {
   makePage(FORM)
 })
@@ -134,10 +143,6 @@ describe('kernel form_fields', () => {
 })
 
 describe('kernel fill_form', () => {
-  function fillOp(fields: FormFillField[]): Op {
-    return { action: 'fill_form', fields } as Op
-  }
-
   it('writes text, a select by visible label and a checkbox in one injection', async () => {
     const result = (await runOp(
       fillOp([
@@ -198,10 +203,6 @@ describe('kernel fill_form', () => {
 })
 
 describe('kernel verify_fields', () => {
-  function checkOp(checks: FieldCheck[]): Op {
-    return { action: 'verify_fields', checks } as Op
-  }
-
   it('compares text after whitespace collapsing', async () => {
     ;(dom.window.document.getElementById('name') as HTMLInputElement).value = '  Ada   Lovelace '
     const result = (await runOp(
@@ -261,5 +262,145 @@ describe('kernel verify_fields', () => {
       checkOp([{ target: cssTarget('#agree'), value: true }]),
     )) as unknown as OpResult
     expect(resultsOf<FieldVerdict>(after)[0]?.ok).toBe(true)
+  })
+})
+
+/**
+ * The checkable half of a mixed form. A checkbox or radio has no text to write,
+ * so the only question is what a value MEANS — and a silent `false` is the
+ * dangerous answer: it unchecks a field the read-back then agrees with.
+ */
+const CHECKABLES = `
+  <label for="nick">Nickname</label><input id="nick" type="text">
+  <label for="tastes">Tastes</label>
+  <select id="tastes" multiple><option value="tea">Tea</option><option value="sake">Sake</option></select>
+  <label for="agree">Agree</label><input id="agree" type="checkbox">
+  <label for="g_m">Male</label><input id="g_m" name="gender" type="radio" value="male">
+  <label for="g_f">Female</label><input id="g_f" name="gender" type="radio" value="female">
+  <label for="locked">VIP</label><input id="locked" type="text" value="readonly" disabled>
+`
+
+describe('kernel batch writes on checkboxes and radios', () => {
+  beforeEach(() => {
+    makePage(CHECKABLES)
+  })
+
+  const isChecked = (id: string) =>
+    (dom.window.document.getElementById(id) as HTMLInputElement).checked
+
+  it('lists each radio of a group and marks the multi-select', async () => {
+    const result = (await runOp({ action: 'form_fields' } as Op)) as unknown as OpResult
+    const byLabel = new Map(fieldsOf(result).map((field) => [field.label, field]))
+    expect(byLabel.get('Male')?.type).toBe('radio')
+    expect(byLabel.get('Female')?.type).toBe('radio')
+    // Without the flag a multi-select is indistinguishable from a single one.
+    expect(byLabel.get('Tastes')?.multiple).toBe(true)
+    expect(byLabel.get('Tastes')?.options).toEqual(['Tea', 'Sake'])
+  })
+
+  it('selects one radio of a group and keeps the group exclusive', async () => {
+    const written = (await runOp(
+      fillOp([{ target: cssTarget('#g_m'), value: true }]),
+    )) as unknown as OpResult
+    expect(resultsOf<FormFillOutcome>(written)[0]?.kind).toBe('radio')
+    expect(isChecked('g_m')).toBe(true)
+
+    const flipped = (await runOp(
+      fillOp([{ target: cssTarget('#g_f'), value: true }]),
+    )) as unknown as OpResult
+    expect(resultsOf<FormFillOutcome>(flipped)[0]?.ok).toBe(true)
+    expect(isChecked('g_f')).toBe(true)
+    expect(isChecked('g_m')).toBe(false)
+
+    const verified = (await runOp(
+      checkOp([
+        { target: cssTarget('#g_f'), value: true },
+        { target: cssTarget('#g_m'), value: false },
+      ]),
+    )) as unknown as OpResult
+    expect(verified.note).toBe('2/2 fields verified')
+  })
+
+  it('takes the option text a caller mirrored from the field list', async () => {
+    // `form_fields` shows a radio's own value/label, so a model repeating it is
+    // naming THIS control — the ref already says which option.
+    const written = (await runOp(
+      fillOp([
+        { target: cssTarget('#g_m'), value: 'male' },
+        { target: cssTarget('#agree'), value: true },
+      ]),
+    )) as unknown as OpResult
+    expect(written.note).toBe('2/2 fields written')
+    expect(isChecked('g_m')).toBe(true)
+    const byLabel = (await runOp(
+      checkOp([{ target: cssTarget('#g_f'), value: 'Female' }]),
+    )) as unknown as OpResult
+    expect(resultsOf<FieldVerdict>(byLabel)[0]?.ok).toBe(false)
+  })
+
+  it('refuses a value that names neither true nor this control', async () => {
+    const written = (await runOp(
+      fillOp([
+        { target: cssTarget('#nick'), value: 'Ada' },
+        // the OTHER radio's value: a guess about which option the caller wanted
+        { target: cssTarget('#g_f'), value: 'male' },
+        // "yes" is not a checked state
+        { target: cssTarget('#agree'), value: 'yes' },
+      ]),
+    )) as unknown as OpResult
+    const outcomes = resultsOf<FormFillOutcome>(written)
+    expect(written.note).toBe('1/3 fields written')
+    expect(outcomes[0]?.ok).toBe(true)
+    expect(outcomes[1]?.ok).toBe(false)
+    expect(outcomes[1]?.error).toContain('chosen by its ref')
+    expect(outcomes[2]?.ok).toBe(false)
+    expect(outcomes[2]?.error).toContain('true or false')
+    // Nothing was touched behind the refusal.
+    expect(isChecked('g_f')).toBe(false)
+    expect(isChecked('agree')).toBe(false)
+  })
+
+  it('never verifies a value the writer would refuse', async () => {
+    const verified = (await runOp(
+      checkOp([{ target: cssTarget('#agree'), value: 'yes' }]),
+    )) as unknown as OpResult
+    expect(resultsOf<FieldVerdict>(verified)[0]?.ok).toBe(false)
+  })
+
+  it('refuses a disabled control instead of reporting it filled', async () => {
+    // A disabled field is never submitted, so writing it would be a field the
+    // model believes is done and the server never receives.
+    const written = (await runOp(
+      fillOp([
+        { target: cssTarget('#locked'), value: 'hacked' },
+        { target: cssTarget('#nick'), value: 'Ada' },
+      ]),
+    )) as unknown as OpResult
+    const outcomes = resultsOf<FormFillOutcome>(written)
+    expect(outcomes[0]?.ok).toBe(false)
+    expect(outcomes[0]?.error).toContain('disabled')
+    expect(outcomes[1]?.ok).toBe(true)
+    expect((dom.window.document.getElementById('locked') as HTMLInputElement).value).toBe(
+      'readonly',
+    )
+  })
+
+  it('means the same thing as a single-field set_checkbox', async () => {
+    const lone = (await runOp({
+      action: 'set_checkbox',
+      target: cssTarget('#g_m'),
+      value: 'male',
+    } as unknown as Op)) as unknown as OpResult
+    expect(lone.ok).toBe(true)
+    expect(isChecked('g_m')).toBe(true)
+
+    const guessed = (await runOp({
+      action: 'set_checkbox',
+      target: cssTarget('#agree'),
+      value: 'yes',
+    } as unknown as Op)) as unknown as OpResult
+    expect(guessed.ok).toBe(false)
+    expect(guessed.error).toContain('true or false')
+    expect(isChecked('agree')).toBe(false)
   })
 })

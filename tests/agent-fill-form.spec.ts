@@ -304,6 +304,42 @@ describe('fill_form batch write', () => {
     expect(steps.every((step) => step.ok === true)).toBe(true)
   })
 
+  it('files each field under the operator that actually replays it', async () => {
+    // A mixed form is one batch call, but N history steps with DIFFERENT
+    // actions: the kind comes back from the page, never from what the model
+    // asked for, so a dropdown filled inside a text-shaped call still replays
+    // as select_option when the conversation is saved as a workflow.
+    await runBatch(
+      {
+        ok: true,
+        note: '3/3 fields written',
+        results: [
+          { i: 0, ok: true, found: true, kind: 'select' },
+          { i: 1, ok: true, found: true, kind: 'radio' },
+          { i: 2, ok: true, found: true, kind: 'checkbox' },
+        ],
+      },
+      {
+        ok: true,
+        note: '3/3 fields verified',
+        results: [
+          { i: 0, ok: true, found: true },
+          { i: 1, ok: true, found: true },
+          { i: 2, ok: true, found: true },
+        ],
+      },
+    )
+
+    const steps = addHistoryMock.mock.calls
+      .map((args) => args[0] as { action: string; args?: Record<string, unknown> })
+      .filter((entry) => entry.action !== 'form_fields' && entry.action !== 'fill_form')
+    expect(steps.map((step) => step.action)).toEqual([
+      'select_option',
+      'set_checkbox',
+      'set_checkbox',
+    ])
+  })
+
   it('refuses an unknown ref before touching the page', async () => {
     stubKernel(WRITE_ALL, { ok: true, results: [] })
     streamMock

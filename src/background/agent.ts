@@ -677,7 +677,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'form_fields',
       description:
-        'List every fillable field (input / textarea / select, with or without a <form> tag): ref, label, type, required, options, current value. When the task needs 3+ values, call it first, then write them all with one `fill_form`; its refs replace the old snapshot refs.',
+        'List every fillable field (input / textarea / select, with or without a <form> tag): ref, label, type, required, options, multiple, current value. When the task needs 3+ values, call it first, then write them all with one `fill_form`; its refs replace the old snapshot refs.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -805,7 +805,7 @@ export const TOOLS: WireTool[] = [
                     { type: 'array', items: { type: 'string' } },
                   ],
                   description:
-                    'Desired text, checked state, or option label(s) for a multi-select.',
+                    'Text, option label(s) for a multi-select, or true/false for a checkbox or radio (its ref already picks which radio).',
                 },
               },
               required: ['ref', 'value'],
