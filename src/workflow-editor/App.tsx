@@ -248,6 +248,13 @@ export default function EditorApp() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
+  /** The run this editor started, once seen on the running board — the Stop
+   *  button cancels it through the same `tasks.cancel` the panel uses. */
+  const [activeRunId, setActiveRunId] = useState<string | null>(null)
+  /** True from clicking Stop until the run settles (Stop shows a spinner). */
+  const [stoppingRun, setStoppingRun] = useState(false)
+  /** Set when Stop was clicked, so the run's failure reply reads as a stop. */
+  const stopRequestedRef = useRef(false)
   /** Testing mode: run with breakpoint pauses (Automa's testingMode). */
   const [testingMode, setTestingMode] = useState(false)
   /** True while this editor's testing run is in flight (drives the poll). */
@@ -964,11 +971,37 @@ export default function EditorApp() {
       // running on unsaved data would step a graph nobody can see.
       if (!(await handleSave())) return
       setRunning(true)
+      setActiveRunId(null)
+      stopRequestedRef.current = false
       const testing = testingMode
       if (testing) setTestingRunActive(true)
       // A `parameter-prompt` mid-run asks THIS window; the token keeps another
       // open editor from answering a dialog it did not launch.
       const promptToken = beginRunInputSession()
+      // The `workflows.run` reply only settles when the run is over, so the Stop
+      // button learns the run's id by watching the running board (the engine
+      // registers every run there; `tasks.cancel` aborts it). Poll briefly — a
+      // run too short to be seen needs no stop.
+      let observing = true
+      const runObserver = (async () => {
+        for (let attempt = 0; observing && attempt < 24; attempt += 1) {
+          const board = await sendCommand({ type: 'workflows.running', workflowId }).catch(
+            () => null,
+          )
+          if (!observing) return
+          if (board?.type === 'workflows.running') {
+            const observed = board.runs.find(
+              (run) => run.workflowId === workflowId && (run.testing ?? false) === testing,
+            )
+            if (observed) {
+              setActiveRunId(observed.runId)
+              return
+            }
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250))
+        }
+      })()
+      void runObserver
       try {
         // Run scoped to the window that opened this editor (see host-window).
         const windowId = hostWindowId()
@@ -994,6 +1027,10 @@ export default function EditorApp() {
               t('runBlockedNodes').replace('{count}', String(Object.keys(blockedNodes).length)),
               'error',
             )
+          } else if (stopRequestedRef.current) {
+            // The engine settles a cancelled run as a plain failure reply; the
+            // Stop click is what distinguishes it from a real failure.
+            toast.show(t('runStopped'), 'ok')
           } else {
             const msg = r.outcome.error ?? r.outcome.summary
             setError(msg)
@@ -1002,16 +1039,38 @@ export default function EditorApp() {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
-        setError(msg)
-        toast.show(`${t('runFailed')}: ${msg}`, 'error')
+        if (stopRequestedRef.current) toast.show(t('runStopped'), 'ok')
+        else {
+          setError(msg)
+          toast.show(`${t('runFailed')}: ${msg}`, 'error')
+        }
       } finally {
+        observing = false
         endRunInputSession(promptToken)
         setRunning(false)
+        setStoppingRun(false)
+        setActiveRunId(null)
+        stopRequestedRef.current = false
         if (testing) setTestingRunActive(false)
       }
     },
     [workflowId, handleSave, blockedNodes, toast, t, testingMode],
   )
+
+  // The Stop button aborts this editor's run through the same running board
+  // the panel's terminate uses (`tasks.cancel`); the run's own reply then
+  // unwinds `handleRun` and reports the stop.
+  const stopRun = useCallback(async () => {
+    if (!activeRunId) return
+    stopRequestedRef.current = true
+    setStoppingRun(true)
+    try {
+      await sendCommand({ type: 'tasks.cancel', runId: activeRunId })
+    } catch {
+      // The run may have settled between the click and the command; `handleRun`'s
+      // finally still resets the button state.
+    }
+  }, [activeRunId])
 
   // While a testing run is alive, poll its pause. A run that vanishes from
   // `runs` but is absent from `finished` was lost with its worker — the run
@@ -1867,6 +1926,8 @@ export default function EditorApp() {
           recording={recording}
           onSave={() => void handleSave()}
           onRun={() => void handleRun()}
+          onStop={() => void stopRun()}
+          stoppingRun={stoppingRun}
           onOpenLogs={() => setLogsOpen(true)}
           onOpenGoal={() => setGoalOpen(true)}
           onOpenDataTable={() => setDataTableOpen(true)}

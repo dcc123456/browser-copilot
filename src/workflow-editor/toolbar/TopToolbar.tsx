@@ -23,6 +23,7 @@ import {
   Play,
   Save,
   SlidersHorizontal,
+  Square,
   SquareTerminal,
   Table2,
   Target,
@@ -45,6 +46,8 @@ export default function TopToolbar({
   recording,
   onSave,
   onRun,
+  onStop,
+  stoppingRun,
   onOpenLogs,
   onOpenGoal,
   onOpenDataTable,
@@ -72,6 +75,10 @@ export default function TopToolbar({
   recording: boolean
   onSave: () => void
   onRun: () => void
+  /** Abort the run this editor started (visible only while it runs). */
+  onStop: () => void
+  /** A stop was requested and the run has not settled yet. */
+  stoppingRun: boolean
   /** Open the run-logs modal. */
   onOpenLogs: () => void
   /** Open the workflow-goal modal. */
@@ -251,11 +258,19 @@ export default function TopToolbar({
         <button
           type="button"
           className="wf-icon-btn"
-          title={`${t('run')} (Ctrl+Enter)`}
-          onClick={onRun}
-          disabled={running}
+          title={running ? t('stopRun') : `${t('run')} (Ctrl+Enter)`}
+          onClick={running ? onStop : onRun}
+          disabled={stoppingRun}
         >
-          {running ? <LoaderCircle size={14} className="wf-spin" /> : <Play size={14} />}
+          {running ? (
+            stoppingRun ? (
+              <LoaderCircle size={14} className="wf-spin" />
+            ) : (
+              <Square size={14} className="text-err" />
+            )
+          ) : (
+            <Play size={14} />
+          )}
         </button>
       </div>
     </div>
