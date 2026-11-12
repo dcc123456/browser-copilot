@@ -19,7 +19,19 @@
  * @module inpage/kernel
  */
 
-import type { Op, OpResult, PageSnapshot, SnapshotElement, Target, TargetSpec } from '../lib/ops'
+import type {
+  FieldCheck,
+  FieldVerdict,
+  FormFieldEntry,
+  FormFillField,
+  FormFillOutcome,
+  Op,
+  OpResult,
+  PageSnapshot,
+  SnapshotElement,
+  Target,
+  TargetSpec,
+} from '../lib/ops'
 
 /**
  * Performs one operation in the current frame. Never throws: every failure
@@ -1108,6 +1120,219 @@ export function runOp(op: Op): OpResult {
     return value === '' ? '(空)' : value
   }
 
+  // --- Control writers -------------------------------------------------------
+  //
+  // The write half of `fill` / `select_option` / `set_checkbox`, factored out of
+  // those branches so the batched `fill_form` op drives the SAME code. A second
+  // copy would be a form that fills differently depending on how the caller
+  // asked. Focus, the disabled check and the contenteditable path deliberately
+  // stay at the call sites (they differ per op); these write and nothing else.
+
+  /**
+   * Text into an input/textarea. Assumes the element is not a rich editor.
+   * `append` keeps the existing content (`fill`'s `clear: false`); the batch
+   * op always replaces.
+   */
+  function writeTextControl(element: Element, value: string, append: boolean): OpResult {
+    const isField =
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement
+    if (!isField)
+      return fail(`${describeElement(element)} is not a text field, select, or textarea.`)
+    if (element instanceof HTMLInputElement) {
+      const type = (element.type || 'text').toLowerCase()
+      if (type === 'checkbox' || type === 'radio')
+        return fail(`${describeElement(element)} is a ${type}; use set_checkbox.`)
+      if (type === 'file') return fail('File inputs cannot be filled by an extension.')
+    }
+    const current = String((element as HTMLInputElement).value ?? '')
+    if (append) {
+      setControlValue(element, `${current}${value}`)
+      fireInputAndChange(element)
+      return { ...base(), ok: true, found: true }
+    }
+    // Content already equal to the target: do NOT clear-and-retype. The
+    // forms fill then never wipes content an earlier step (an AI agent, a
+    // previous fill, the page itself) already wrote correctly.
+    if (value !== '' && current === value) {
+      return {
+        ...base(),
+        ok: true,
+        found: true,
+        note: '字段内容已是目标值，跳过填写（不清空已填写内容）',
+      }
+    }
+    setControlValue(element, value)
+    fireInputAndChange(element)
+    return { ...base(), ok: true, found: true }
+  }
+
+  /** Select the given options (single or multiple) and fire the events. */
+  function applyChosenOptions(
+    element: HTMLSelectElement,
+    chosen: readonly HTMLOptionElement[],
+  ): OpResult {
+    focusElement(element)
+    if (element.multiple) {
+      for (let i = 0; i < element.options.length; i += 1) {
+        const option = element.options[i]
+        if (option) option.selected = chosen.indexOf(option) !== -1
+      }
+    } else {
+      const first = chosen[0]
+      if (first) setControlValue(element, first.value)
+    }
+    fireInputAndChange(element)
+    return { ...base(), ok: true, found: true }
+  }
+
+  /** Match wanted values/labels against a `<select>` and choose the winner(s). */
+  function chooseOptionByLabel(element: Element, wanted: readonly string[]): OpResult {
+    if (!(element instanceof HTMLSelectElement))
+      return fail(`${describeElement(element)} is not a <select>.`)
+    const available: string[] = []
+    const chosen: HTMLOptionElement[] = []
+    for (let i = 0; i < element.options.length; i += 1) {
+      const option = element.options[i]
+      if (!option) continue
+      const label = collapse(option.textContent ?? '')
+      available.push(label || option.value)
+      if (wanted.indexOf(option.value) !== -1 || wanted.indexOf(label) !== -1) chosen.push(option)
+    }
+    if (chosen.length === 0)
+      return fail(`No option matched ${JSON.stringify(wanted)}. Available: ${available.join(', ')}`)
+    return applyChosenOptions(element, chosen)
+  }
+
+  /** Check or uncheck a checkbox / radio (a click, so page handlers run). */
+  function writeCheckControl(element: Element, desired: boolean): OpResult {
+    const input = element as HTMLInputElement
+    const type = (input.type || '').toLowerCase()
+    if (type !== 'checkbox' && type !== 'radio')
+      return fail(`${describeElement(element)} is not a checkbox or radio.`)
+    if (isDisabled(element)) return fail(`${describeElement(element)} is disabled.`)
+    if (input.checked === desired)
+      return { ...base(), ok: true, found: true, note: 'already in desired state' }
+    ;(element as HTMLElement).click()
+    const ok = input.checked === desired
+    return {
+      ...base(),
+      ok,
+      found: true,
+      ...(ok ? {} : { error: 'The control did not change state.' }),
+    }
+  }
+
+  /** Which verification rule an element needs, derived from the element itself. */
+  function fieldKindOf(
+    element: Element,
+  ): 'text' | 'select' | 'checkbox' | 'radio' | 'password' | 'other' {
+    if (element instanceof HTMLSelectElement) return 'select'
+    if (element instanceof HTMLInputElement) {
+      const type = (element.type || 'text').toLowerCase()
+      if (type === 'checkbox') return 'checkbox'
+      if (type === 'radio') return 'radio'
+      if (type === 'password') return 'password'
+      return 'text'
+    }
+    if (element instanceof HTMLTextAreaElement) return 'text'
+    return 'other'
+  }
+
+  /** Visible labels of the selected options — the caller often names labels. */
+  function selectedOptionText(element: HTMLSelectElement): string[] {
+    const out: string[] = []
+    for (let i = 0; i < element.options.length; i += 1) {
+      const option = element.options[i]
+      if (option && option.selected) out.push(collapse(option.textContent ?? '') || option.value)
+    }
+    return out
+  }
+
+  /**
+   * Does the control's LIVE value match what the batch asked for?
+   *
+   * Compared in page rather than by shipping values back: a password must never
+   * travel into the transcript, and only the page knows an option's label. The
+   * rules are the ones real pages drift on — a `<select>` stores a VALUE while
+   * callers pass the visible LABEL, a multi-select stores a set, and text
+   * round-trips through whitespace collapsing.
+   */
+  function fieldMatchesWanted(element: Element, wanted: string | string[] | boolean): boolean {
+    const kind = fieldKindOf(element)
+    if (kind === 'checkbox' || kind === 'radio')
+      return (element as HTMLInputElement).checked === (wanted === true || wanted === 'true')
+    const accepted = Array.isArray(wanted) ? wanted.map(String) : [String(wanted ?? '')]
+    if (kind === 'select' && element instanceof HTMLSelectElement) {
+      const stored = element.multiple
+        ? Array.prototype.slice
+            .call(element.selectedOptions)
+            .map((option: HTMLOptionElement) => option.value)
+        : [element.value]
+      const labels = selectedOptionText(element)
+      return accepted.every(
+        (wish) => stored.indexOf(wish) !== -1 || labels.indexOf(collapse(wish)) !== -1,
+      )
+    }
+    const read = readControlValue(element)
+    if (read === null || typeof read !== 'string') return false
+    const actual = collapse(read)
+    return accepted.every((wish) => collapse(wish) === actual)
+  }
+
+  /** Short, transcript-safe preview of a value; secrets report only their length. */
+  function previewValue(value: string | string[] | boolean, secret: boolean): string {
+    if (secret) return typeof value === 'string' ? `${value.length} chars (hidden)` : String(value)
+    const text = Array.isArray(value) ? value.join(', ') : String(value ?? '')
+    return text.length > 80 ? `${text.slice(0, 80)}…` : text
+  }
+
+  /**
+   * Resolve one bulk field's locator. Bulk ops carry no single `op.target`, so
+   * the per-field failure is reported as text rather than as the op's own
+   * not-found result — one stale field must not fail the whole batch.
+   */
+  function resolveBulkTarget(target: Target | undefined): { element: Element } | { error: string } {
+    const resolution = resolve(target)
+    if (resolution && !('refusal' in resolution)) return { element: resolution.element }
+    return {
+      error:
+        resolution && 'refusal' in resolution
+          ? resolution.refusal.error
+          : 'No element matched this locator.',
+    }
+  }
+
+  /**
+   * Write one bulk field, routed by what the element IS. The caller never
+   * declares a kind, which is what keeps a batch of mixed text fields, dropdowns
+   * and checkboxes down to two schema lines.
+   */
+  function writeBulkField(
+    element: Element,
+    kind: 'text' | 'select' | 'checkbox' | 'radio' | 'password' | 'other',
+    value: string | string[] | boolean,
+  ): OpResult {
+    if (kind === 'select')
+      return chooseOptionByLabel(
+        element,
+        Array.isArray(value) ? value.map(String) : [String(value ?? '')],
+      )
+    if (kind === 'checkbox' || kind === 'radio')
+      return writeCheckControl(element, value === true || value === 'true')
+    focusElement(element)
+    return writeTextControl(
+      element,
+      Array.isArray(value)
+        ? value.join('\n')
+        : typeof value === 'boolean'
+          ? String(value)
+          : String(value ?? ''),
+      false,
+    )
+  }
+
   // --- Simulated typing (stateful rich editors) ------------------------------
   //
   // DraftJS editors (Zhihu articles, Medium…) keep their content in React
@@ -2037,6 +2262,175 @@ export function runOp(op: Op): OpResult {
       return { ...base(), ok: true, found: true, note: '已读取表单', data: results }
     }
 
+    if (op.action === 'form_fields') {
+      // The whole-form read that starts a batched fill. Two deliberate
+      // differences from a `snapshot`: it lists every visible control whether or
+      // not the author used a `<form>` tag (div-based forms are the norm), and
+      // it carries no body prose — the caller wants fields and refs, nothing else.
+      const NON_FILLABLE = ['hidden', 'button', 'submit', 'reset', 'image']
+      const OPTION_CAP = 30
+      const VALUE_CAP = 120
+      const fields: FormFieldEntry[] = []
+      for (const control of querySelectorIn(openRoots(), 'input, select, textarea')) {
+        const type =
+          control instanceof HTMLInputElement ? (control.type || 'text').toLowerCase() : ''
+        if (NON_FILLABLE.indexOf(type) !== -1) continue
+        if (!isVisible(control)) continue
+        const entry: FormFieldEntry = {
+          ref: `e${fields.length + 1}`,
+          label: accessibleName(control),
+          tag: control.tagName.toLowerCase(),
+          target: targetFor(control),
+        }
+        if (type) entry.type = type
+        if ((control as HTMLInputElement).required) entry.required = true
+        if (isDisabled(control)) entry.disabled = true
+        // A password's content never leaves the page.
+        if (type !== 'password' && type !== 'file') {
+          const read = readControlValue(control)
+          if (typeof read === 'boolean') entry.value = read
+          else if (Array.isArray(read)) entry.value = read
+          else if (typeof read === 'string' && read !== '')
+            entry.value = read.length > VALUE_CAP ? `${read.slice(0, VALUE_CAP)}…` : read
+        }
+        const placeholder = collapse(control.getAttribute('placeholder') ?? '')
+        if (placeholder && placeholder !== entry.label) entry.placeholder = placeholder
+        if (control instanceof HTMLSelectElement) {
+          const options: string[] = []
+          for (let o = 0; o < control.options.length && o < OPTION_CAP; o += 1) {
+            const option = control.options[o]
+            if (option) options.push(collapse(option.textContent ?? '') || option.value)
+          }
+          if (control.options.length > OPTION_CAP)
+            options.push(`…+${control.options.length - OPTION_CAP} more`)
+          entry.options = options
+        }
+        fields.push(entry)
+      }
+      if (fields.length === 0) return notFound('No visible form controls found in this frame.')
+      return {
+        ...base(),
+        ok: true,
+        found: true,
+        note: `${fields.length} fillable fields`,
+        data: { url: location.href, title: document.title, fields },
+      }
+    }
+
+    if (op.action === 'fill_form') {
+      // One batched form write: every field resolved and written in THIS
+      // injection, so a ten-field form costs what one field used to. Verification
+      // is a separate `verify_fields` op on purpose — the page settles after this
+      // injection returns, and reading back synchronously would happily report
+      // success for a React control that clears the value on its next render.
+      const fields = op.fields ?? []
+      if (fields.length === 0) return fail('fill_form needs at least one field.', false)
+      const results: FormFillOutcome[] = []
+      for (let i = 0; i < fields.length; i += 1) {
+        const field = fields[i] as FormFillField | undefined
+        if (!field) {
+          results.push({ i, ok: false, found: false, error: 'Missing field descriptor.' })
+          continue
+        }
+        const resolved = resolveBulkTarget(field.target)
+        if ('error' in resolved) {
+          results.push({ i, ok: false, found: false, error: resolved.error })
+          continue
+        }
+        const element = resolved.element
+        const editable = element.getAttribute('contenteditable')
+        if (editable === '' || editable === 'true') {
+          // Stateful rich editors are the one thing a batch cannot write: they
+          // need `typeIntoEditable` plus the driver's CDP keystroke escalation,
+          // and typing several of them would hold this injection open past the
+          // driver's per-op timeout. Refuse loudly instead of half-filling.
+          results.push({
+            i,
+            ok: false,
+            found: true,
+            error: `${describeElement(element)} is a rich-text editor; write it with the single-field fill tool.`,
+          })
+          continue
+        }
+        const kind = fieldKindOf(element)
+        if (kind === 'other') {
+          results.push({
+            i,
+            ok: false,
+            found: true,
+            error: `${describeElement(element)} is not a form control; write it with the single-field fill tool.`,
+          })
+          continue
+        }
+        const written = writeBulkField(element, kind, field.value)
+        results.push({
+          i,
+          ok: written.ok,
+          found: written.found,
+          // Reported so the caller can file the field under the operator that
+          // actually replays it (a select filled as text would not replay).
+          kind: kind === 'password' ? 'text' : kind,
+          ...(written.error ? { error: written.error } : {}),
+        })
+      }
+      const writtenCount = results.filter((entry) => entry.ok).length
+      return {
+        ...base(),
+        ok: writtenCount === results.length,
+        found: results.some((entry) => entry.found),
+        note: `${writtenCount}/${results.length} fields written`,
+        data: { results },
+      }
+    }
+
+    if (op.action === 'verify_fields') {
+      // Read-back for a batched fill, compared IN PAGE: only the verdict comes
+      // back, so a password value never enters the transcript and a `<select>`
+      // can be matched by the label the caller passed rather than the value the
+      // page stored.
+      const checks = op.checks ?? []
+      if (checks.length === 0) return fail('verify_fields needs at least one check.', false)
+      const results: FieldVerdict[] = []
+      for (let i = 0; i < checks.length; i += 1) {
+        const check = checks[i] as FieldCheck | undefined
+        if (!check) {
+          results.push({ i, ok: false, found: false, error: 'Missing check descriptor.' })
+          continue
+        }
+        const resolved = resolveBulkTarget(check.target)
+        if ('error' in resolved) {
+          results.push({ i, ok: false, found: false, error: resolved.error })
+          continue
+        }
+        const element = resolved.element
+        const kind = fieldKindOf(element)
+        const secret = kind === 'password'
+        const ok = fieldMatchesWanted(element, check.value)
+        results.push({
+          i,
+          ok,
+          found: true,
+          kind: kind === 'password' ? 'text' : kind,
+          ...(secret ? { secret: true } : {}),
+          ...(ok
+            ? {}
+            : {
+                error: 'The page does not hold the requested value.',
+                expected: previewValue(check.value, secret),
+                actual: previewValue(readControlValue(element) ?? '', secret),
+              }),
+        })
+      }
+      const passed = results.filter((entry) => entry.ok).length
+      return {
+        ...base(),
+        ok: passed === results.length,
+        found: true,
+        note: `${passed}/${results.length} fields verified`,
+        data: { results },
+      }
+    }
+
     if (op.action === 'create_element') {
       const html = String(op.value ?? '')
       // The block's own "CSS" and "JavaScript" fields: styles go into a
@@ -2436,106 +2830,38 @@ export function runOp(op: Op): OpResult {
           withMeta,
         ) as unknown as OpResult
       }
-      const isField =
-        element instanceof HTMLInputElement ||
-        element instanceof HTMLTextAreaElement ||
-        element instanceof HTMLSelectElement
-      if (!isField)
-        return withMeta(
-          fail(`${describeElement(element)} is not a text field, select, or textarea.`),
-        )
-      if (element instanceof HTMLInputElement) {
-        const type = (element.type || 'text').toLowerCase()
-        if (type === 'checkbox' || type === 'radio')
-          return withMeta(fail(`${describeElement(element)} is a ${type}; use set_checkbox.`))
-        if (type === 'file') return withMeta(fail('File inputs cannot be filled by an extension.'))
-      }
-      // Content already equal to the target: do NOT clear-and-retype. The
-      // forms fill then never wipes content an earlier step (an AI agent, a
-      // previous fill, the page itself) already wrote correctly.
-      const current = String((element as HTMLInputElement).value ?? '')
-      if (op.clear !== false && value !== '' && current === value) {
-        return withMeta({
-          ...base(),
-          ok: true,
-          found: true,
-          note: '字段内容已是目标值，跳过填写（不清空已填写内容）',
-        })
-      }
-      const next =
-        op.clear === false ? `${(element as HTMLInputElement).value ?? ''}${value}` : value
-      setControlValue(element, next)
-      fireInputAndChange(element)
-      return withMeta({ ...base(), ok: true, found: true })
+      return withMeta(writeTextControl(element, value, op.clear === false))
     }
 
     if (op.action === 'select_option') {
       if (!(element instanceof HTMLSelectElement))
         return withMeta(fail(`${describeElement(element)} is not a <select>.`))
       const wanted = Array.isArray(op.value) ? op.value.map(String) : [String(op.value ?? '')]
-      const available: string[] = []
-      const chosen: HTMLOptionElement[] = []
       // "Select an option by" also offers positions (first / last / custom), not
       // just the value, and nothing used to read that choice — every positional
       // mode fell through to the value match and failed on a blank value box.
       const byPosition =
         op.selectBy === 'first' || op.selectBy === 'last' || op.selectBy === 'index'
-      const position =
-        op.selectBy === 'last'
-          ? element.options.length - 1
-          : op.selectBy === 'first'
-            ? 0
-            : Math.trunc(op.index ?? 0)
       if (byPosition) {
+        const position =
+          op.selectBy === 'last'
+            ? element.options.length - 1
+            : op.selectBy === 'first'
+              ? 0
+              : Math.trunc(op.index ?? 0)
         const at = element.options[position]
         if (!at || position < 0)
           return withMeta(
             fail(`No option at position ${position + 1}. Available: ${element.options.length}`),
           )
-        chosen.push(at)
+        return withMeta(applyChosenOptions(element, [at]))
       }
-      for (let i = 0; i < element.options.length; i += 1) {
-        const option = element.options[i]
-        if (!option || byPosition) continue
-        const label = collapse(option.textContent ?? '')
-        available.push(label || option.value)
-        if (wanted.indexOf(option.value) !== -1 || wanted.indexOf(label) !== -1) chosen.push(option)
-      }
-      if (chosen.length === 0)
-        return withMeta(
-          fail(`No option matched ${JSON.stringify(wanted)}. Available: ${available.join(', ')}`),
-        )
-      focusElement(element)
-      if (element.multiple) {
-        for (let i = 0; i < element.options.length; i += 1) {
-          const option = element.options[i]
-          if (option) option.selected = chosen.indexOf(option) !== -1
-        }
-      } else {
-        const first = chosen[0]
-        if (first) setControlValue(element, first.value)
-      }
-      fireInputAndChange(element)
-      return withMeta({ ...base(), ok: true, found: true })
+      return withMeta(chooseOptionByLabel(element, wanted))
     }
 
     if (op.action === 'set_checkbox') {
-      const input = element as HTMLInputElement
-      const type = (input.type || '').toLowerCase()
-      if (type !== 'checkbox' && type !== 'radio')
-        return withMeta(fail(`${describeElement(element)} is not a checkbox or radio.`))
-      if (isDisabled(element)) return withMeta(fail(`${describeElement(element)} is disabled.`))
       const desired = op.value === undefined ? true : op.value === true || op.value === 'true'
-      if (input.checked === desired)
-        return withMeta({ ...base(), ok: true, found: true, note: 'already in desired state' })
-      ;(element as HTMLElement).click()
-      const ok = input.checked === desired
-      return withMeta({
-        ...base(),
-        ok,
-        found: true,
-        ...(ok ? {} : { error: 'The control did not change state.' }),
-      })
+      return withMeta(writeCheckControl(element, desired))
     }
 
     if (op.action === 'get_attribute') {

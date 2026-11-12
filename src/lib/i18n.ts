@@ -1262,6 +1262,10 @@ export interface Messages {
   toolReadPageWarn: string
   toolSnapshot: string
   toolSnapshotWarn: string
+  toolFormFields: string
+  toolFormFieldsWarn: string
+  toolFillForm: string
+  toolFillFormWarn: string
   toolReadPicked: string
   toolReadPickedWarn: string
   toolListTabs: string
@@ -2989,6 +2993,12 @@ const en: Messages = {
   toolSnapshot: 'Snapshot page elements',
   toolSnapshotWarn:
     'When off: the assistant cannot see buttons, links, or fields, so it cannot reliably click or fill anything.',
+  toolFormFields: 'List form fields',
+  toolFormFieldsWarn:
+    'When off: the assistant cannot read a whole form at once, so it fills fields one by one.',
+  toolFillForm: 'Fill forms in bulk',
+  toolFillFormWarn:
+    'When off: the assistant types into one field per step instead of filling the whole form at once.',
   toolReadPicked: 'Read the element you picked',
   toolReadPickedWarn:
     'When off: the assistant cannot read the element you picked with the crosshair button.',
@@ -4703,6 +4713,10 @@ const zhCN: Messages = {
   toolReadPageWarn: '关闭后：助手无法读取当前页面的文本。',
   toolSnapshot: '快照页面元素',
   toolSnapshotWarn: '关闭后：助手无法看到按钮、链接、输入框，因此无法可靠地点击或填写。',
+  toolFormFields: '列出表单字段',
+  toolFormFieldsWarn: '关闭后：助手无法一次读取整个表单，只能逐个字段填写。',
+  toolFillForm: '批量填写表单',
+  toolFillFormWarn: '关闭后：助手每一步只能填写一个字段，无法一次填完整张表单。',
   toolReadPicked: '读取你在页面上选中的元素',
   toolReadPickedWarn: '关闭后：助手无法读取你用准星按钮选中的元素。',
   toolListTabs: '列出标签页',

@@ -556,6 +556,7 @@ export async function execOnActiveTab(
     (op.action === 'click' ||
       op.action === 'hover' ||
       op.action === 'fill' ||
+      op.action === 'fill_form' ||
       op.action === 'press_key' ||
       op.action === 'select_option' ||
       op.action === 'set_checkbox' ||

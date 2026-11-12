@@ -40,8 +40,14 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * actions ask first (pay / password / delete / send) instead of "every action
  * asks": measured total=12_661, +253 chars, and it buys the whole risk-based
  * gate its own prompt.
+ * 12_700 → 14_250 for the batched form pair (`form_fields` + `fill_form`,
+ * ~1.5k of schema). That is the point of the change: one 40-field form now
+ * costs two rounds instead of forty, so the schemas pay for themselves in the
+ * first form filled. Both are withheld in workflow generation (see
+ * WORKFLOW_WITHHELD_TOOLS), where the per-field `wf_op_forms` operator records
+ * the node a batch cannot.
  */
-const MAX_ADVERTISED_PAYLOAD_CHARS = 12_700
+const MAX_ADVERTISED_PAYLOAD_CHARS = 14_250
 /**
  * The full catalog (core + every on-demand group) must also stay bounded.
  * Raised 19_500 → 21_500 when the on-demand "delegate" group
@@ -97,8 +103,10 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 12_700
  * Raised 32_100 → 32_300 when `load_tools` had to name the new page groups and
  * their members (~200 chars in the schema; group moves themselves cost nothing
  * — the same schemas, filed differently). Measured 32_229.
+ * Raised 32_300 → 33_750 for the batched form pair (`form_fields` +
+ * `fill_form`). Measured 33_702.
  */
-const MAX_CATALOG_CHARS = 32_300
+const MAX_CATALOG_CHARS = 33_750
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the
@@ -147,9 +155,11 @@ const MAX_CATALOG_CHARS = 32_300
  * first. Kept at 63_700 for the `javascript-code` output contract (measured
  * 63_697): the guide's two script-output paragraphs were merged into one and
  * the `code` / `outputVariables` descriptions lost their restated helper
- * clauses, so the new contract rode on the existing budget.
+ * clauses, so the new contract rode on the existing budget. Kept at 63_750 for
+ * the batched-form tools named in rule 13 of the shared prompt (+12 chars —
+ * the tools themselves are withheld in this mode, measured 63_709).
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 63_700
+const MAX_WORKFLOW_ROUND1_CHARS = 63_750
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~37.6k; the smallest (`general`)
@@ -190,9 +200,11 @@ const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_850
  * Raised 62_700 → 62_800 with the round-1 budget (the `ai-agent` capability
  * keys — measured 62_676). Raised 62_800 → 63_200 with the round-1 budget (the
  * semi-auto approval rule — measured 63_046). Raised 63_200 → 63_700 with the
- * round-1 budget (the corrected data-mapping schema — measured 63_580).
+ * round-1 budget (the corrected data-mapping schema — measured 63_580). Moved
+ * to 63_750 with the round-1 budget (rule 13 names the batched-form tools —
+ * measured 63_709).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 63_700
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 63_750
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a

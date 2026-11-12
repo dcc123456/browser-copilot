@@ -177,6 +177,18 @@ export function assessActionRisk(
     }
     return { risky: false }
   }
+  if (name === 'fill_form') {
+    // A batch is only as safe as its riskiest field: one password input inside
+    // fifty harmless ones still needs the user's click.
+    const fields = Array.isArray(args['fields']) ? args['fields'] : []
+    for (const field of fields) {
+      if (!field || typeof field !== 'object') continue
+      const record = field as Record<string, unknown>
+      const verdict = assessElementAction(record, resolve)
+      if (verdict.risky) return verdict
+    }
+    return { risky: false }
+  }
   if (ELEMENT_ACTIONS.has(name)) return assessElementAction(args, resolve)
   // Reads, observations, scrolling, waits, navigation, tab bookkeeping,
   // local saves and delegation are either harmless or gated by their own

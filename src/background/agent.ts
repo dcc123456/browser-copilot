@@ -128,8 +128,25 @@ import {
   type Skill,
   type UserProfile,
 } from '../lib/types'
-import { SNAPSHOT_ELEMENT_HARD_CAP, SNAPSHOT_ELEMENT_LIMIT, summarizeSnapshot } from '../lib/ops'
-import type { Op, OpResult, PageSnapshot, Target } from '../lib/ops'
+import {
+  BULK_FIELD_LIMIT,
+  SNAPSHOT_ELEMENT_HARD_CAP,
+  SNAPSHOT_ELEMENT_LIMIT,
+  summarizeFormFields,
+  summarizeSnapshot,
+} from '../lib/ops'
+import type {
+  BulkFieldKind,
+  FieldCheck,
+  FieldVerdict,
+  FormFieldEntry,
+  FormFillField,
+  FormFillOutcome,
+  Op,
+  OpResult,
+  PageSnapshot,
+  Target,
+} from '../lib/ops'
 import {
   DriverError,
   closeActiveTab,
@@ -222,6 +239,7 @@ import { BLOCK_BY_ID } from '../lib/workflow/blocks/palette'
 const ACTION_TOOLS = new Set([
   'click',
   'fill',
+  'fill_form',
   'select_option',
   'set_checkbox',
   'press_key',
@@ -249,6 +267,7 @@ const ACTION_TOOLS = new Set([
 const READ_TOOLS = new Set([
   'read_current_page',
   'snapshot_page',
+  'form_fields',
   'read_selected_element',
   'list_tabs',
   'list_network_requests',
@@ -656,6 +675,15 @@ export const TOOLS: WireTool[] = [
   {
     type: 'function',
     function: {
+      name: 'form_fields',
+      description:
+        'List every fillable field of the page (input / textarea / select, with or without a <form> tag): ref, label, type, required, options, current value. Call it before filling, then write the whole form in one `fill_form`; its refs replace the previous snapshot refs.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'read_selected_element',
       description:
         'Read the element the user picked with the Browser Copilot crosshair button on the page: CSS selector, tag, text and capped HTML. The result carries a ready `target` for click/fill, so act on exactly what the user chose. `stale` means the tab has navigated since the pick. Read-only.',
@@ -751,6 +779,46 @@ export const TOOLS: WireTool[] = [
         },
         required: ['value'],
         $defs: { spec: SPEC_SCHEMA },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'fill_form',
+      description:
+        'Fill many fields in one page pass: a single injection writes them all, then each value is read back and compared. Use it for 2+ fields; the kind comes from the element, never from the call. The result names the `failed` fields — retry only those. Rich-text and file inputs need `fill`.',
+      parameters: {
+        type: 'object',
+        properties: {
+          fields: {
+            type: 'array',
+            description: `Fields to write (max ${BULK_FIELD_LIMIT}; split a longer form into calls).`,
+            items: {
+              type: 'object',
+              properties: {
+                ref: REF_ARG,
+                value: {
+                  oneOf: [
+                    { type: 'string' },
+                    { type: 'boolean' },
+                    { type: 'array', items: { type: 'string' } },
+                  ],
+                  description:
+                    'Desired text, checked state, or option label(s) for a multi-select.',
+                },
+              },
+              required: ['ref', 'value'],
+            },
+          },
+          generated: {
+            type: 'boolean',
+            description:
+              'True when you composed the text yourself; false for literal user data (email, URL, name, number).',
+          },
+          withScreenshot: SCREENSHOT_ARG,
+        },
+        required: ['fields'],
       },
     },
   },
@@ -1855,6 +1923,11 @@ export interface ToolAdvertiseOptions {
 export const WORKFLOW_WITHHELD_TOOLS: ReadonlySet<string> = new Set([
   'click',
   'fill',
+  // The batched pair records nothing either, so workflow generation keeps its
+  // per-field `wf_op_forms` operator instead. Withheld (rather than a separate
+  // group) also keeps them out of that mode's byte-budgeted round-1 payload.
+  'fill_form',
+  'form_fields',
   'select_option',
   'set_checkbox',
   'press_key',
@@ -2682,6 +2755,63 @@ function rememberSnapshotTargets(
 }
 
 /**
+ * Stores a `form_fields` read's ref→target mapping. Reuses the snapshot map so
+ * a batch fill can address fields by the refs the model just saw, and so risk
+ * classification sees the control kind (`type`) the same way it does for a
+ * snapshot element.
+ */
+function rememberFieldTargets(ctx: ToolContext, fields: FormFieldEntry[]): void {
+  rememberSnapshotTargets(ctx, {
+    elements: fields.map((field) => ({
+      ref: field.ref,
+      name: field.label,
+      target: field.target,
+      type: field.type ?? field.tag,
+    })),
+  })
+}
+
+/**
+ * One field of a `fill_form` batch, tracked across the write injection and the
+ * read-back that confirms it.
+ */
+interface BulkFieldStatus {
+  ref: string
+  label: string
+  field: FormFillField
+  kind: BulkFieldKind
+  ok: boolean
+  /** Which stage lost the field: the injection, or the read-back after it. */
+  stage: 'write' | 'verify'
+  error?: string
+  expected?: string
+  actual?: string
+}
+
+/**
+ * The single-field operator a bulk field was written with. History records
+ * under this name — a batch step is not replayable, but `fill`, `select_option`
+ * and `set_checkbox` are, and those are what "save this conversation as a
+ * workflow" and the AI-prefill detection read.
+ */
+function bulkFieldAction(kind: BulkFieldKind): 'fill' | 'select_option' | 'set_checkbox' {
+  if (kind === 'select') return 'select_option'
+  if (kind === 'checkbox' || kind === 'radio') return 'set_checkbox'
+  return 'fill'
+}
+
+/** The transcript shape of a failed batch field: enough to retry just this one. */
+function failedFieldEntry(status: BulkFieldStatus): Record<string, unknown> {
+  return {
+    ref: status.ref,
+    label: status.label,
+    stage: status.stage,
+    error: status.error ?? 'The field was not filled.',
+    ...(status.expected === undefined ? {} : { expected: status.expected, actual: status.actual }),
+  }
+}
+
+/**
  * Replaces a ref-only element handle with the resolved durable target for
  * DOWNSTREAM consumers of the recorded args (workflowFromHistory's
  * selectorFromArgs reads `args.target`). Model-facing transcripts stay lean —
@@ -2709,7 +2839,7 @@ export { hydrateRecordArgs }
  * the page navigates away. The model is told the snapshot was dropped; it can
  * re-read if it still needs it.
  */
-const PAGE_READ_TOOLS = new Set(['read_current_page', 'snapshot_page'])
+const PAGE_READ_TOOLS = new Set(['read_current_page', 'snapshot_page', 'form_fields'])
 
 /**
  * Token-budget guard for long automated runs. Every prior tool result is
@@ -2755,7 +2885,11 @@ export function retireOldPageReads(history: WireMessage[], retireAll = false): v
     msg.content = JSON.stringify({
       ok: true,
       retired: true,
-      note: '[Page context retired] This older page read was dropped to save context. Call read_current_page or snapshot_page again if you need the current page.',
+      note: `[Page context retired] This older ${
+        name === 'form_fields' ? 'field list' : 'page read'
+      } was dropped to save context. Call ${
+        name === 'form_fields' ? 'form_fields' : 'read_current_page or snapshot_page'
+      } again if you need the current page.`,
       ...(url ? { url } : {}),
     })
   }
@@ -2841,6 +2975,21 @@ function describeDetail(
     case 'set_checkbox':
       lines.push(`Set to: ${args.value === false ? 'unchecked' : 'checked'}`)
       break
+    case 'fill_form': {
+      // Labels only: a batch can contain a password field, and the per-field
+      // history entries already carry what each control received.
+      const fields = Array.isArray(args.fields) ? (args.fields as { ref?: unknown }[]) : []
+      const names = fields
+        .slice(0, 8)
+        .map(
+          (field) =>
+            (typeof field?.ref === 'string' ? snapshotTargets?.get(field.ref)?.name : undefined) ??
+            String(field?.ref ?? '?'),
+        )
+        .join(', ')
+      lines.push(`Fields (${fields.length}): ${names}${fields.length > 8 ? '…' : ''}`)
+      break
+    }
     case 'press_key':
       if (args.key) lines.push(`Key: ${String(args.key)}`)
       break
@@ -2938,6 +3087,8 @@ function describeAction(
       return 'Read the text of the current page'
     case 'snapshot_page':
       return 'Read the current page and list its buttons, links, and fields'
+    case 'form_fields':
+      return 'List every fillable field of the current form'
     case 'read_selected_element':
       return 'Read the element picked on the page'
     case 'list_console_messages':
@@ -2950,6 +3101,21 @@ function describeAction(
           ? `: "${args.value.length > 40 ? `${args.value.slice(0, 40)}…` : args.value}"`
           : ''
       }`
+    case 'fill_form': {
+      // The batch card names the fields, not their content — the user is
+      // approving "fill this form", and a password value must not sit on a card.
+      const fields = Array.isArray(args.fields) ? (args.fields as { ref?: unknown }[]) : []
+      const names = fields
+        .slice(0, 6)
+        .map(
+          (field) =>
+            (typeof field?.ref === 'string' ? snapshotTargets?.get(field.ref)?.name : undefined) ??
+            String(field?.ref ?? '?'),
+        )
+        .join(', ')
+      const more = fields.length > 6 ? `… (+${fields.length - 6} more)` : ''
+      return `Fill ${fields.length} form fields in one step: ${names}${more}`
+    }
     case 'select_option':
       return `Select ${JSON.stringify(args.value)} in ${targetLabel}`
     case 'set_checkbox':
@@ -3484,6 +3650,34 @@ export async function executeTool(
       return JSON.stringify(compactSnapshot(snapshot, maxElements))
     }
 
+    case 'form_fields': {
+      throwIfAborted()
+      const result = await execOnActiveTab({ action: 'form_fields' }, signal, undefined, ctx.scope)
+      const listed = result.data as
+        { url?: string; title?: string; fields?: FormFieldEntry[] } | undefined
+      const fields = listed?.fields ?? []
+      if (!result.ok || fields.length === 0) {
+        return JSON.stringify({
+          ok: false,
+          error: result.error ?? 'No fillable fields found on this page.',
+        })
+      }
+      if (listed?.url) ctx.lastUrl = listed.url
+      rememberFieldTargets(ctx, fields)
+      return JSON.stringify({
+        ok: true,
+        url: listed?.url,
+        title: listed?.title,
+        count: fields.length,
+        fields: summarizeFormFields(fields),
+        ...(fields.length > BULK_FIELD_LIMIT
+          ? {
+              note: `More fields than one call takes: write the first ${BULK_FIELD_LIMIT} with fill_form, then call it again for the rest.`,
+            }
+          : {}),
+      })
+    }
+
     case 'read_selected_element': {
       throwIfAborted()
       const tab = await resolveAutomationTab(undefined, ctx.scope)
@@ -3962,6 +4156,168 @@ export async function executeTool(
         ctx.scope,
       )
       return afterAction(result, ctx, {}, { withScreenshot: args.withScreenshot === true, signal })
+    }
+
+    case 'fill_form': {
+      throwIfAborted()
+      const requested = Array.isArray(args.fields) ? (args.fields as unknown[]) : []
+      if (requested.length === 0) {
+        return JSON.stringify({
+          error:
+            'fill_form needs a non-empty fields array. Read the form with form_fields, then pass the refs it returned.',
+        })
+      }
+      if (requested.length > BULK_FIELD_LIMIT) {
+        return JSON.stringify({
+          error: `fill_form takes at most ${BULK_FIELD_LIMIT} fields per call (got ${requested.length}). Split the form into separate calls.`,
+        })
+      }
+
+      // Resolve EVERY ref before touching the page, in request order. One stale
+      // ref must not cost a model round, so unresolvable fields never reach the
+      // injection and come back in `failed[]` beside a batch that still wrote
+      // everything it could locate.
+      const pending: { ref: string; label: string; field: FormFillField }[] = []
+      const unresolved: Record<string, unknown>[] = []
+      for (const raw of requested) {
+        const entry = (raw ?? {}) as { ref?: unknown; value?: unknown }
+        const ref = typeof entry.ref === 'string' ? entry.ref.trim() : ''
+        const value =
+          typeof entry.value === 'boolean'
+            ? entry.value
+            : Array.isArray(entry.value)
+              ? entry.value.map((part) => String(part))
+              : String(entry.value ?? '')
+        const hit = ref ? ctx.snapshotTargets?.get(ref) : undefined
+        if (!hit) {
+          unresolved.push({
+            ...(ref ? { ref } : {}),
+            stage: 'resolve',
+            error: ctx.navigated
+              ? 'The page navigated since these refs were read. Call form_fields again and use the new refs.'
+              : 'This ref is not from the latest field read. Call form_fields again.',
+            value:
+              typeof value === 'string' && value.length > 40 ? `${value.slice(0, 40)}…` : value,
+          })
+          continue
+        }
+        pending.push({ ref, label: hit.name || ref, field: { target: hit.target, value } })
+      }
+      if (pending.length === 0) {
+        return JSON.stringify({
+          ok: false,
+          error: 'None of the fields resolved. Call form_fields and use the refs it returns.',
+          failed: unresolved,
+        })
+      }
+
+      const written = await execOnActiveTab(
+        { action: 'fill_form', fields: pending.map((entry) => entry.field) },
+        signal,
+        undefined,
+        ctx.scope,
+      )
+      const outcomes = (written.data as { results?: FormFillOutcome[] } | undefined)?.results ?? []
+      const statuses: BulkFieldStatus[] = pending.map((entry, i) => {
+        const outcome = outcomes[i]
+        if (!outcome) {
+          return {
+            ...entry,
+            kind: 'other',
+            ok: false,
+            stage: 'write',
+            error: written.error ?? 'The field could not be written.',
+          }
+        }
+        return {
+          ...entry,
+          kind: outcome.kind ?? 'other',
+          ok: outcome.ok,
+          stage: 'write',
+          ...(outcome.ok ? {} : { error: outcome.error ?? 'The field could not be written.' }),
+        }
+      })
+
+      // Read back only what the injection wrote, and only AFTER the page has
+      // settled: a React control that clears the value on its next render must
+      // not be reported as filled. The comparison happens in the page (see the
+      // `verify_fields` op), so a password value never comes back here.
+      const pendingChecks: { status: BulkFieldStatus; check: FieldCheck }[] = []
+      for (const status of statuses) {
+        if (!status.ok) continue
+        pendingChecks.push({
+          status,
+          check: { target: status.field.target, value: status.field.value },
+        })
+      }
+      if (pendingChecks.length > 0) {
+        await waitForPageStable(signal, undefined, ctx.scope)
+        const readBack = await execOnActiveTab(
+          { action: 'verify_fields', checks: pendingChecks.map((entry) => entry.check) },
+          signal,
+          undefined,
+          ctx.scope,
+        )
+        const verdicts = (readBack.data as { results?: FieldVerdict[] } | undefined)?.results ?? []
+        for (let c = 0; c < pendingChecks.length; c += 1) {
+          const entry = pendingChecks[c]
+          const verdict = verdicts[c]
+          if (!entry) continue
+          entry.status.stage = 'verify'
+          if (verdict?.ok) continue
+          entry.status.ok = false
+          entry.status.error = verdict
+            ? (verdict.error ?? 'The page does not hold the requested value.')
+            : 'The page could not be read back to confirm this field.'
+          entry.status.expected = verdict?.expected
+          entry.status.actual = verdict?.actual
+        }
+      }
+
+      const filled = statuses.filter((entry) => entry.ok).length
+      const failed: Record<string, unknown>[] = statuses
+        .filter((entry) => !entry.ok)
+        .map(failedFieldEntry)
+      if (unresolved.length > 0) failed.push(...unresolved)
+
+      // One history entry per field, under the single-field operator that
+      // actually replays it: the batch is what the model saw, but "save this
+      // conversation as a workflow" and the AI-prefill detection both read
+      // per-field `fill` / `select_option` / `set_checkbox` steps.
+      for (const status of statuses) {
+        const action = bulkFieldAction(status.kind)
+        const recordArgs: Record<string, unknown> = {
+          target: status.field.target,
+          value: status.field.value,
+          ...(action === 'fill' && typeof args.generated === 'boolean'
+            ? { generated: args.generated }
+            : {}),
+        }
+        await recordAction(
+          ctx.conversationId,
+          action,
+          describeAction(action, recordArgs, ctx.snapshotTargets),
+          ctx.lastUrl ? hostOf(ctx.lastUrl) : undefined,
+          true, // the batch was approved once, as a run_plan is
+          status.ok,
+          describeDetail(action, recordArgs, ctx.snapshotTargets),
+          recordArgs,
+        )
+      }
+
+      const payload: Record<string, unknown> = {
+        ok: failed.length === 0,
+        attempted: statuses.length,
+        filled,
+        note:
+          failed.length === 0
+            ? `${filled}/${statuses.length} fields written and verified`
+            : `Retry only these fields: ${failed.map((entry) => String(entry.ref ?? '(no ref)')).join(', ')}`,
+        ...(failed.length === 0 ? {} : { failed }),
+      }
+      const observed = await captureObservation(ctx, args.withScreenshot === true, signal)
+      if (observed) payload.observation = observed
+      return JSON.stringify(payload)
     }
 
     case 'press_key': {
@@ -4886,6 +5242,14 @@ function shortSummary(name: string, result: string): string {
     if (name === 'read_current_page') {
       const page = JSON.parse(result) as { title?: string; text?: string }
       return `Read "${page.title ?? 'page'}" (${page.text?.length ?? 0} chars)`
+    }
+    if (name === 'form_fields') {
+      const listed = JSON.parse(result) as { count?: number }
+      return `Listed ${listed.count ?? 0} fillable fields`
+    }
+    if (name === 'fill_form') {
+      const batch = JSON.parse(result) as { filled?: number; attempted?: number }
+      return `Filled ${batch.filled ?? 0}/${batch.attempted ?? 0} fields`
     }
     if (name === 'use_skill') {
       const loaded = JSON.parse(result) as { skill?: string; error?: string }

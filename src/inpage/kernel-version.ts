@@ -15,8 +15,12 @@
  * 5: element selectors given to `count_elements` / `element_selector_at` resolve
  *    XPath as well as CSS (Automa element loops). A kernel from build 4 would
  *    report 0 matches for an XPath selector and the loop would run 0 times.
+ * 6: the batched form ops joined the vocabulary — `form_fields` (list every
+ *    fillable control), `fill_form` (write a whole form in one injection) and
+ *    `verify_fields` (read the batch back). A build-5 kernel has no branch for
+ *    them and would answer an unknown action with its generic failure.
  *
  * @module inpage/kernel-version
  */
 
-export const KERNEL_VERSION = 5
+export const KERNEL_VERSION = 6

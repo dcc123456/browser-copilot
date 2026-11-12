@@ -143,6 +143,9 @@ export type ActionName =
   | 'get_value'
   | 'click_link'
   | 'read_form'
+  | 'fill_form'
+  | 'verify_fields'
+  | 'form_fields'
   | 'create_element'
   | 'handle_dialog'
   | 'count_elements'
@@ -247,7 +250,68 @@ export interface Op {
    * contract on every element op of a generated-strict run.
    */
   resolvePolicy?: ResolvePolicy
+  /** Fields for `fill_form`, in request order. */
+  fields?: FormFillField[]
+  /** Desired values for `verify_fields`, keyed by the same order as `fields`. */
+  checks?: FieldCheck[]
 }
+
+/**
+ * One field of a batched write. A batch ALWAYS replaces the content (the
+ * append mode of {@link Op.clear} has no meaning for a whole form), and the
+ * CONTROL KIND is never declared — the page element decides which writer runs,
+ * so a batch can mix text, selects and checkboxes freely.
+ */
+export interface FormFillField {
+  target: Target
+  value: string | string[] | boolean
+}
+
+/** One field's desired value, re-resolved by target for the read-back pass. */
+export interface FieldCheck {
+  target: Target
+  value: string | string[] | boolean
+}
+
+/**
+ * What kind of control a bulk field turned out to be. Decided in page, from the
+ * element itself — the caller never declares a kind, and the reported one is
+ * what the history entry needs to replay through the right operator.
+ */
+export type BulkFieldKind = 'text' | 'select' | 'checkbox' | 'radio' | 'other'
+
+/** Per-field result of `fill_form`, `i` = index into the request. */
+export interface FormFillOutcome {
+  i: number
+  ok: boolean
+  found: boolean
+  kind?: BulkFieldKind
+  error?: string
+}
+
+/**
+ * Per-field verdict of `verify_fields`. The comparison happened IN PAGE, so a
+ * password's value never travels back into the transcript: `secret` marks the
+ * rows where `expected`/`actual` were deliberately dropped.
+ */
+export interface FieldVerdict {
+  i: number
+  ok: boolean
+  found: boolean
+  kind?: BulkFieldKind
+  error?: string
+  expected?: string
+  actual?: string
+  secret?: boolean
+}
+
+/**
+ * Ceiling on one batched form write, shared by the tool schema, the dispatch
+ * guard and the kernel so the three cannot drift. A form with more fields than
+ * this needs splitting, which is also the point where one injection starts to
+ * race the driver's per-op timeout.
+ */
+export const BULK_FIELD_LIMIT = 40
 
 /** One file descriptor handed into the page for upload/drop ops. */
 export interface PageFilePayload {
@@ -287,6 +351,30 @@ export interface FormSummary {
     required?: boolean
     options?: string[]
   }[]
+}
+
+/**
+ * One fillable control of the whole page, as the `form_fields` read reports it.
+ * Unlike {@link FormSummary} (which only covers controls inside a `<form>` tag)
+ * this lists every visible control on the page, because div-based forms are the
+ * norm and a batched write needs a ref per field whether or not the author used
+ * a `<form>` element.
+ */
+export interface FormFieldEntry {
+  ref: string
+  label: string
+  tag: string
+  /** Input type for `input` controls (`text`, `email`, `checkbox`, …). */
+  type?: string
+  required?: boolean
+  disabled?: boolean
+  /** Live value; omitted for password controls. */
+  value?: string | string[] | boolean
+  placeholder?: string
+  /** Visible labels, for `select` controls only. */
+  options?: string[]
+  /** Durable target, so a later batch can resolve the ref. */
+  target: Target
 }
 
 /** Structured reading of a page. */
@@ -411,6 +499,26 @@ export function summarizeSnapshot(
       remaining: Math.max(0, snapshot.scrollHeight - snapshot.scrollY - snapshot.viewportHeight),
     },
   }
+}
+
+/**
+ * Model-facing projection of a {@link FormFieldEntry} list: refs, labels and the
+ * constraints a batched fill needs, without the durable locators (a ref is the
+ * handle) and without page prose. Lives next to {@link summarizeSnapshot}
+ * because it is the same kind of projection of the same in-page read.
+ */
+export function summarizeFormFields(fields: FormFieldEntry[]): Record<string, unknown>[] {
+  return fields.map((field) => ({
+    ref: field.ref,
+    ...(field.label ? { label: field.label } : {}),
+    tag: field.tag,
+    ...(field.type ? { type: field.type } : {}),
+    ...(field.value !== undefined ? { value: field.value } : {}),
+    ...(field.placeholder ? { placeholder: field.placeholder } : {}),
+    ...(field.options ? { options: field.options } : {}),
+    ...(field.required ? { required: true } : {}),
+    ...(field.disabled ? { disabled: true } : {}),
+  }))
 }
 
 /** Result of one op in one frame. */

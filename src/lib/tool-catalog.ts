@@ -84,6 +84,12 @@ export const TOOL_META: ToolMeta[] = [
     warningKey: 'toolSnapshotWarn',
   },
   {
+    name: 'form_fields',
+    category: 'read',
+    labelKey: 'toolFormFields',
+    warningKey: 'toolFormFieldsWarn',
+  },
+  {
     name: 'read_selected_element',
     category: 'read',
     labelKey: 'toolReadPicked',
@@ -109,6 +115,12 @@ export const TOOL_META: ToolMeta[] = [
   },
   { name: 'click', category: 'act', labelKey: 'toolClick', warningKey: 'toolClickWarn' },
   { name: 'fill', category: 'act', labelKey: 'toolFill', warningKey: 'toolFillWarn' },
+  {
+    name: 'fill_form',
+    category: 'act',
+    labelKey: 'toolFillForm',
+    warningKey: 'toolFillFormWarn',
+  },
   {
     name: 'select_option',
     category: 'act',

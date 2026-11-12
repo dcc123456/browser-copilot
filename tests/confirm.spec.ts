@@ -168,3 +168,55 @@ describe('run_plan inherits the risk of its steps', () => {
     })
   })
 })
+
+describe('fill_form inherits the risk of its fields', () => {
+  const PASSWORD_FIELD: RiskTargetInfo = {
+    name: 'Password',
+    type: 'password',
+    target: { primary: { how: 'id', value: 'pw' }, fallbacks: [] },
+  }
+
+  /** Ref-keyed resolver: a batch has one element per field, not one for all. */
+  const resolveFields =
+    (byRef: Record<string, RiskTargetInfo>) => (args: Record<string, unknown>) =>
+      byRef[String(args.ref ?? '')]
+
+  const batch = (refs: string[]) => ({
+    fields: refs.map((ref) => ({ ref, value: 'x' })),
+  })
+
+  it('a batch of named, harmless fields runs without a card', () => {
+    expect(
+      assessActionRisk(
+        'fill_form',
+        batch(['e1', 'e2']),
+        resolveFields({ e1: EMAIL_FIELD, e2: NEXT_BUTTON }),
+      ).risky,
+    ).toBe(false)
+  })
+
+  it('one password field among dozens still asks, once', () => {
+    const byRef: Record<string, RiskTargetInfo> = { e1: EMAIL_FIELD, e2: NEXT_BUTTON }
+    expect(assessActionRisk('fill_form', batch(['e1', 'e2']), resolveFields(byRef)).risky).toBe(
+      false,
+    )
+    expect(
+      assessActionRisk(
+        'fill_form',
+        batch(['e1', 'e2', 'e3']),
+        resolveFields({ ...byRef, e3: PASSWORD_FIELD }),
+      ),
+    ).toEqual({ risky: true, reason: 'credentials' })
+  })
+
+  it('a field the last read did not name asks', () => {
+    expect(
+      assessActionRisk('fill_form', batch(['e9']), resolveFields({ e1: EMAIL_FIELD })).reason,
+    ).toBe('unknown-target')
+  })
+
+  it('reading the field list is never an approval', () => {
+    expect(modeAutoApproves('semi', 'form_fields')).toBe(true)
+    expect(assessActionRisk('form_fields', {}).risky).toBe(false)
+  })
+})
