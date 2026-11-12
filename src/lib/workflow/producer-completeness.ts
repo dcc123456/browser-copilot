@@ -26,6 +26,7 @@ import type { Workflow, WorkflowNode } from './types'
 import { variableAssignmentsOf } from './block-output'
 import { referenceRoot } from './dynamic-data'
 import { SECRET_PRODUCER_BLOCK, secretVariableNamesOf } from './secret-params'
+import { mergeScriptOutputNames } from './script-outputs'
 
 export type ProducerCompletenessCode = 'MISSING_PRODUCER' | 'MISSING_TABLE_PRODUCER'
 
@@ -122,6 +123,17 @@ export function producedVariableNames(node: WorkflowNode): string[] {
   for (const assignment of variableAssignmentsOf((node.data ?? {}) as Record<string, unknown>)) {
     names.add(assignment.name)
   }
+  // A script block publishes through its code, not a `variableName` field:
+  // the declared `outputVariables` plus the names the code visibly writes,
+  // and the engine's `lastResult` alias for whatever the script returns.
+  if (blockId === 'javascript-code') {
+    const data = (node.data ?? {}) as Record<string, unknown>
+    const declared = Array.isArray(data['outputVariables']) ? data['outputVariables'] : []
+    for (const name of mergeScriptOutputNames(declared, stringField(node, 'code'))) {
+      names.add(name)
+    }
+    names.add('lastResult')
+  }
   const written = stringField(node, 'variableName')
   if (written) names.add(written)
   return [...names]
@@ -135,6 +147,9 @@ export function producedVariableNames(node: WorkflowNode): string[] {
  */
 function producesVariable(node: WorkflowNode, name: string): boolean {
   const blockId = blockIdOf(node)
+  // A script block has no entry in VARIABLE_PRODUCER_FIELD — its published
+  // names come from the code, already merged in {@link producedVariableNames}.
+  if (blockId === 'javascript-code') return producedVariableNames(node).includes(name)
   const field = VARIABLE_PRODUCER_FIELD[blockId]
   if (!field) return false
   if (producedVariableNames(node).includes(name)) return true
