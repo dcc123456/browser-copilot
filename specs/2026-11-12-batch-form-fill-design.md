@@ -210,3 +210,30 @@ durable target：这样「从历史生成工作流」与 AI 预填（`lib/workfl
 6. 保存为工作流：预期历史里是 N 条单字段表单动作（不是 1 条未知工具），AI 预填勾选列表照常出现。
 
 浏览器实证若拿不到，按 §8.6 标 BLOCKED 并写明原因。
+
+## 7. 浏览器实证（已拿到）
+
+上面的 1–6 步没有靠侧栏手工点，而是用一次性 spike 在真实 Chrome 里跑通了同一条链路
+（spike 只留在 `tmp/`，不入主干，遵循 §7.3）：headless Chromium + `--load-extension=dist`
+（unpacked 新构建）+ 本地 http fixture 页面，fixture 是**真 React 19 受控组件**
+（`esm.sh/react@19.2.8`），op 通过与 driver 完全相同的常驻内核跳板注入
+（`globalThis.__browserCopilotKernel` + `__browserCopilotKernelVersion === 6`）。
+12 条断言全绿（`tmp/batch-fill-probe.mjs`，2026-11-12）：
+
+| 断言                                    | 观察到的事实                                                                                                                    |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `form_fields` 一次列出 6 个控件         | `note: "6 fillable fields"`，`submit` 按钮不列出；无 `<form>` 标签的 React 渲染同样能列                                         |
+| password 只列字段不列内容               | `type: "password"`，`value` 缺席                                                                                                |
+| 一次注入写完整个批量                    | `note: "6/6 fields written"`，results 里 kind 分别为 text/select/checkbox/text                                                  |
+| **写进的是 React 的 state，不只是 DOM** | 页内 `window.__state()` 回读：`name/bio/plan/agree/pw` 全部为期望值（`plan` 存的是 `pro_1`）                                    |
+| 「写进去又被组件清空」不放过            | 受控组件把非白名单值在下一次 render 清成 `''`，`verify_fields` 报 `expected "Shanghai" / actual ""`，note `5/6 fields verified` |
+| select 按模型传的 label 判等            | 页面存 `pro_1`、调用传 `"Pro"` → `ok: true`                                                                                     |
+| password 原文不出页                     | 判定项只带 `secret: true`，整包结果里搜不到 `hunter2`                                                                           |
+| 失败字段可单独重试                      | 用允许值重试同一字段：`1/1 fields written` → `1/1 fields verified`，state 变成 `Nanjing`                                        |
+
+注入次数实测：6 字段表单 **4 次**（列字段 / 批量写 / 读回比对 / 单字段重试）；
+旧流程按字段「填+看」要 12 次以上注入外加同等轮次。
+
+未取证项：**侧栏 UI 与工具流水显示**（`form_fields` / `fill_form` 两个 chip、半自动确认卡、
+历史记录里落 N 条单字段动作）——这些要真实 LLM 轮次才能触发，本次只由
+`tests/agent-fill-form.spec.ts` 与 `tests/confirm.spec.ts` 离线锁定，人工验证请按上面 1–6 步。
