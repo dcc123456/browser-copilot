@@ -482,6 +482,7 @@ export interface Messages {
   marketplaceUnpublishMessage: (params: { title: string }) => string
   marketplaceUnpublishConfirm: string
   marketplaceUnpublishBanner: (params: { number: number }) => string
+  marketplaceUnpublishMerged: (params: { title: string }) => string
   /** Chip on a local workflow whose published source was deleted. */
   marketplaceSourceRemoved: string
   marketplaceApplyDone: (params: { name: string }) => string
@@ -2371,10 +2372,11 @@ const en: Messages = {
   marketplaceUnpublish: 'Unpublish',
   marketplaceUnpublishTitle: 'Unpublish this workflow?',
   marketplaceUnpublishMessage: ({ title }) =>
-    `A pull request will remove "${title}" from the marketplace. It disappears once the maintainer merges it; copies already applied keep working.`,
+    `A pull request will remove "${title}" from the marketplace. It merges immediately when your GitHub token can write to the repository; otherwise it waits for review. Copies already applied keep working.`,
   marketplaceUnpublishConfirm: 'Submit removal PR',
   marketplaceUnpublishBanner: ({ number }) =>
     `Removal PR #${number} submitted. The card disappears after the maintainer merges it.`,
+  marketplaceUnpublishMerged: ({ title }) => `Removed "${title}" from the marketplace.`,
   marketplaceSourceRemoved: 'Source removed',
   marketplaceApplyDone: ({ name }) => `Added "${name}".`,
   marketplaceUpdateDone: ({ name }) => `Updated "${name}".`,
@@ -4137,10 +4139,11 @@ const zhCN: Messages = {
   marketplaceUnpublish: '下架',
   marketplaceUnpublishTitle: '下架这个工作流？',
   marketplaceUnpublishMessage: ({ title }) =>
-    `会提交一个 PR 把「${title}」从广场删除，维护者合并后生效；已经「应用」到你本地的副本不受影响，仍可继续使用。`,
+    `会提交一个 PR 把「${title}」从广场删除：你的 GitHub 令牌对该仓库有写权限时会立即合并，否则等待审核。已经「应用」到你本地的副本不受影响，仍可继续使用。`,
   marketplaceUnpublishConfirm: '提交下架 PR',
   marketplaceUnpublishBanner: ({ number }) =>
     `下架 PR #${number} 已提交，维护者合并后该卡片就会消失。`,
+  marketplaceUnpublishMerged: ({ title }) => `已将「${title}」从广场下架。`,
   marketplaceSourceRemoved: '来源已删除',
   marketplaceApplyDone: ({ name }) => `已添加「${name}」。`,
   marketplaceUpdateDone: ({ name }) => `已更新「${name}」。`,

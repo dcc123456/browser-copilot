@@ -20,6 +20,7 @@ import { formatAttachmentSize } from '../lib/marketplace/attachments'
 import { categoryKey, categoryLabel, categoryOptions } from '../lib/marketplace/categories'
 import {
   chromeCatalogCache,
+  invalidateCatalogCache,
   loadCatalog,
   teamCatalogCacheKey,
   type LoadCatalogResult,
@@ -671,8 +672,9 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
   /**
    * Opens the removal PR for a listing authored by the connected account.
    *
-   * Nothing is removed locally: the card stays until the maintainer merges, and
-   * every copy already applied keeps working afterwards.
+   * The PR merges right away when the token can write to the repository; a
+   * read-only token leaves it for the maintainer. Nothing is removed locally
+   * either way: every copy already applied keeps working.
    */
   const unpublish = async (card: MarketplaceCard): Promise<void> => {
     const where = cardSource(card)
@@ -696,6 +698,22 @@ export default function MarketplaceTab({ active, initial }: Props): React.ReactE
           repo: where.repo,
         },
       )
+      if (result.merged) {
+        void invalidateCatalogCache(
+          where.connection ? teamCatalogCacheKey(connectionRepo(where.connection)) : undefined,
+        ).catch(() => {})
+        const key = cardKey(card)
+        setSnapshot((prev) =>
+          prev === null
+            ? prev
+            : { ...prev, cards: prev.cards.filter((entry) => cardKey(entry) !== key) },
+        )
+        setBanner({
+          kind: 'ok',
+          text: t.marketplaceUnpublishMerged({ title: card.meta.title }),
+        })
+        return
+      }
       setBanner({
         kind: 'ok',
         text: t.marketplaceUnpublishBanner({ number: result.prNumber }),

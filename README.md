@@ -654,7 +654,8 @@ bundle; a workflow that uses stored credentials lists the credential and field
 names and commits them with the listing. Publishing opens a pull request: your
 own releases merge automatically when the token may write, while third-party
 publishers keep a PR for review. Re-publishing updates the existing listing;
-**Unpublish** opens a removal PR, and copies already applied keep working.
+**Unpublish** opens a removal PR that merges the same way, and copies already
+applied keep working.
 
 **Applying and updating.** A listing that bundles workflows creates a group
 named after the parent and files the parent plus its sub-workflows there;

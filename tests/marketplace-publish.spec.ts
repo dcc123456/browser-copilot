@@ -917,12 +917,29 @@ describe('unpublishWorkflow', () => {
         base: 'main',
       },
     ])
+    expect(calls.mergePull).toEqual([
+      { owner: MARKETPLACE_OWNER, repo: MARKETPLACE_REPO, pullNumber: 42, mergeMethod: 'merge' },
+    ])
     expect(result).toMatchObject({
       prNumber: 42,
       slug: SLUG,
       files: 3,
+      merged: true,
       prUrl: `https://github.com/${MARKETPLACE_OWNER}/${MARKETPLACE_REPO}/pull/42`,
     })
+  })
+
+  it('leaves the removal pull request open when the token cannot merge it', async () => {
+    const { client, calls } = makeClient({ tree: treeFor(SLUG), mergeForbidden: true })
+
+    const result = await unpublishWorkflow(
+      { slug: SLUG, title: 'Scrape orders' },
+      { client, auth: AUTH, now: NOW, sleep: async () => {} },
+    )
+
+    expect(calls.mergePull).toHaveLength(1)
+    expect(result.merged).toBe(false)
+    expect(result.prUrl).toContain('/pull/42')
   })
 
   it('reports a slug with no published files instead of opening an empty PR', async () => {
@@ -989,7 +1006,10 @@ describe('unpublishWorkflow', () => {
       { owner: 'acme', repo: 'team-workflows', head: branch, base: 'main' },
     ])
     expect(calls.createPull[0]!.body).toContain('from the team repository')
-    expect(result).toMatchObject({ slug: SLUG, files: 3 })
+    expect(calls.mergePull).toEqual([
+      { owner: 'acme', repo: 'team-workflows', pullNumber: 42, mergeMethod: 'merge' },
+    ])
+    expect(result).toMatchObject({ slug: SLUG, files: 3, merged: true })
   })
 })
 

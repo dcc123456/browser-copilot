@@ -6,7 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-_To be released._
+### Changed — Unpublishing merges its own pull request
+
+A removal PR now merges right after it opens when the GitHub token can write to
+the repository, exactly like a publish: the marketplace cache is dropped, the
+card leaves the open list immediately, and no maintainer approval is needed. A
+token without write access — every third-party delist — still leaves the PR for
+review. `MARKETPLACE_AUTO_MERGE_PULLS = false` restores review for both paths.
 
 ## [0.6.19] - 2026-11-12
 

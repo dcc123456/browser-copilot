@@ -185,6 +185,8 @@ export interface UnpublishResult {
   slug: string
   /** Files the removal PR deletes: both JSON files plus every asset. */
   files: number
+  /** True when the pull request was merged right after it opened. */
+  merged: boolean
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -468,9 +470,9 @@ async function writableOwner(
  * still being computed, so those retry once. A 403 means the publisher has no
  * write access — every third-party submission — and the PR stays open for the
  * maintainer, which is the review path this falls back to. Nothing here may
- * fail a publish: the PR already exists.
+ * fail a publish or a removal: the PR already exists.
  */
-async function tryMergePublish(
+async function tryMergePull(
   client: PublishClient,
   owner: string,
   repo: string,
@@ -569,7 +571,7 @@ export async function pushPublish(
         body: pullBody(prepared.meta, isPublic),
       })
       const merged = MARKETPLACE_AUTO_MERGE_PULLS
-        ? await tryMergePublish(deps.client, repo.owner, repo.repo, pull.number, sleep)
+        ? await tryMergePull(deps.client, repo.owner, repo.repo, pull.number, sleep)
         : false
       return {
         prUrl: pull.html_url,
@@ -621,8 +623,9 @@ function workflowBlobs(tree: GitHubTree, slug: string): Array<{ path: string; sh
  *
  * The tree is read from the same branch the removal PR targets, so the shas
  * GitHub requires for a delete match the files the PR branch will hold. The
- * directory disappears once its last file is deleted; a merge by the
- * maintainer then drops the card from the next catalog read.
+ * directory disappears once its last file is deleted; the merge — immediate
+ * when the token can write, otherwise the maintainer's — drops the card from
+ * the next catalog read.
  */
 export async function unpublishWorkflow(
   input: { slug: string; title: string },
@@ -684,11 +687,15 @@ export async function unpublishWorkflow(
         base,
         body,
       })
+      const merged = MARKETPLACE_AUTO_MERGE_PULLS
+        ? await tryMergePull(deps.client, repo.owner, repo.repo, pull.number, sleep)
+        : false
       return {
         prUrl: pull.html_url,
         prNumber: pull.number,
         slug: input.slug,
         files: blobs.length,
+        merged,
       }
     } catch (error) {
       if (isConflict(error) && attempt === 0) continue
