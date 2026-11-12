@@ -204,8 +204,10 @@ describe('built-in skill instruction budget', () => {
     // silently truncate. Keep a working margin. (Lowered 200 → 100 when the
     // generator's operator paragraph grew for the every-category default, then
     // 100 → 60 when `file-path` joined the file-operator section; the cap rose
-    // 9400 → 9500 with the corrected data-mapping row and measured headroom is
-    // ~80. The hard cap above still blocks silent truncation.)
+    // 9400 → 9500 with the corrected data-mapping row, then 9500 → 9600 for the
+    // javascript-code output contract (guide paragraphs merged first: 9617 →
+    // 9538, so measured headroom is 62). The hard cap above still blocks silent
+    // truncation.)
     const generator = BUILT_IN_SKILLS.find((s) => s.id === 'builtin-workflow-generator')!
     expect(MAX_INSTRUCTIONS_LENGTH - generator.instructions.length).toBeGreaterThanOrEqual(60)
   })

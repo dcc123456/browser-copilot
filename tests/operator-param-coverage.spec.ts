@@ -92,8 +92,8 @@ const ENGINE_SERVED_EXECUTORS = new Set(['noop', 'placeholder'])
  *   never ported (it reads one or two keys and ignores the rest).
  * - `catalog-only`: declared for Automa graph compatibility, with no edit-form
  *   field and no executor read — dead data rather than a broken control.
- * - `engine-or-kernel`: read by the in-page kernel or the trigger subsystem
- *   rather than by the background executor.
+ * - `engine-or-kernel`: read by the in-page kernel, the trigger subsystem or a
+ *   static analyser rather than by the background executor.
  */
 const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
   proxy: ['scheme', 'host', 'port', 'bypassList', 'clearProxy'],
@@ -109,7 +109,18 @@ const KNOWN_INERT: Readonly<Record<string, readonly string[]>> = {
   'get-text': ['findBy', 'regex', 'regexExp', 'addExtraRow', 'extraRowValue', 'extraRowDataColumn'],
   'attribute-value': ['addExtraRow', 'extraRowValue', 'extraRowDataColumn'],
   forms: ['delay'],
-  'javascript-code': ['context', 'preloadScripts', 'everyNewTab', 'runBeforeLoad'],
+  // `outputVariables` declares names for the static readers — the producer
+  // index (`producer-completeness.ts`, which is what makes the `/` menu and the
+  // completeness check treat a script as a variable producer) and the repair
+  // provenance. The body writes the variables themselves with
+  // `automaSetVariable`, so the executor never looks at the list.
+  'javascript-code': [
+    'context',
+    'preloadScripts',
+    'everyNewTab',
+    'runBeforeLoad',
+    'outputVariables',
+  ],
   'trigger-event': ['waitForSelector', 'waitSelectorTimeout'],
   conditions: ['retryConditions', 'retryCount', 'retryTimeout'],
   'element-exists': ['findBy', 'tryCount', 'timeout', 'throwError'],

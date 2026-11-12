@@ -21,9 +21,13 @@ export interface SkillProblem {
  * storage safety margin with room for the next paragraph. Raised 9400 → 9500
  * when the guide row for data-mapping started naming the keys its form and
  * executor actually read (dataSource / varSourceName / sources / assignVariable
- * / variableName) instead of advertising the dead `mapping` expression.
+ * / variableName) instead of advertising the dead `mapping` expression. Raised
+ * 9500 → 9600 for the `javascript-code` output contract in the guide: the
+ * built-in generator's instructions measured 9617, then 9538 after its two
+ * script-output paragraphs were merged into one. Past the cap `normalizeSkill`
+ * slices the tail — the credential rules — off in production with no error.
  */
-export const MAX_INSTRUCTIONS_LENGTH = 9500
+export const MAX_INSTRUCTIONS_LENGTH = 9600
 /** Longest skill name accepted. */
 export const MAX_NAME_LENGTH = 60
 

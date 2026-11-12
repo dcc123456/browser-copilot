@@ -144,7 +144,10 @@ const MAX_CATALOG_CHARS = 32_300
  * sources, so the model could describe an edit the form never drew. The new
  * keys are the price of a contract that matches EditDataMapping and the
  * executor; nested descriptions were dropped and the guide row compacted
- * first.
+ * first. Kept at 63_700 for the `javascript-code` output contract (measured
+ * 63_697): the guide's two script-output paragraphs were merged into one and
+ * the `code` / `outputVariables` descriptions lost their restated helper
+ * clauses, so the new contract rode on the existing budget.
  */
 const MAX_WORKFLOW_ROUND1_CHARS = 63_700
 /**
@@ -163,9 +166,12 @@ const MAX_WORKFLOW_ROUND1_CHARS = 63_700
  * measured 38_304). Raised 38_400 → 38_500 with the round-1 budget (rule 14 of
  * the shared system prompt now names the new loadable groups — measured 38_421).
  * Raised 38_500 → 38_750 with the round-1 budget (the semi-auto approval rule —
- * measured 38_674).
+ * measured 38_674). Raised 38_750 → 38_850 with the round-1 budget (the
+ * `javascript-code` output contract — measured 38_819 in the largest category,
+ * `interaction`, after the guide paragraphs and the two schema descriptions
+ * were merged).
  */
-const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_750
+const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_850
 /**
  * The ceiling for the worst case the model can actually reach: every category
  * declared at once, which is the same set as `operators_author` (~42.9k of tool
@@ -212,9 +218,13 @@ const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 63_700
  * where the correction has to live; the always-loaded guide line was fixed
  * within its own budget headroom. Raised 64_700 → 65_300 for the corrected
  * data-mapping schema (measured 65_254 — the same operator contract as the
- * round-1 budget; nested descriptions were dropped first).
+ * round-1 budget; nested descriptions were dropped first). Raised 65_300 →
+ * 65_800 for the `javascript-code` output contract (measured 65_774): the
+ * escape schema is where the model reads the automaSetVariable /
+ * outputVariables rule while writing the body, so the merged `code` tail and
+ * the new `outputVariables` entry have no cheaper home.
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 65_300
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 65_800
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
  * now deliberately carries EVERY operator schema, so workflow runs several
