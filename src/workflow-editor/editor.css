@@ -2124,7 +2124,8 @@
   background: var(--we-bg-input);
   border-radius: 10px;
   padding: 10px 12px;
-  cursor: pointer;
+  /* The row itself is a container now; only its open/delete buttons act. */
+  cursor: default;
   font-family: inherit;
   transition:
     border-color 0.14s ease,
@@ -2194,6 +2195,107 @@
   flex: none;
   color: var(--we-text-faint);
   font-size: 15px;
+}
+
+/* --- Run-log deletion ---------------------------------------------------- */
+.wf-run-row-selected {
+  border-color: var(--we-accent);
+  background: var(--we-accent-soft);
+}
+.wf-run-check {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--we-accent);
+  cursor: pointer;
+}
+.wf-run-check:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.wf-run-open {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.wf-run-delete {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--we-text-faint);
+  cursor: pointer;
+}
+.wf-run-delete:hover:not(:disabled) {
+  color: var(--we-danger);
+  background: var(--we-danger-soft);
+}
+.wf-run-delete:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.wf-logs-batchbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--we-border);
+  border-radius: 10px;
+  background: var(--we-bg-input);
+}
+.wf-logs-selectall {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--we-text);
+  cursor: pointer;
+}
+.wf-logs-selectall input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--we-accent);
+  cursor: pointer;
+}
+.wf-logs-batchcount {
+  font-size: 11px;
+  color: var(--we-text-faint);
+}
+.wf-logs-delete-selected {
+  margin-left: auto;
+  padding: 5px 10px;
+  border: 1px solid var(--we-danger);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--we-danger);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wf-logs-delete-selected:hover:not(:disabled) {
+  background: var(--we-danger-soft);
+}
+.wf-logs-delete-selected:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .wf-run-detail-title {
