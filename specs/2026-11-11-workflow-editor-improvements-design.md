@@ -304,3 +304,24 @@ A 复用既有 `cancelRun`，不新增取消设施；`RunningTask.workflowId` �
 - 新建但未保存的工作流若产生会话，其 `workflowId` 不会进入 `deleteWorkflows`，会留下少量孤儿会话
   key；不做惰性清理（§5.5 不为假想问题加设施），需要时可在后续主题按 `listWorkflows()` 收敛。
 - 日志删除只作用于已结束的运行；运行中的行不可勾选（见 §3）。
+
+## 9. 实施记录（2026-11-12 收尾）
+
+| No. | Commit                                                                                 | 与设计的偏差                                                                                                                                                                                                                                                                                      |
+| --- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `465cbc4` `fix(sidepanel): remove the AI repair entry from workflow cards`             | 按计划                                                                                                                                                                                                                                                                                            |
+| 2   | `cdd6314` `feat(workflow): persist AI assistant chats per workflow`                    | 按计划                                                                                                                                                                                                                                                                                            |
+| 3   | `2bc974c` `feat(workflow): allow deleting run logs individually and in bulk`           | 按计划                                                                                                                                                                                                                                                                                            |
+| 4   | `80e1041` `fix(workflow): expose script-produced variables to slash suggestions`       | `producedVariableNames` 对脚本节点额外发布引擎 `lastResult` 别名（设计未提；下游引用脚本返回值的常见写法需要它）                                                                                                                                                                                  |
+| 5   | `f2d594a` `feat(workflow): make the assistant's script steps declare output variables` | §4 落点 1-5 全部落地；guide 的图片特例按计划升格为通用规则                                                                                                                                                                                                                                        |
+| 6   | `9eedfcb` `feat(workflow): turn the editor's Run button into Stop while a run is live` | §5 选了被否决的 B 的变体：编辑器从 `workflows.running` 观察自己发起的 run 拿 `runId`，再走既有 `tasks.cancel`。否决理由（两次往返的竞态）不成立——发起方本来就在长 Promise 里等待，观察轮询与 run 生命周期同起同终；且 A 需要新增协议族，B 复用两个既有命令，零后台改动（§5.6 不加第二套取消设施） |
+
+每阶段提交前门禁：`pnpm typecheck` / `vitest`（新增 spec 全绿）/ `pnpm lint`（0 errors；
+8 条存量 warning）/ `pnpm format:check` / `pnpm build`。
+
+已知存量问题（与本系列无关，干净 HEAD 工作树复现确认）：
+`tests/agent-turn-resilience.spec.ts` 的 "round budget > ends a silent panel ceiling with a
+count-free reason" 在 HEAD 上即失败。
+
+浏览器实证（加载扩展手工验证终止按钮、斜杠补全、会话记录）**BLOCKED**：本环境无法操作真实
+Chrome 会话；§8.6 的人工验证步骤见各阶段提交说明。
