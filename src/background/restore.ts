@@ -11,6 +11,7 @@
 import type { AttachmentSummary } from '../lib/attachments'
 import { toAttachmentSummaries } from '../lib/attachments'
 import type { WireMessage } from '../lib/llm'
+import { toolOutputSucceeded } from '../lib/tool-error'
 import { summarizeToolResult } from './agent'
 
 /** One replayed transcript entry, shaped for the side panel. */
@@ -20,6 +21,8 @@ export interface RestoreMessage {
   attachments?: AttachmentSummary[]
   /** Skill slash-picked for this turn, rendered as its `/name` tag. */
   skillName?: string
+  /** Structured tool outcome, recovered from the original result payload. */
+  toolOk?: boolean
 }
 
 /**
@@ -98,6 +101,7 @@ export function toRestoreMessages(history: readonly WireMessage[]): RestoreMessa
         return {
           role: 'tool' as const,
           text: `← ${name}: ${summarizeToolResult(name, entry.content)}`,
+          toolOk: toolOutputSucceeded(entry.content),
         }
       }
       if (entry.role === 'user') {

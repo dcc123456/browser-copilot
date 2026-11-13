@@ -99,7 +99,6 @@ import {
   Minus,
   Paperclip,
   Plus,
-  Wrench,
   X,
 } from 'lucide-react'
 import { normalizeSkill, PLAN_SKILL_NAME } from '../lib/skills'
@@ -171,6 +170,8 @@ interface Entry {
    * running; restored transcripts always carry it.
    */
   toolSummary?: string
+  /** Structured execution outcome; absent only in pre-outcome restored events. */
+  toolOk?: boolean
   /** Panel-side clock tick when this entry appeared, for the running elapsed. */
   startedAt?: number
   /** Reasoning (`role === 'thinking'`) finished streaming; set on first answer delta or tool.start. */
@@ -770,28 +771,42 @@ function ToolCallCard({ entry, t, now }: { entry: Entry; t: ChatT; now: number }
   const summary = entry.toolSummary
   const intent = entry.toolIntent
   const running = summary === undefined
+  const failed = !running && entry.toolOk === false
+  const state = running ? 'running' : failed ? 'error' : 'success'
+  const status = running ? t.chatToolRunning : failed ? t.chatToolFailed : t.chatToolSucceeded
   const elapsed =
     running && entry.startedAt != null
       ? Math.max(0, Math.floor((now - entry.startedAt) / 1000))
       : null
-  const baseClass = 'rounded-lg border border-border bg-sunken px-2.5 py-1.5'
+  const baseClass = `rounded-lg border px-2.5 py-1.5 ${
+    running
+      ? 'border-border bg-sunken'
+      : failed
+        ? 'border-err bg-err-surface'
+        : 'border-ok bg-ok-surface'
+  }`
 
   const icon = running ? (
     <Loader2 aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin text-accent" />
+  ) : failed ? (
+    <X aria-hidden="true" className="h-3 w-3 shrink-0 text-err" />
   ) : (
-    <Wrench aria-hidden="true" className="h-3 w-3 shrink-0 text-muted" />
+    <Check aria-hidden="true" className="h-3 w-3 shrink-0 text-ok" />
   )
 
   const inner = (
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
       {icon}
-      <span className="shrink-0 font-mono text-xs text-ink">{name}</span>
-      {running ? (
-        intent ? (
-          <span className="min-w-0 truncate text-xs text-muted">· {intent}</span>
-        ) : (
-          <span className="text-xs text-muted">{t.chatToolRunning}</span>
-        )
+      <span className={`shrink-0 font-mono text-xs ${failed ? 'text-err' : 'text-ink'}`}>
+        {name}
+      </span>
+      <span
+        className={`shrink-0 text-xs ${failed ? 'text-err' : running ? 'text-muted' : 'text-ok'}`}
+      >
+        · {status}
+      </span>
+      {running && intent ? (
+        <span className="min-w-0 truncate text-xs text-muted">· {intent}</span>
       ) : (
         summary && <span className="min-w-0 truncate text-xs text-muted">· {summary}</span>
       )}
@@ -801,19 +816,24 @@ function ToolCallCard({ entry, t, now }: { entry: Entry; t: ChatT; now: number }
     </div>
   )
 
-  if (running || !summary?.trim()) {
+  if (running) {
     return (
-      <div className={`${baseClass} flex items-center`} data-kind="tool" data-state="running">
+      <div className={`${baseClass} flex items-center`} data-kind="tool" data-state={state}>
         {inner}
       </div>
     )
   }
 
   return (
-    <details className={`${baseClass} group/tool`} data-kind="tool" data-state="done">
+    <details
+      className={`${baseClass} group/tool`}
+      data-kind="tool"
+      data-state={state}
+      data-ok={String(!failed)}
+    >
       <summary
         className="flex cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden"
-        title={summary}
+        title={summary || status}
       >
         {inner}
         <ChevronRight
@@ -822,8 +842,10 @@ function ToolCallCard({ entry, t, now }: { entry: Entry; t: ChatT; now: number }
           size={12}
         />
       </summary>
-      <div className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-muted">
-        {summary}
+      <div
+        className={`mt-1 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed ${failed ? 'text-err' : 'text-muted'}`}
+      >
+        {summary || status}
       </div>
     </details>
   )
@@ -2351,6 +2373,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                   text: entry.text,
                   toolName: name,
                   toolSummary: summary,
+                  toolOk: entry.toolOk !== false,
                 }
               }
               return {
@@ -2495,11 +2518,14 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                     text: '',
                     toolName: message.name,
                     toolSummary: message.summary,
+                    toolOk: message.ok !== false,
                   },
                 ]
               }
               return prev.map((entry, index) =>
-                index === pending ? { ...entry, toolSummary: message.summary } : entry,
+                index === pending
+                  ? { ...entry, toolSummary: message.summary, toolOk: message.ok !== false }
+                  : entry,
               )
             })
             break

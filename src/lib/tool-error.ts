@@ -116,6 +116,17 @@ export function isUnchangeableFailure(message: string): boolean {
   return errorType === 'JS_BLOCKED' || errorType === 'PERMISSION'
 }
 
+/** Structured output decides the outcome; display summaries never do. */
+export function toolOutputSucceeded(output: string): boolean {
+  try {
+    const parsed = JSON.parse(output) as { ok?: unknown; error?: unknown } | null
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return true
+    return parsed.ok !== false && typeof parsed.error !== 'string'
+  } catch {
+    return true
+  }
+}
+
 /** Identical failures charged against one tool before it is refused. */
 export const REPEAT_FAILURE_LIMIT = 3
 

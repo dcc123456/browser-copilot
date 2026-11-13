@@ -117,6 +117,7 @@ import {
   nextFailureStreak,
   recentFailedAttempts,
   REPEAT_FAILURE_LIMIT,
+  toolOutputSucceeded,
 } from '../lib/tool-error'
 import {
   type Agent,
@@ -4473,13 +4474,13 @@ export async function executeTool(
           return fail(`"${toolName}" is disabled in settings`)
         }
         const output = await executeTool(toolName, stepArgs, ctx, signal)
-        let parsed: { ok?: boolean; error?: string }
+        let parsed: { error?: string } = {}
         try {
-          parsed = JSON.parse(output) as { ok?: boolean; error?: string }
+          parsed = JSON.parse(output) as { error?: string }
         } catch {
-          parsed = { ok: true }
+          /* non-JSON output has no structured error detail */
         }
-        const ok = parsed.ok !== false
+        const ok = toolOutputSucceeded(output)
         // Inner steps bypass runOneToolCall (and its audit), so record each
         // one here — action history is the source for "workflow from history",
         // and a plan that skips its recording loses operator nodes.
@@ -6225,8 +6226,13 @@ async function runOneToolCall(
   // Hygiene: the audit record is written by `executeTool`, and a call that is
   // refused before reaching it must not inherit the previous step's record.
   ctx.operatorAudit = undefined
+  let resultOk = true
   const pushResult = (content: string): void => {
+    resultOk = toolOutputSucceeded(content)
     history.push({ role: 'tool', tool_call_id: call.id, content, name })
+  }
+  const sendToolResult = (message: Extract<AgentServerMessage, { type: 'tool.result' }>): void => {
+    deps.send({ ...message, ok: resultOk })
   }
   // Only unchangeable failures are charged: a stale ref or a timeout is what
   // the next attempt (with fresh state) is supposed to fix.
@@ -6241,7 +6247,7 @@ async function runOneToolCall(
     args = parseArgs(call.function.arguments)
   } catch (error) {
     pushResult(JSON.stringify({ error: (error as Error).message }))
-    deps.send({
+    sendToolResult({
       type: 'tool.result',
       name,
       summary: `Invalid arguments: ${(error as Error).message}`,
@@ -6274,7 +6280,7 @@ async function runOneToolCall(
   if (ctx.disabled.has(name)) {
     const message = `The "${name}" tool is disabled in settings.`
     pushResult(JSON.stringify({ error: message }))
-    deps.send({ type: 'tool.result', name, summary: `Blocked (${name} disabled)` })
+    sendToolResult({ type: 'tool.result', name, summary: `Blocked (${name} disabled)` })
     return
   }
 
@@ -6289,7 +6295,7 @@ async function runOneToolCall(
       `${name} has already failed ${failureStreak.count} times in this turn with an error that retrying cannot change. ` +
       'Do not call it again in this turn — use a different tool, or stop and tell the user what is blocking you and what they should do.'
     pushResult(enrichToolError({ error: refusal }, history, name, ctx.lastUrl))
-    deps.send({ type: 'tool.result', name, summary: `Blocked (${name} kept failing)` })
+    sendToolResult({ type: 'tool.result', name, summary: `Blocked (${name} kept failing)` })
     return
   }
 
@@ -6302,7 +6308,7 @@ async function runOneToolCall(
       '`run_javascript` is unavailable in workflow-generation mode. ' +
       'For a script step load `operators_escape` and call `wf_op_javascript-code` — it runs the page script AND records the node, and accepts a bare expression or a `return` body.'
     pushResult(JSON.stringify({ error: message }))
-    deps.send({ type: 'tool.result', name, summary: 'Blocked (use wf_op_javascript-code)' })
+    sendToolResult({ type: 'tool.result', name, summary: 'Blocked (use wf_op_javascript-code)' })
     return
   }
 
@@ -6316,7 +6322,7 @@ async function runOneToolCall(
         error: `"${name}" records no workflow node, so it is unavailable in workflow-generation mode. Use the wf_op_* operator for this step — every operator call operates the page AND records the node.`,
       }),
     )
-    deps.send({ type: 'tool.result', name, summary: `Blocked (${name} records nothing)` })
+    sendToolResult({ type: 'tool.result', name, summary: `Blocked (${name} records nothing)` })
     return
   }
 
@@ -6328,14 +6334,14 @@ async function runOneToolCall(
     const outcome = await runDelegateTool(args, deps, ctx)
     pushResult(JSON.stringify(outcome))
     if (outcome.status === 'refused') {
-      deps.send({
+      sendToolResult({
         type: 'tool.result',
         name,
         summary: `Delegation refused: ${outcome.reason.slice(0, 120)}`,
       })
       return
     }
-    deps.send({
+    sendToolResult({
       type: 'tool.result',
       name,
       summary: `Delegated to ${outcome.agent}: ${outcome.status}${
@@ -6384,7 +6390,7 @@ async function runOneToolCall(
           error: `No valid group requested. Valid groups: ${offered.join(', ')}.`,
         }),
       )
-      deps.send({ type: 'tool.result', name, summary: 'load_tools: no valid group' })
+      sendToolResult({ type: 'tool.result', name, summary: 'load_tools: no valid group' })
       return
     }
     const fresh = valid.filter((group) => !ctx.loadedGroups?.has(group))
@@ -6400,7 +6406,7 @@ async function runOneToolCall(
           : advertised,
       }),
     )
-    deps.send({
+    sendToolResult({
       type: 'tool.result',
       name,
       summary:
@@ -6420,7 +6426,7 @@ async function runOneToolCall(
           error: `The "${USE_OPERATORS_TOOL}" tool is only available in workflow-generation mode.`,
         }),
       )
-      deps.send({
+      sendToolResult({
         type: 'tool.result',
         name,
         summary: `Blocked (${name} is workflow-mode only)`,
@@ -6451,7 +6457,7 @@ async function runOneToolCall(
         toolsAdvertised: [...new Set(advertised)],
       }),
     )
-    deps.send({
+    sendToolResult({
       type: 'tool.result',
       name,
       summary:
@@ -6496,7 +6502,7 @@ async function runOneToolCall(
           error: `The "${name}" tool is not available to this sub-agent. Complete the task with your advertised tools only.`,
         }),
       )
-      deps.send({
+      sendToolResult({
         type: 'tool.result',
         name,
         summary: `Blocked (${name} not allowed for this sub-agent)`,
@@ -6511,7 +6517,7 @@ async function runOneToolCall(
           error: `The "${name}" tool is only available in workflow-generation mode.`,
         }),
       )
-      deps.send({
+      sendToolResult({
         type: 'tool.result',
         name,
         summary: `Blocked (${name} is workflow-mode only)`,
@@ -6533,7 +6539,7 @@ async function runOneToolCall(
           error: `"${name}" was not available: the "${operatorCategory}" operator category has been activated now and will be advertised on the next request. Call "${name}" again immediately — do not tell the user you lack tools.`,
         }),
       )
-      deps.send({
+      sendToolResult({
         type: 'tool.result',
         name,
         summary: `Activated operator category ${operatorCategory} — retry ${name}`,
@@ -6546,7 +6552,7 @@ async function runOneToolCall(
         error: `"${name}" was not loaded: its "${groupName}" tool group has been auto-loaded now and will be advertised on the next request. Call "${name}" again immediately — do not tell the user you lack tools.`,
       }),
     )
-    deps.send({
+    sendToolResult({
       type: 'tool.result',
       name,
       summary: `Auto-loaded ${groupName} group — retry ${name}`,
@@ -6559,7 +6565,7 @@ async function runOneToolCall(
   if (ctx.toolAllowSet && name !== 'load_tools' && !ctx.toolAllowSet.has(name)) {
     const message = `The "${name}" tool is not allowed for this sub-agent.`
     pushResult(JSON.stringify({ error: message }))
-    deps.send({
+    sendToolResult({
       type: 'tool.result',
       name,
       summary: `Blocked (${name} not allowed for this sub-agent)`,
@@ -6584,7 +6590,7 @@ async function runOneToolCall(
             'The "ask_user" tool is not available in workflow-generation mode. Record the standard flow with operators; the user reviews and adjusts it in the save card.',
         }),
       )
-      deps.send({ type: 'tool.result', name, summary: 'Blocked (workflow mode)' })
+      sendToolResult({ type: 'tool.result', name, summary: 'Blocked (workflow mode)' })
       return
     }
     const question = typeof args.question === 'string' ? args.question.trim().slice(0, 2000) : ''
@@ -6615,7 +6621,7 @@ async function runOneToolCall(
             'ask_user requires "question" (explain the situation) and 3-6 "options", each with non-empty "label", "pros" and "cons"; put the recommended option first.',
         }),
       )
-      deps.send({ type: 'tool.result', name, summary: 'ask_user: invalid arguments' })
+      sendToolResult({ type: 'tool.result', name, summary: 'ask_user: invalid arguments' })
       return
     }
     if (!deps.askUser) {
@@ -6626,7 +6632,7 @@ async function runOneToolCall(
             'No interactive user is connected (unattended run): ask_user is unavailable. Decide with a reasonable default and state the assumption in your answer.',
         }),
       )
-      deps.send({ type: 'tool.result', name, summary: 'No interactive user (unattended run)' })
+      sendToolResult({ type: 'tool.result', name, summary: 'No interactive user (unattended run)' })
       return
     }
     const answer = await deps.askUser({ question, options })
@@ -6639,7 +6645,7 @@ async function runOneToolCall(
             'The user dismissed the question without answering. Proceed with a sensible default and state the assumption, or stop.',
         }),
       )
-      deps.send({ type: 'tool.result', name, summary: 'User dismissed the question' })
+      sendToolResult({ type: 'tool.result', name, summary: 'User dismissed the question' })
       await recordAction(
         deps.conversationId,
         name,
@@ -6654,7 +6660,7 @@ async function runOneToolCall(
     }
     const answerText = answer.answer.trim()
     pushResult(JSON.stringify({ ok: true, answer: answerText }))
-    deps.send({
+    sendToolResult({
       type: 'tool.result',
       name,
       summary: `User answered: "${answerText.slice(0, 80)}${answerText.length > 80 ? '…' : ''}"`,
@@ -6702,7 +6708,7 @@ async function runOneToolCall(
             'present_plan requires "goal" (one line) and "steps" (2-20 items, each with a non-empty "title").',
         }),
       )
-      deps.send({ type: 'tool.result', name, summary: 'present_plan: invalid plan' })
+      sendToolResult({ type: 'tool.result', name, summary: 'present_plan: invalid plan' })
       return
     }
     const risks = typeof args.risks === 'string' ? args.risks.trim().slice(0, 2000) : ''
@@ -6723,7 +6729,7 @@ async function runOneToolCall(
           note: 'No interactive user is connected (unattended run): the plan is auto-approved. State it in your answer and proceed as planned.',
         }),
       )
-      deps.send({
+      sendToolResult({
         type: 'tool.result',
         name,
         summary: `Plan auto-approved (${steps.length} steps)`,
@@ -6749,7 +6755,7 @@ async function runOneToolCall(
           note: 'The user approved the plan. Execute it now; if the page no longer matches, explain the difference first.',
         }),
       )
-      deps.send({
+      sendToolResult({
         type: 'tool.result',
         name,
         summary: `Plan approved (${steps.length} steps)`,
@@ -6775,7 +6781,7 @@ async function runOneToolCall(
         error: `The user rejected the plan${feedback ? `: ${feedback}` : ' without feedback'}. Revise it accordingly and call present_plan again; after two rejected revisions, ask the user directly (ask_user) instead.`,
       }),
     )
-    deps.send({
+    sendToolResult({
       type: 'tool.result',
       name,
       summary: `Plan rejected: ${feedback.slice(0, 120) || 'no feedback'}`,
@@ -6806,7 +6812,7 @@ async function runOneToolCall(
           'Plan-first is active: the plan has not been approved yet, so page actions are refused. Finish your research (reads stay available), then call present_plan with the steps and wait for approval.',
       }),
     )
-    deps.send({ type: 'tool.result', name, summary: 'Blocked (plan not approved)' })
+    sendToolResult({ type: 'tool.result', name, summary: 'Blocked (plan not approved)' })
     await recordAction(
       deps.conversationId,
       name,
@@ -6842,7 +6848,7 @@ async function runOneToolCall(
       ? 'Chat mode is on. No page actions or tools are available. Ask the user to switch to Semi or Full auto in the panel to operate the page.'
       : 'Read-only mode is now on. Clicking, typing, navigating, switching tabs, and filling forms are disabled. Ask the user to switch to Semi or Full auto in the panel.'
     pushResult(JSON.stringify({ error: message }))
-    deps.send({
+    sendToolResult({
       type: 'tool.result',
       name,
       summary: inChat ? 'Blocked (chat mode)' : 'Blocked (read-only mode)',
@@ -6873,7 +6879,7 @@ async function runOneToolCall(
       approved = await deps.confirm(name, describeAction(name, args))
       if (!approved) {
         pushResult(JSON.stringify({ error: 'The user declined this action. Do not retry it.' }))
-        deps.send({ type: 'tool.result', name, summary: 'Declined by user' })
+        sendToolResult({ type: 'tool.result', name, summary: 'Declined by user' })
         await recordAction(
           deps.conversationId,
           name,
@@ -6893,14 +6899,13 @@ async function runOneToolCall(
     const output = await executeTool(name, args, ctx, deps.signal)
     pushResult(enrichToolOutputError(output, history, name, ctx.lastUrl))
     const summary = shortSummary(name, output)
-    deps.send({ type: 'tool.result', name, summary })
-    let ok = true
+    sendToolResult({ type: 'tool.result', name, summary })
+    const ok = resultOk
     try {
-      const parsed = JSON.parse(output) as { ok?: boolean; error?: string }
-      ok = parsed.ok !== false
+      const parsed = JSON.parse(output) as { error?: string }
       if (typeof parsed.error === 'string') noteFailure(parsed.error)
     } catch {
-      /* keep ok */
+      /* non-JSON output has no structured failure */
     }
     const audit = auditOf(name, args, ctx)
     await recordAction(
@@ -6924,7 +6929,7 @@ async function runOneToolCall(
           ? error.message
           : String(error)
     pushResult(enrichToolError({ error: message }, history, name, ctx.lastUrl))
-    deps.send({ type: 'tool.result', name, summary: `Failed: ${message}` })
+    sendToolResult({ type: 'tool.result', name, summary: `Failed: ${message}` })
     noteFailure(message)
     const audit = auditOf(name, args, ctx)
     await recordAction(

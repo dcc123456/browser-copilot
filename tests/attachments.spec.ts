@@ -406,7 +406,22 @@ describe('toRestoreMessages', () => {
     expect(out[1]!.role).toBe('assistant')
     expect(out[1]!.text).toBe('')
     expect(out[2]!.role).toBe('tool')
+    expect(out[2]!.toolOk).toBe(true)
     expect(out[2]!.text).toContain('read_current_page')
+  })
+
+  it('restores structured tool failures without reading the summary text', () => {
+    const history: WireMessage[] = [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'click', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'c1', content: JSON.stringify({ error: 'Unknown ref' }) },
+    ]
+    const out = toRestoreMessages(history)
+    expect(out[1]).toMatchObject({ role: 'tool', toolOk: false })
+    expect(out[1]!.text).not.toContain('Failed')
   })
 
   it('passes plain user and assistant turns through unchanged', () => {

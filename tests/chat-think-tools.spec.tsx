@@ -153,7 +153,7 @@ describe('assistant turn · reasoning, tools and split replies', () => {
 
       // The completed tool card shows name + summary and is expandable.
       const toolCard = container.querySelector(
-        '[data-kind="tool"][data-state="done"]',
+        '[data-kind="tool"][data-state="success"]',
       ) as HTMLElement
       expect(toolCard.textContent).toContain('click')
       expect(toolCard.textContent).toContain('clicked #go')
@@ -181,6 +181,42 @@ describe('assistant turn · reasoning, tools and split replies', () => {
     }
   })
 
+  it('collapses completed calls and distinguishes success, failure and empty results', async () => {
+    const { container, root } = await renderChat()
+    try {
+      await push({ type: 'delta', text: 'Working through the steps.' })
+      await push({ type: 'tool.start', name: 'click' })
+      await push({ type: 'tool.result', name: 'click', summary: 'clicked #go', ok: true })
+      await push({ type: 'tool.start', name: 'fill' })
+      await push({ type: 'tool.result', name: 'fill', summary: 'Unknown ref "e9"', ok: false })
+      await push({ type: 'tool.start', name: 'snapshot_page' })
+      await push({ type: 'tool.result', name: 'snapshot_page', summary: '', ok: true })
+
+      const cards = [
+        ...container.querySelectorAll('details[data-kind="tool"]'),
+      ] as HTMLDetailsElement[]
+      expect(cards).toHaveLength(3)
+      expect(cards.every((card) => !card.open)).toBe(true)
+      expect(cards.map((card) => card.dataset.state)).toEqual(['success', 'error', 'success'])
+      expect(cards.map((card) => card.dataset.ok)).toEqual(['true', 'false', 'true'])
+      expect(cards[0]!.textContent).toContain('Succeeded')
+      expect(cards[1]!.textContent).toContain('Failed')
+      expect(cards[1]!.className).toContain('border-err')
+      expect(cards[1]!.className).toContain('bg-err-surface')
+      expect(cards[2]!.querySelector('.animate-spin')).toBeNull()
+
+      cards[1]!.open = true
+      expect(cards[1]!.open).toBe(true)
+      expect(cards[1]!.textContent).toContain('Unknown ref "e9"')
+      expect(container.querySelectorAll('[data-role="assistant-turn"]')).toHaveLength(1)
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
   it('renders a restored transcript with the same grouped structure', async () => {
     const { container, root } = await renderChat()
     try {
@@ -190,7 +226,7 @@ describe('assistant turn · reasoning, tools and split replies', () => {
         messages: [
           { role: 'user', text: 'do the thing' },
           { role: 'assistant', text: '<think>r</think>hi' },
-          { role: 'tool', text: '← click: clicked #go' },
+          { role: 'tool', text: '← click: Unknown ref "e9"', toolOk: false },
           { role: 'assistant', text: 'more after the tool' },
         ],
       })
@@ -206,9 +242,10 @@ describe('assistant turn · reasoning, tools and split replies', () => {
       expect(think?.textContent).toContain('r')
 
       const toolCard = turn.querySelector('[data-kind="tool"]') as HTMLElement
-      expect(toolCard.dataset.state).toBe('done')
+      expect(toolCard.dataset.state).toBe('error')
+      expect(toolCard.dataset.ok).toBe('false')
       expect(toolCard.textContent).toContain('click')
-      expect(toolCard.textContent).toContain('clicked #go')
+      expect(toolCard.textContent).toContain('Unknown ref "e9"')
     } finally {
       await act(async () => {
         root.unmount()

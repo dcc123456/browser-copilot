@@ -677,6 +677,7 @@ export type CommandResult =
         attachments?: AttachmentSummary[]
         /** Skill slash-picked for the turn, shown as its `/name` tag. */
         skillName?: string
+        toolOk?: boolean
       }[]
     }
   | { type: 'conversations.rename' }
@@ -1051,7 +1052,7 @@ export type AgentServerMessage =
   | { type: 'delta'; text: string }
   | { type: 'thinking'; text: string }
   | { type: 'tool.start'; name: string; summary?: string }
-  | { type: 'tool.result'; name: string; summary: string }
+  | { type: 'tool.result'; name: string; summary: string; ok?: boolean }
   | {
       type: 'confirm.request'
       requestId: string
@@ -1176,6 +1177,7 @@ export type AgentServerMessage =
         attachments?: AttachmentSummary[]
         /** Skill slash-picked for the turn, shown as its `/name` tag. */
         skillName?: string
+        toolOk?: boolean
       }[]
       running: boolean
       /**
