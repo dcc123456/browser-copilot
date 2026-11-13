@@ -18,6 +18,7 @@ import { advertiseTools, executeTool, modeAutoApproves } from '../src/background
 import {
   _resetPickedElementWritesForTests,
   rememberPickedElement,
+  rememberPickedElements,
 } from '../src/background/element-selection-store'
 
 const baseCtx = {
@@ -117,6 +118,41 @@ describe('read_selected_element', () => {
       stale: false,
       target: { primary: { how: 'css', value: '#buy' }, fallbacks: [] },
     })
+  })
+
+  it('returns every picked element with aligned targets and compatible first-element fields', async () => {
+    resolveAutomationTab.mockResolvedValue({ id: 7, url: picked.url })
+    const second = { ...picked, selector: '#cart', text: 'Cart', html: '<div id="cart">Cart</div>' }
+    await rememberPickedElements(7, [picked, second])
+
+    const parsed = JSON.parse(await executeTool('read_selected_element', {}, baseCtx)) as {
+      ok: boolean
+      selector: string
+      elements: { selector: string; text: string }[]
+      target: { primary: { value: string } }
+      targets: { primary: { how: string; value: string }; fallbacks: unknown[] }[]
+      stale: boolean
+    }
+
+    expect(parsed.ok).toBe(true)
+    expect(parsed.selector).toBe('#buy')
+    expect(parsed.elements.map((element) => element.selector)).toEqual(['#buy', '#cart'])
+    expect(parsed.targets).toEqual([
+      { primary: { how: 'css', value: '#buy' }, fallbacks: [] },
+      { primary: { how: 'css', value: '#cart' }, fallbacks: [] },
+    ])
+    expect(parsed.target).toEqual(parsed.targets[0])
+    expect(parsed.stale).toBe(false)
+  })
+
+  it('marks the batch stale when any element came from another URL', async () => {
+    resolveAutomationTab.mockResolvedValue({ id: 7, url: picked.url })
+    await rememberPickedElements(7, [picked, { ...picked, url: 'https://shop.test/previous' }])
+
+    const parsed = JSON.parse(await executeTool('read_selected_element', {}, baseCtx)) as {
+      stale: boolean
+    }
+    expect(parsed.stale).toBe(true)
   })
 
   it('flags a pick made on a different URL as stale but still returns it', async () => {

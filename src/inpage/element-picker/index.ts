@@ -27,8 +27,9 @@
  * whole UI. A click copies the payload, reports the element to the worker
  * (`picker:selection` → `read_selected_element`) and closes. With `selectOnly`
  * set, the same click instead SELECTS the element — nothing is copied and the
- * highlight stays on the choice — and the next click or Escape dismisses, so a
- * local agent reads exactly what the user marked.
+ * highlight stays on the choice. Ctrl/Cmd+click toggles more elements, and an
+ * ordinary next click or Escape dismisses, so a local agent reads exactly what
+ * the user marked.
  *
  * IMPORTANT: this function is serialized via `func.toString()` and run in the
  * page world by chrome.scripting.executeScript. EVERYTHING it uses — styles,
@@ -199,6 +200,7 @@ export const startPicker: PickerStart = async (args) => {
         ? `已复制 <${tag}> 的文本（${size} 个字符）`
         : `Copied <${tag}> text (${size} chars)`,
     copyFailed: locale === 'zh' ? '复制失败，请重试' : 'Copy failed — please retry',
+    selectionLimit: locale === 'zh' ? '最多同时选择 10 个元素' : 'Select up to 10 elements',
   }
 
   // --- selector builder (mirrors build-selector.ts; inlined for injection) ---
@@ -456,6 +458,7 @@ export const startPicker: PickerStart = async (args) => {
   rootEl.className = 'pick-root'
   const overlay = document.createElement('div')
   overlay.className = 'pick-overlay'
+  const selectionHighlights = document.createElement('div')
   const highlight = document.createElement('div')
   highlight.className = 'pick-highlight'
   highlight.style.display = 'none'
@@ -503,7 +506,7 @@ export const startPicker: PickerStart = async (args) => {
       <div class="pick-hint" data-role="hint" style="display:none">${STRINGS.hint}</div>
       <div class="pick-note" data-role="note" style="display:none"></div>
     </div>`
-  rootEl.append(overlay, highlight, card)
+  rootEl.append(overlay, selectionHighlights, highlight, card)
   root.appendChild(rootEl)
   document.documentElement.appendChild(host)
 
@@ -534,8 +537,9 @@ export const startPicker: PickerStart = async (args) => {
 
   let locked: Element | null = null
   let hovered: Element | null = null
-  /** Select-only mode: the element was reported already, so the next click only
-   *  dismisses instead of selecting again. */
+  const selectedElements: Element[] = []
+  /** Select-only mode: a selection was reported already, so the next ordinary
+   *  click only dismisses instead of selecting again. */
   let selectionReported = false
   let curSelector = initial
   /**
@@ -553,17 +557,17 @@ export const startPicker: PickerStart = async (args) => {
     hintEl.style.display = target() ? 'block' : 'none'
   }
 
-  function highlightEl(el: Element | null) {
+  function highlightEl(el: Element | null, box: HTMLElement = highlight) {
     if (!el || el === host || host.contains(el)) {
-      highlight.style.display = 'none'
+      box.style.display = 'none'
       return
     }
     const r = el.getBoundingClientRect()
-    highlight.style.display = 'block'
-    highlight.style.top = `${r.top}px`
-    highlight.style.left = `${r.left}px`
-    highlight.style.width = `${r.width}px`
-    highlight.style.height = `${r.height}px`
+    box.style.display = 'block'
+    box.style.top = `${r.top}px`
+    box.style.left = `${r.left}px`
+    box.style.width = `${r.width}px`
+    box.style.height = `${r.height}px`
   }
 
   function renderMatchNav() {
@@ -591,41 +595,58 @@ export const startPicker: PickerStart = async (args) => {
    *  every round, so the recording stays small; the worker truncates again. */
   const MAX_REPORTED_TEXT = 2000
   const MAX_REPORTED_HTML = 20_000
+  const MAX_SELECTED_ELEMENTS = 10
 
-  /**
-   * Reports the selected element to the worker so a local agent can read and act
-   * on it (`read_selected_element`). Copy mode reports on every pick, whether or
-   * not the clipboard accepted the payload.
-   */
-  function reportSelection(el: Element): void {
+  function selectionPayload(el: Element) {
     const text = visibleTextOf(el)
     const html = el.outerHTML
-    try {
-      void chrome.runtime
-        .sendMessage({
-          type: 'picker:selection',
-          selection: {
-            selector: selectorFor(el),
-            tag: el.tagName.toLowerCase(),
-            ...(el.id ? { id: el.id } : {}),
-            ...(el.classList.length ? { classes: Array.from(el.classList).slice(0, 12) } : {}),
-            text: text.slice(0, MAX_REPORTED_TEXT),
-            html: html.slice(0, MAX_REPORTED_HTML),
-            ...(html.length > MAX_REPORTED_HTML ? { htmlTruncated: true } : {}),
-            url: location.href,
-            title: document.title,
-            pickedAt: Date.now(),
-          },
-        })
-        .catch(() => {})
-    } catch {
-      /* the clipboard result must not depend on messaging being available */
+    return {
+      selector: selectorFor(el),
+      tag: el.tagName.toLowerCase(),
+      ...(el.id ? { id: el.id } : {}),
+      ...(el.classList.length ? { classes: Array.from(el.classList).slice(0, 12) } : {}),
+      text: text.slice(0, MAX_REPORTED_TEXT),
+      html: html.slice(0, MAX_REPORTED_HTML),
+      ...(html.length > MAX_REPORTED_HTML ? { htmlTruncated: true } : {}),
+      url: location.href,
+      title: document.title,
+      pickedAt: Date.now(),
     }
   }
 
-  /** Copy mode has no card: aiming and holding are just the highlight. */
+  function sendSelection(message: Record<string, unknown>): void {
+    try {
+      void chrome.runtime.sendMessage(message).catch(() => {})
+    } catch {
+      /* picking and copying must not depend on messaging being available */
+    }
+  }
+
+  /** Copy mode reports on every pick, whether or not the clipboard accepted it. */
+  function reportSelection(el: Element): void {
+    sendSelection({ type: 'picker:selection', selection: selectionPayload(el) })
+  }
+
+  /** Select-only changes replace the worker's whole ordered selection atomically. */
+  function reportSelections(): void {
+    sendSelection({
+      type: 'picker:selection',
+      selections: selectedElements.map(selectionPayload),
+    })
+  }
+
+  /** Copy mode has no card: selected boxes persist while the aim gets a preview. */
   function refreshCopy() {
-    highlightEl(target())
+    selectionHighlights.replaceChildren()
+    selectedElements.forEach((el) => {
+      const box = document.createElement('div')
+      box.className = 'pick-highlight'
+      box.dataset.role = 'selected-highlight'
+      highlightEl(el, box)
+      selectionHighlights.appendChild(box)
+    })
+    const aimed = target()
+    highlightEl(aimed && !selectedElements.includes(aimed) ? aimed : null)
   }
 
   function refresh() {
@@ -797,9 +818,10 @@ export const startPicker: PickerStart = async (args) => {
     e.stopImmediatePropagation()
   }
   const lockTo = (e: MouseEvent) => {
-    // Once the select-only pick is reported, the next press dismisses; moving
-    // the lock would drag the visible highlight to wherever that click lands.
-    if (mode === 'copy' && selectOnly && selectionReported) return
+    const additive = e.ctrlKey || e.metaKey
+    // An ordinary press after the first report only dismisses; a modified press
+    // still aims so it can toggle another element in the selection.
+    if (mode === 'copy' && selectOnly && selectionReported && !additive) return
     const el = eventTarget(e)
     if (!el || el === host || host.contains(el)) return
     locked = el
@@ -809,8 +831,10 @@ export const startPicker: PickerStart = async (args) => {
   // re-lock: by then the page may have moved the DOM under the cursor.
   let sawPointerPress = false
   let sawMousePress = false
+  let sawAdditiveContextMenu = false
   const onPointerDown = (e: MouseEvent) => {
     sawPointerPress = true
+    sawAdditiveContextMenu = false
     // Card presses are let through before anything else — the old guard order
     // killed the card's own confirm/cancel handlers and stranded the spinner.
     if (isOurUi(e)) return
@@ -825,35 +849,72 @@ export const startPicker: PickerStart = async (args) => {
   }
   const onClick = (e: MouseEvent) => {
     const pressed = sawPointerPress || sawMousePress
+    const contextMenuHandled = sawAdditiveContextMenu
     sawPointerPress = false
     sawMousePress = false
+    sawAdditiveContextMenu = false
     if (isOurUi(e)) return
     swallowPress(e)
+    if (contextMenuHandled) return
     // A click with no press at all (a synthetic `el.click()`) still picks.
     if (!pressed) lockTo(e)
     // Copy mode has no confirm button, so the click is the whole gesture.
     // Handling it at click (not pointerdown) keeps the press swallowed:
     // cleanup() unbinds the listeners, and any later event of the same press
     // would otherwise reach the page and activate it.
-    if (mode === 'copy') commitCopy()
+    if (mode === 'copy') commitCopy(e)
+  }
+  // On macOS Ctrl+click is a right-click: the browser emits contextmenu instead
+  // of click, so the additive commit must accept that native gesture too.
+  const onContextMenu = (e: MouseEvent) => {
+    if (isOurUi(e)) return
+    swallowPress(e)
+    if (mode !== 'copy' || !selectOnly || (!e.ctrlKey && !e.metaKey)) return
+    const pressed = sawPointerPress || sawMousePress
+    sawPointerPress = false
+    sawMousePress = false
+    sawAdditiveContextMenu = true
+    if (!pressed) lockTo(e)
+    commitCopy(e)
   }
   /**
    * Copy mode: one click takes the element. Normally that means copy the payload
    * (per `copyFormat`), report it, and close. In select-only mode nothing is
    * copied: the first click reports the element and leaves the dim overlay and
-   * the highlight on the choice, and the next click or Escape dismisses. The
-   * worker keeps the recording either way.
+   * the highlight on the choice. Ctrl/Cmd+click toggles more elements; an
+   * ordinary next click or Escape dismisses without changing the recording.
    */
-  function commitCopy(): void {
+  function commitCopy(e?: MouseEvent): void {
+    const additive = e?.ctrlKey === true || e?.metaKey === true
+    if (selectOnly && selectionReported && !additive) {
+      cleanup()
+      return
+    }
     const el = target()
     if (!el) return
     if (selectOnly) {
-      if (!selectionReported) {
+      if (additive) {
+        const existingIndex = selectedElements.indexOf(el)
+        if (existingIndex < 0 && selectedElements.length >= MAX_SELECTED_ELEMENTS) {
+          locked = selectedElements[selectedElements.length - 1] ?? null
+          hovered = null
+          refreshCopy()
+          showCopiedToast(STRINGS.selectionLimit, true)
+          return
+        }
+        if (existingIndex >= 0) selectedElements.splice(existingIndex, 1)
+        else selectedElements.push(el)
         selectionReported = true
-        reportSelection(el)
+        locked = selectedElements[selectedElements.length - 1] ?? null
+        hovered = null
+        reportSelections()
+        refreshCopy()
         return
       }
-      cleanup()
+      selectionReported = true
+      selectedElements.splice(0, selectedElements.length, el)
+      reportSelections()
+      refreshCopy()
       return
     }
     const value = copyValueFor(el)
@@ -1051,6 +1112,7 @@ export const startPicker: PickerStart = async (args) => {
     window.removeEventListener('pointerdown', onPointerDown, true)
     window.removeEventListener('mousedown', onMouseDown, true)
     window.removeEventListener('click', onClick, true)
+    window.removeEventListener('contextmenu', onContextMenu, true)
     window.removeEventListener('keydown', onKey, true)
     host.remove()
     if (launcherHost instanceof HTMLElement && launcherHost.isConnected) {
@@ -1064,5 +1126,6 @@ export const startPicker: PickerStart = async (args) => {
   window.addEventListener('pointerdown', onPointerDown, true)
   window.addEventListener('mousedown', onMouseDown, true)
   window.addEventListener('click', onClick, true)
+  window.addEventListener('contextmenu', onContextMenu, true)
   window.addEventListener('keydown', onKey, true)
 }

@@ -8,8 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   _resetPickedElementWritesForTests,
-  getPickedElement,
+  getPickedElements,
   rememberPickedElement,
+  rememberPickedElements,
   sanitizePickedElement,
 } from '../src/background/element-selection-store'
 
@@ -32,8 +33,8 @@ function makeChrome() {
   }
 }
 
-function stored(): Record<string, Record<string, unknown>> {
-  return (fake.session.get(SESSION_KEY) ?? {}) as Record<string, Record<string, unknown>>
+function stored(): Record<string, unknown> {
+  return (fake.session.get(SESSION_KEY) ?? {}) as Record<string, unknown>
 }
 
 let fake: ReturnType<typeof makeChrome>
@@ -49,6 +50,8 @@ const picked = {
   title: 'Shop',
   pickedAt: 1_700_000_000_000,
 }
+
+const firstPickedElement = async (tabId: number) => (await getPickedElements(tabId))[0]
 
 beforeEach(() => {
   fake = makeChrome()
@@ -121,11 +124,11 @@ describe('sanitizePickedElement', () => {
   })
 })
 
-describe('rememberPickedElement / getPickedElement', () => {
+describe('rememberPickedElement / firstPickedElement', () => {
   it('round-trips a pick through storage.session', async () => {
     await rememberPickedElement(7, picked)
 
-    const read = await getPickedElement(7)
+    const read = await firstPickedElement(7)
     expect(read).toMatchObject({ selector: '#buy', tag: 'button', url: picked.url })
     expect(stored()).toHaveProperty('7')
   })
@@ -135,9 +138,9 @@ describe('rememberPickedElement / getPickedElement', () => {
     await rememberPickedElement(2, { ...picked, selector: '#sell', url: 'https://sell.test/' })
     await rememberPickedElement(1, { ...picked, selector: '#cart', pickedAt: picked.pickedAt + 1 })
 
-    expect((await getPickedElement(1))?.selector).toBe('#cart')
-    expect((await getPickedElement(2))?.selector).toBe('#sell')
-    expect(await getPickedElement(3)).toBeUndefined()
+    expect((await firstPickedElement(1))?.selector).toBe('#cart')
+    expect((await firstPickedElement(2))?.selector).toBe('#sell')
+    expect(await firstPickedElement(3)).toBeUndefined()
   })
 
   it('serializes concurrent writes instead of losing one', async () => {
@@ -146,8 +149,8 @@ describe('rememberPickedElement / getPickedElement', () => {
       rememberPickedElement(2, { ...picked, selector: '#two' }),
     ])
 
-    expect((await getPickedElement(1))?.selector).toBe('#buy')
-    expect((await getPickedElement(2))?.selector).toBe('#two')
+    expect((await firstPickedElement(1))?.selector).toBe('#buy')
+    expect((await firstPickedElement(2))?.selector).toBe('#two')
   })
 
   it('drops the oldest record past the tab cap', async () => {
@@ -166,13 +169,57 @@ describe('rememberPickedElement / getPickedElement', () => {
     await rememberPickedElement(Number.NaN, picked)
 
     expect(stored()).toEqual({})
-    expect(await getPickedElement(1)).toBeUndefined()
+    expect(await firstPickedElement(1)).toBeUndefined()
   })
 
   it('is a no-op when chrome.storage.session is unavailable', async () => {
     vi.stubGlobal('chrome', {})
 
     await expect(rememberPickedElement(1, picked)).resolves.toBeUndefined()
-    expect(await getPickedElement(1)).toBeUndefined()
+    expect(await firstPickedElement(1)).toBeUndefined()
+  })
+})
+
+describe('rememberPickedElements / getPickedElements', () => {
+  it('round-trips the ordered batch and replaces it on every update', async () => {
+    await rememberPickedElements(7, [picked, { ...picked, selector: '#cart', text: 'Cart' }])
+    expect((await getPickedElements(7)).map((element) => element.selector)).toEqual([
+      '#buy',
+      '#cart',
+    ])
+
+    await rememberPickedElements(7, [{ ...picked, selector: '#sell' }])
+    expect((await getPickedElements(7)).map((element) => element.selector)).toEqual(['#sell'])
+    expect((await firstPickedElement(7))?.selector).toBe('#sell')
+  })
+
+  it('clears a tab when the last selected element is toggled off', async () => {
+    await rememberPickedElements(7, [picked])
+    await rememberPickedElements(7, [])
+
+    expect(await getPickedElements(7)).toEqual([])
+    expect(stored()).toEqual({})
+  })
+
+  it('caps each batch and filters invalid records at the worker boundary', async () => {
+    const batch: unknown[] = Array.from({ length: 12 }, (_, index) => ({
+      ...picked,
+      selector: `#item-${index}`,
+    }))
+    batch[2] = { selector: '' }
+
+    await rememberPickedElements(7, batch)
+
+    const elements = await getPickedElements(7)
+    expect(elements).toHaveLength(9)
+    expect(elements.some((element) => element.selector === '#item-2')).toBe(false)
+    expect(elements[0]?.selector).toBe('#item-0')
+  })
+
+  it('reads a pre-multi-select session record as a one-element batch', async () => {
+    fake.session.set(SESSION_KEY, { 7: picked })
+
+    expect(await getPickedElements(7)).toEqual([picked])
+    expect(await firstPickedElement(7)).toEqual(picked)
   })
 })

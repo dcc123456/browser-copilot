@@ -58,24 +58,32 @@ const hintText = () => field('[data-role="hint"]').textContent
 const hintShown = () => field('[data-role="hint"]').style.display === 'block'
 const confirmBtn = () => field('[data-act="confirm"]') as HTMLButtonElement
 
-function dispatchPointer(el: Element): PointerEvent {
+type ClickModifiers = { ctrlKey?: boolean; metaKey?: boolean }
+
+function dispatchPointer(el: Element, modifiers: ClickModifiers = {}): PointerEvent {
   const event = new PointerEvent('pointerdown', {
     bubbles: true,
     composed: true,
     cancelable: true,
     clientX: 5,
     clientY: 5,
+    ...modifiers,
   })
   el.dispatchEvent(event)
   return event
 }
-function dispatchMouse(el: Element, type: 'mousedown' | 'mouseup' | 'click' | 'mousemove') {
+function dispatchMouse(
+  el: Element,
+  type: 'mousedown' | 'mouseup' | 'click' | 'contextmenu' | 'mousemove',
+  modifiers: ClickModifiers = {},
+) {
   const event = new MouseEvent(type, {
     bubbles: true,
     composed: true,
     cancelable: true,
     clientX: 5,
     clientY: 5,
+    ...modifiers,
   })
   el.dispatchEvent(event)
   return event
@@ -91,11 +99,20 @@ function dispatchKey(key: string, target: EventTarget = document): KeyboardEvent
   return event
 }
 /** The full gesture one real click produces, in DOM order. */
-function clickGesture(el: Element): MouseEvent {
-  dispatchPointer(el)
-  dispatchMouse(el, 'mousedown')
-  dispatchMouse(el, 'mouseup')
-  return dispatchMouse(el, 'click')
+function clickGesture(el: Element, modifiers: ClickModifiers = {}): MouseEvent {
+  dispatchPointer(el, modifiers)
+  dispatchMouse(el, 'mousedown', modifiers)
+  dispatchMouse(el, 'mouseup', modifiers)
+  return dispatchMouse(el, 'click', modifiers)
+}
+/** macOS turns Ctrl+click into a right-click with contextmenu and no click. */
+function controlClickGesture(el: Element): MouseEvent {
+  const modifiers = { ctrlKey: true }
+  dispatchPointer(el, modifiers)
+  dispatchMouse(el, 'mousedown', modifiers)
+  const event = dispatchMouse(el, 'contextmenu', modifiers)
+  dispatchMouse(el, 'mouseup', modifiers)
+  return event
 }
 
 const results = () => sent.filter((message) => message.type === 'picker:result')
@@ -689,8 +706,38 @@ describe('element picker: select-only copy mode', () => {
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({
       type: 'picker:selection',
-      selection: { selector: '#buy', tag: 'button', id: 'buy', text: 'Buy' },
+      selections: [{ selector: '#buy', tag: 'button', id: 'buy', text: 'Buy' }],
     })
+  })
+
+  it('Ctrl/Cmd+click toggles an ordered multi-selection with one highlight per element', async () => {
+    await mountSelectOnly()
+    const pageSaw: string[] = []
+    onPage(document, 'click', () => pageSaw.push('click'))
+    onPage(document, 'contextmenu', () => pageSaw.push('contextmenu'))
+    const buy = document.getElementById('buy')!
+    const blank = document.getElementById('blank')!
+    const shop = document.getElementById('shop')!
+
+    clickGesture(buy)
+    controlClickGesture(blank)
+    clickGesture(shop, { metaKey: true })
+
+    expect(sent).toHaveLength(3)
+    expect(sent[2]).toMatchObject({
+      type: 'picker:selection',
+      selections: [{ selector: '#buy' }, { selector: '#blank' }, { selector: '#shop' }],
+    })
+    expect(card()?.querySelectorAll('[data-role="selected-highlight"]')).toHaveLength(3)
+
+    controlClickGesture(blank)
+
+    expect(sent[3]).toMatchObject({
+      selections: [{ selector: '#buy' }, { selector: '#shop' }],
+    })
+    expect(card()?.querySelectorAll('[data-role="selected-highlight"]')).toHaveLength(2)
+    expect(pageSaw).toEqual([])
+    expect(execCommand).not.toHaveBeenCalled()
   })
 
   it('keeps the selection while the mouse moves, then dismisses on the next click', async () => {

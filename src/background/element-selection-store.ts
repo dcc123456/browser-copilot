@@ -1,10 +1,10 @@
 /**
- * The element the user last confirmed with the on-page picker, per tab.
+ * The elements the user confirmed with the on-page picker, per tab.
  *
- * `read_selected_element` reads this back; the picker itself cannot be asked
+ * `read_selected_element` reads these back; the picker itself cannot be asked
  * afterwards because its UI and its listeners are gone once the pick ends.
  * Session storage (not local): a pick describes THIS browsing session's page,
- * and the record must survive a service-worker eviction between the pick and
+ * and the records must survive a service-worker eviction between the pick and
  * the agent's read — module memory would not.
  *
  * @module background/element-selection-store
@@ -15,6 +15,7 @@ import type { PickedElement } from '../lib/messages'
 const SESSION_KEY = 'pickedElements'
 /** Distinct tabs kept; each record is capped separately. */
 const MAX_TABS = 20
+const MAX_ELEMENTS_PER_TAB = 10
 const MAX_SELECTOR_CHARS = 500
 const MAX_TAG_CHARS = 60
 const MAX_ID_CHARS = 200
@@ -25,7 +26,8 @@ const MAX_HTML_CHARS = 20_000
 const MAX_URL_CHARS = 2000
 const MAX_TITLE_CHARS = 300
 
-type StoredSelections = Record<string, PickedElement>
+type StoredSelection = PickedElement | PickedElement[]
+type StoredSelections = Record<string, StoredSelection>
 
 function storageAvailable(): boolean {
   return typeof chrome !== 'undefined' && !!chrome.storage?.session
@@ -36,6 +38,10 @@ async function readAll(): Promise<StoredSelections> {
   const stored = await chrome.storage.session.get(SESSION_KEY).catch(() => undefined)
   const value = stored?.[SESSION_KEY]
   return value && typeof value === 'object' ? (value as StoredSelections) : {}
+}
+
+function asElements(record: StoredSelection | undefined): PickedElement[] {
+  return Array.isArray(record) ? record : record ? [record] : []
 }
 
 /**
@@ -82,20 +88,31 @@ export function sanitizePickedElement(raw: unknown, now = Date.now()): PickedEle
 // would otherwise lose one of them.
 let writeQueue: Promise<void> = Promise.resolve()
 
-/** Remembers a pick for this tab, oldest record dropped past {@link MAX_TABS}. */
-export function rememberPickedElement(tabId: number, raw: unknown): Promise<void> {
-  if (!Number.isInteger(tabId) || !storageAvailable()) return Promise.resolve()
-  const picked = sanitizePickedElement(raw)
-  if (!picked) return Promise.resolve()
+/** Replaces the whole ordered selection for this tab; an empty batch clears it. */
+export function rememberPickedElements(tabId: number, raws: unknown): Promise<void> {
+  if (!Number.isInteger(tabId) || !storageAvailable() || !Array.isArray(raws)) {
+    return Promise.resolve()
+  }
+  const picked = raws
+    .slice(0, MAX_ELEMENTS_PER_TAB)
+    .map((raw) => sanitizePickedElement(raw))
+    .filter((element): element is PickedElement => element !== undefined)
   writeQueue = writeQueue
     .catch(() => {})
     .then(async () => {
       const all = await readAll()
-      all[String(tabId)] = picked
+      if (picked.length > 0) all[String(tabId)] = picked
+      else delete all[String(tabId)]
       const keys = Object.keys(all)
       if (keys.length > MAX_TABS) {
         keys
-          .sort((a, b) => (all[a]?.pickedAt ?? 0) - (all[b]?.pickedAt ?? 0))
+          .sort((a, b) => {
+            const aElements = asElements(all[a])
+            const bElements = asElements(all[b])
+            const aPickedAt = aElements[aElements.length - 1]?.pickedAt ?? 0
+            const bPickedAt = bElements[bElements.length - 1]?.pickedAt ?? 0
+            return aPickedAt - bPickedAt
+          })
           .slice(0, keys.length - MAX_TABS)
           .forEach((key) => delete all[key])
       }
@@ -104,11 +121,17 @@ export function rememberPickedElement(tabId: number, raw: unknown): Promise<void
   return writeQueue
 }
 
-/** The last element picked on this tab, if any. */
-export async function getPickedElement(tabId: number): Promise<PickedElement | undefined> {
-  if (!Number.isInteger(tabId)) return undefined
+/** Compatibility entry for copy mode, which still reports exactly one element. */
+export function rememberPickedElement(tabId: number, raw: unknown): Promise<void> {
+  if (!sanitizePickedElement(raw)) return Promise.resolve()
+  return rememberPickedElements(tabId, [raw])
+}
+
+/** The ordered elements picked on this tab, if any. */
+export async function getPickedElements(tabId: number): Promise<PickedElement[]> {
+  if (!Number.isInteger(tabId)) return []
   const all = await readAll()
-  return all[String(tabId)]
+  return asElements(all[String(tabId)])
 }
 
 /** Test helper: drops the pending write chain. */

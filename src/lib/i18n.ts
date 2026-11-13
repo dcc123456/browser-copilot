@@ -3109,7 +3109,7 @@ const en: Messages = {
     'Show a crosshair button on web pages. Click it, then click an element: the element (children included) is copied to the clipboard and recorded for the local agent to read.',
   settingsElementPickerEnable: 'Show the picker button on pages',
   settingsElementPickerSelectOnly:
-    'Select without copying — keep the highlight until you click again',
+    'Select without copying — Ctrl/Cmd+click adds or removes elements; an ordinary click closes',
   settingsElementPickerFormat: 'Copy on click',
   settingsElementPickerFormatSelector: 'CSS selector only',
   settingsElementPickerFormatText: 'Visible text only',
@@ -4806,7 +4806,7 @@ const zhCN: Messages = {
   settingsElementPickerIntro:
     '在网页上显示一个十字准星按钮。点击它，再点击页面元素：该元素（含子元素）会复制到剪贴板，并记录给本地 Agent 读取。',
   settingsElementPickerEnable: '在网页上显示元素选择按钮',
-  settingsElementPickerSelectOnly: '选中但不复制（高亮保留到再次点击）',
+  settingsElementPickerSelectOnly: '选中但不复制（Ctrl/Cmd+点击添加或移除元素，普通点击关闭）',
   settingsElementPickerFormat: '点击后复制的内容',
   settingsElementPickerFormatSelector: '仅 CSS 选择器',
   settingsElementPickerFormatText: '仅文本',

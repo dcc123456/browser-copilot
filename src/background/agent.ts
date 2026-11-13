@@ -173,7 +173,7 @@ import {
   waitForNetworkIdle,
 } from './cdp-monitor'
 import { activeTab, readActivePage } from './page'
-import { getPickedElement } from './element-selection-store'
+import { getPickedElements } from './element-selection-store'
 import { captureVisiblePage } from './capture'
 import { captureElementRobust } from './element-capture'
 import {
@@ -686,7 +686,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'read_selected_element',
       description:
-        'Read the element the user picked with the Browser Copilot crosshair button on the page: CSS selector, tag, text and capped HTML. The result carries a ready `target` for click/fill, so act on exactly what the user chose. `stale` means the tab has navigated since the pick. Read-only.',
+        'Read the elements picked with the Browser Copilot crosshair: `elements` and aligned `targets` carry CSS selectors, tags, text and capped HTML; the first element also keeps `target`. Ctrl/Cmd+click selects multiple in select-only mode. `stale` means the tab navigated since a pick. Read-only.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -3686,23 +3686,31 @@ export async function executeTool(
       if (!tab || typeof tab.id !== 'number') {
         return JSON.stringify({ ok: false, error: '没有可读取的标签页。' })
       }
-      const picked = await getPickedElement(tab.id)
+      const pickedElements = await getPickedElements(tab.id)
+      const picked = pickedElements[0]
       if (!picked) {
         return JSON.stringify({
           ok: false,
           error:
-            'No element has been picked on this tab yet. Ask the user to click the crosshair button on the page, click the element, then retry (the picker must be enabled in Settings).',
+            'No element has been picked on this tab yet. Ask the user to click the crosshair button on the page, click an element, then retry. In select-only mode, Ctrl/Cmd+click adds more elements (the picker must be enabled in Settings).',
         })
       }
       ctx.lastUrl = tab.url
       // A pick made on another URL does not locate anything on this document;
       // report it rather than letting the model act on a stale selector.
-      const stale = typeof tab.url === 'string' && tab.url !== picked.url
+      const stale =
+        typeof tab.url === 'string' && pickedElements.some((element) => tab.url !== element.url)
+      const targets = pickedElements.map((element) => ({
+        primary: { how: 'css', value: element.selector },
+        fallbacks: [],
+      }))
       return JSON.stringify({
         ok: true,
         ...picked,
+        elements: pickedElements,
         stale,
-        target: { primary: { how: 'css', value: picked.selector }, fallbacks: [] },
+        target: targets[0],
+        targets,
       })
     }
 

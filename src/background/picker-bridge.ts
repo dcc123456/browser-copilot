@@ -22,7 +22,7 @@ import { startPicker } from '../inpage/element-picker'
 import { isInjectablePage } from '../lib/pages'
 import { resolveAutomationTab } from './driver'
 import { normalScopeFromWindowId, type ScopeWindow } from './automation-scope'
-import { rememberPickedElement } from './element-selection-store'
+import { rememberPickedElement, rememberPickedElements } from './element-selection-store'
 
 export interface PickerStartMessage {
   type: 'picker:start'
@@ -123,7 +123,7 @@ export async function handlePickerMessage(
     | PickerStartMessage
     | PickerVerifyMessage
     | { type: 'picker:result' | 'picker:cancel' }
-    | { type: 'picker:selection'; selection?: unknown }
+    | { type: 'picker:selection'; selection?: unknown; selections?: unknown }
 
   if (msg.type === 'picker:start') {
     const response = await injectPicker({
@@ -154,7 +154,11 @@ export async function handlePickerMessage(
     // sender tab (e.g. from an extension page) cannot be keyed, so it is
     // acknowledged and dropped.
     if (typeof senderTabId === 'number') {
-      await rememberPickedElement(senderTabId, (msg as { selection?: unknown }).selection)
+      if (Array.isArray(msg.selections)) {
+        await rememberPickedElements(senderTabId, msg.selections)
+      } else {
+        await rememberPickedElement(senderTabId, msg.selection)
+      }
     }
     return { handled: true, response: { ok: true } }
   }

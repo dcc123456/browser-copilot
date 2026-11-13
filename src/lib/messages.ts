@@ -1279,8 +1279,9 @@ export interface ElementPickerStatusResponse {
 
 /**
  * One element the user confirmed in copy mode, reported to the worker so the
- * local agent can read and act on it (`read_selected_element`). Payload fields
- * are capped in the picker AND re-capped by the worker's store.
+ * local agent can read and act on it (`read_selected_element`). Select-only
+ * mode reports an ordered array of these records. Payload fields are capped in
+ * the picker AND re-capped by the worker's store.
  */
 export interface PickedElement {
   /** CSS selector the picker resolved to exactly this element. */
