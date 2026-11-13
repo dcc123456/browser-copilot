@@ -47,3 +47,14 @@ supervisor 实际委派 search-expert，子 Agent 实际执行 `open_url`。最�
 `[search-expert] open_url` 为 `success` / `ok=true`、默认关闭且位于 `assistant-turn` 内；
 遍历全部文本节点未发现卡片外的同名字符串。四项断言全部 PASS，截图与判定 JSON 保存在
 `tmp/subagent-tool-cards-probe/`，不进入提交。
+
+## 结果图标轻量化（追加）
+
+成功与失败卡片统一使用普通边框和背景，不再通过绿色/红色边框、底色、工具名或结果详情表达状态。
+已完成卡片只显示中性 `✓` / `×` 图标，不显示“成功 / 失败”或“Succeeded / Failed”可见文字；
+图标仍保留双语无障碍名称，执行中状态和工具执行详情不变。
+
+真实 Chromium 复测同时生成一个成功 `read_current_page` 和一个失败 `click`：两张卡片计算后的边框均为
+`rgb(220, 226, 235)`、背景均为 `rgb(250, 251, 253)`，图标分别为 `✓` / `×`，卡片文本不包含
+`Succeeded` / `Failed`；失败详情可展开，刷新恢复后状态和折叠行为保持。九项断言全部 PASS，
+证据保存在 `tmp/chat-tool-outcomes-probe/`，不进入提交。

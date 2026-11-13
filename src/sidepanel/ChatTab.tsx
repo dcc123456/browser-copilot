@@ -773,38 +773,25 @@ function ToolCallCard({ entry, t, now }: { entry: Entry; t: ChatT; now: number }
   const running = summary === undefined
   const failed = !running && entry.toolOk === false
   const state = running ? 'running' : failed ? 'error' : 'success'
-  const status = running ? t.chatToolRunning : failed ? t.chatToolFailed : t.chatToolSucceeded
   const elapsed =
     running && entry.startedAt != null
       ? Math.max(0, Math.floor((now - entry.startedAt) / 1000))
       : null
-  const baseClass = `rounded-lg border px-2.5 py-1.5 ${
-    running
-      ? 'border-border bg-sunken'
-      : failed
-        ? 'border-err bg-err-surface'
-        : 'border-ok bg-ok-surface'
-  }`
+  const baseClass = 'rounded-lg border border-border bg-sunken px-2.5 py-1.5'
 
   const icon = running ? (
     <Loader2 aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin text-accent" />
   ) : failed ? (
-    <X aria-hidden="true" className="h-3 w-3 shrink-0 text-err" />
+    <X aria-label={t.chatToolFailed} role="img" className="h-3 w-3 shrink-0 text-muted" />
   ) : (
-    <Check aria-hidden="true" className="h-3 w-3 shrink-0 text-ok" />
+    <Check aria-label={t.chatToolSucceeded} role="img" className="h-3 w-3 shrink-0 text-muted" />
   )
 
   const inner = (
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
       {icon}
-      <span className={`shrink-0 font-mono text-xs ${failed ? 'text-err' : 'text-ink'}`}>
-        {name}
-      </span>
-      <span
-        className={`shrink-0 text-xs ${failed ? 'text-err' : running ? 'text-muted' : 'text-ok'}`}
-      >
-        · {status}
-      </span>
+      <span className="shrink-0 font-mono text-xs text-ink">{name}</span>
+      {running && <span className="shrink-0 text-xs text-muted">· {t.chatToolRunning}</span>}
       {running && intent ? (
         <span className="min-w-0 truncate text-xs text-muted">· {intent}</span>
       ) : (
@@ -833,7 +820,7 @@ function ToolCallCard({ entry, t, now }: { entry: Entry; t: ChatT; now: number }
     >
       <summary
         className="flex cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden"
-        title={summary || status}
+        title={summary || undefined}
       >
         {inner}
         <ChevronRight
@@ -842,10 +829,8 @@ function ToolCallCard({ entry, t, now }: { entry: Entry; t: ChatT; now: number }
           size={12}
         />
       </summary>
-      <div
-        className={`mt-1 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed ${failed ? 'text-err' : 'text-muted'}`}
-      >
-        {summary || status}
+      <div className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-muted">
+        {summary}
       </div>
     </details>
   )

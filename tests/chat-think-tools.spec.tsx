@@ -220,10 +220,15 @@ describe('assistant turn · reasoning, tools and split replies', () => {
       expect(cards.every((card) => !card.open)).toBe(true)
       expect(cards.map((card) => card.dataset.state)).toEqual(['success', 'error', 'success'])
       expect(cards.map((card) => card.dataset.ok)).toEqual(['true', 'false', 'true'])
-      expect(cards[0]!.textContent).toContain('Succeeded')
-      expect(cards[1]!.textContent).toContain('Failed')
-      expect(cards[1]!.className).toContain('border-err')
-      expect(cards[1]!.className).toContain('bg-err-surface')
+      expect(cards[0]!.querySelector('svg[aria-label="Succeeded"]')).toBeTruthy()
+      expect(cards[1]!.querySelector('svg[aria-label="Failed"]')).toBeTruthy()
+      expect(cards[0]!.textContent).not.toContain('Succeeded')
+      expect(cards[1]!.textContent).not.toContain('Failed')
+      for (const card of cards) {
+        expect(card.className).toContain('border-border')
+        expect(card.className).toContain('bg-sunken')
+        expect(card.className).not.toMatch(/border-(ok|err)|bg-(ok|err)-surface/)
+      }
       expect(cards[2]!.querySelector('.animate-spin')).toBeNull()
 
       cards[1]!.open = true
