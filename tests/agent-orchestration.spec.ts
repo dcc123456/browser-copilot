@@ -242,6 +242,39 @@ describe('sub-agent execution', () => {
     expect(result!.rounds).toBe(0)
   })
 
+  it('forwards specialist tool progress as outcome cards, not status text', async () => {
+    streamMock
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [toolCall('c1', 'delegate_to_agent', delegateArgs(specialist(), longTask))],
+      } as never)
+      .mockResolvedValueOnce({
+        content: '',
+        toolCalls: [toolCall('child-click', 'click', { ref: 'e999' })],
+      } as never)
+      .mockResolvedValueOnce({ content: 'report', toolCalls: [] } as never)
+      .mockResolvedValueOnce({ content: 'done', toolCalls: [] } as never)
+
+    const history: { role: string; name?: string; content?: string }[] = [
+      { role: 'user', content: 'research with tools' },
+    ]
+    const sent: AgentServerMessage[] = []
+    await runAgentTurn(history as never, deps({ send: (message) => sent.push(message) }) as never)
+
+    const childEvents = sent.filter(
+      (message) =>
+        (message.type === 'tool.start' || message.type === 'tool.result') &&
+        message.name === '[search-expert] click',
+    )
+    expect(childEvents).toEqual([
+      expect.objectContaining({ type: 'tool.start' }),
+      expect.objectContaining({ type: 'tool.result', ok: false }),
+    ])
+    expect(
+      sent.some((message) => message.type === 'status' && message.text.includes('click')),
+    ).toBe(false)
+  })
+
   it('hard-truncates the returned summary and never streams it to the supervisor', async () => {
     const longReport = `x`.repeat(3000)
     streamMock

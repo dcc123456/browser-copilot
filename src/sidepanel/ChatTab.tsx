@@ -1876,6 +1876,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
   const [highlight, setHighlight] = useState(0)
 
   const portRef = useRef<chrome.runtime.Port | null>(null)
+  // Delegated cards are panel-only, so the final parent-transcript refresh must carry them over.
+  const preserveDelegatedToolsRef = useRef(false)
   /**
    * Holds the live connect() routine so post() can trigger a full reconnect
    * (listener + heartbeat + resume) after the worker was evicted. A bare
@@ -2396,7 +2398,14 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 text: tRef.current.chatTurnInterrupted,
               })
             }
-            setEntries(restored)
+            const preserveDelegatedTools = preserveDelegatedToolsRef.current
+            preserveDelegatedToolsRef.current = false
+            setEntries((prev) => [
+              ...restored,
+              ...(preserveDelegatedTools
+                ? prev.filter((entry) => entry.role === 'tool' && entry.toolName?.startsWith('['))
+                : []),
+            ])
             // A supplement injected while this panel was away announced itself on
             // the connection that had just closed, so reconcile against the
             // transcript instead: the worker's copy contains the note only if it
@@ -2731,13 +2740,17 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
    * used both for a turn that finished without this panel and for a context
    * compression it just performed.
    */
-  const requestResume = useCallback((): void => {
+  const requestResume = useCallback((preserveDelegatedTools = false): void => {
+    const port = portRef.current
+    if (!port) return
+    preserveDelegatedToolsRef.current = preserveDelegatedTools
     try {
-      portRef.current?.postMessage({
+      port.postMessage({
         type: 'resume',
         conversationId: conversationIdRef.current,
       } satisfies AgentClientMessage)
     } catch {
+      preserveDelegatedToolsRef.current = false
       /* the reconnect loop resumes on its own */
     }
   }, [])
@@ -2759,7 +2772,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
     ): void => {
       const message = raw as { type?: string; conversationId?: string }
       if (message?.type !== 'conversation.ended') return
-      if (message.conversationId === conversationIdRef.current) requestResume()
+      if (message.conversationId === conversationIdRef.current) requestResume(true)
       sendResponse({ ok: true })
     }
     onMessage.addListener(listener)

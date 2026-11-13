@@ -29,8 +29,15 @@ import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Command } from '../src/lib/messages'
 import ChatTab from '../src/sidepanel/ChatTab'
+import { DEFAULT_CONVERSATION_ID } from '../src/lib/storage'
 
 const portMessageListeners: ((message: unknown) => void)[] = []
+type RuntimeListener = (
+  message: unknown,
+  sender: unknown,
+  sendResponse: (response: unknown) => void,
+) => void
+const runtimeMessageListeners: RuntimeListener[] = []
 const fakePort = {
   postMessage: vi.fn(),
   // A real Port drops its listeners when disconnected; the chat effect
@@ -62,6 +69,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   portMessageListeners.length = 0
+  runtimeMessageListeners.length = 0
   mocks.sendCommand.mockReset()
   mocks.sendCommand.mockImplementation(async (command: Command) => {
     switch (command.type) {
@@ -79,7 +87,13 @@ beforeEach(() => {
     runtime: {
       connect: vi.fn(() => fakePort),
       sendMessage: vi.fn(async () => undefined),
-      onMessage: { addListener: () => {}, removeListener: () => {} },
+      onMessage: {
+        addListener: (fn: RuntimeListener) => runtimeMessageListeners.push(fn),
+        removeListener: (fn: RuntimeListener) => {
+          const index = runtimeMessageListeners.indexOf(fn)
+          if (index >= 0) runtimeMessageListeners.splice(index, 1)
+        },
+      },
     },
     windows: { getCurrent: vi.fn(async () => ({ id: 1 })) },
     storage: {
@@ -111,6 +125,13 @@ async function renderChat(): Promise<{ container: HTMLElement; root: Root }> {
 async function push(message: unknown): Promise<void> {
   await act(async () => {
     for (const listener of portMessageListeners) listener(message)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
+async function broadcast(message: unknown): Promise<void> {
+  await act(async () => {
+    for (const listener of runtimeMessageListeners) listener(message, {}, () => {})
     await new Promise((resolve) => setTimeout(resolve, 0))
   })
 }
@@ -209,6 +230,50 @@ describe('assistant turn · reasoning, tools and split replies', () => {
       expect(cards[1]!.open).toBe(true)
       expect(cards[1]!.textContent).toContain('Unknown ref "e9"')
       expect(container.querySelectorAll('[data-role="assistant-turn"]')).toHaveLength(1)
+    } finally {
+      await act(async () => {
+        root.unmount()
+      })
+      container.remove()
+    }
+  })
+
+  it('keeps delegated tool cards through the final transcript refresh', async () => {
+    const { container, root } = await renderChat()
+    try {
+      await push({ type: 'tool.start', name: 'delegate_to_agent' })
+      await push({ type: 'tool.start', name: '[search-expert] open_url' })
+      await push({
+        type: 'tool.result',
+        name: '[search-expert] open_url',
+        summary: 'open_url failed',
+        ok: false,
+      })
+      await push({
+        type: 'tool.result',
+        name: 'delegate_to_agent',
+        summary: 'Delegated to search-expert: completed',
+      })
+      await push({ type: 'delta', text: 'done' })
+      await push({ type: 'done' })
+      await broadcast({ type: 'conversation.ended', conversationId: DEFAULT_CONVERSATION_ID })
+      await push({
+        type: 'restore',
+        running: false,
+        messages: [
+          { role: 'user', text: 'research' },
+          { role: 'tool', text: '← delegate_to_agent: Delegated to search-expert: completed' },
+          { role: 'assistant', text: 'done' },
+        ],
+      })
+
+      const childCard = container.querySelector(
+        'details[data-kind="tool"][data-state="error"]',
+      ) as HTMLDetailsElement
+      expect(childCard.textContent).toContain('[search-expert] open_url')
+      expect(childCard.open).toBe(false)
+      expect(childCard.closest('[data-role="assistant-turn"]')).toBeTruthy()
+      expect(container.querySelectorAll('details[data-kind="tool"]')).toHaveLength(2)
     } finally {
       await act(async () => {
         root.unmount()

@@ -30,3 +30,20 @@
 助理气泡内且默认关闭；状态分别为 `success` / `error`；失败卡片边框计算样式为 `rgb(188, 50, 50)`、
 浅红底可展开并显示 `Unknown ref`；面板刷新恢复后仍保持两个状态且默认关闭。截图与判定 JSON 保存在
 `tmp/chat-tool-outcomes-probe/`，不进入提交。
+
+## 子 Agent 进度修正（追加）
+
+问题：`orchestrator.ts` 把子 Agent 的 `tool.start` 转成 `[search-expert] open_url` 独立状态行，
+同时丢弃 `tool.result`，因此执行中不断出现气泡外的工具名字符串。
+
+修正：子 Agent 的 `tool.start` / `tool.result` 原样保留事件类型和结构化结果，只把工具显示名改为
+`[agent] tool`，让现有 `ToolCallCard` 在同一助理气泡里展示运行、成功、失败及折叠详情。
+子 Agent 的普通状态文本、回答 delta 和 token 用量仍不转发，保持上下文与界面隔离。
+回合结束后的父 transcript `restore` 会保留当前面板里的子 Agent 卡片；它们不写入父模型上下文，
+普通刷新或切换会话仍只恢复父 transcript，不制造无匹配 tool call 的历史消息。
+
+真实 Chromium 实测（`tmp/subagent-tool-cards-probe.mjs`，配合本地模拟模型和最小 Agent 配置）：
+supervisor 实际委派 search-expert，子 Agent 实际执行 `open_url`。最终面板中
+`[search-expert] open_url` 为 `success` / `ok=true`、默认关闭且位于 `assistant-turn` 内；
+遍历全部文本节点未发现卡片外的同名字符串。四项断言全部 PASS，截图与判定 JSON 保存在
+`tmp/subagent-tool-cards-probe/`，不进入提交。

@@ -283,10 +283,9 @@ export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgent
     { role: 'user', content: renderDelegationPrompt(agent, options.task, options) },
   ]
 
-  // Muted deps: progress gets out as short [name]-prefixed status lines, but
-  // streamed tokens and per-tool payloads never flow back into the
-  // supervisor's context. confirm is reused verbatim — approvals are not
-  // muted or bypassed.
+  // Muted deps: tool progress reaches the panel as [name]-prefixed cards, but
+  // streamed tokens and results never flow back into the supervisor's context.
+  // confirm is reused verbatim — approvals are not muted or bypassed.
   const childDeps: AgentDeps = {
     ...parent,
     conversationId: childConversationId,
@@ -296,12 +295,12 @@ export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgent
     enableDelegation: false,
     getMaxToolRounds: async () => agent.maxRounds,
     send: (message) => {
-      if (message.type === 'tool.start') {
-        parent.send({ type: 'status', text: `[${agent.name}] ${message.name}` })
+      if (message.type === 'tool.start' || message.type === 'tool.result') {
+        parent.send({ ...message, name: `[${agent.name}] ${message.name}` })
       } else if (message.type === 'status') {
         parent.send({ type: 'status', text: `[${agent.name}] ${message.text}` })
       }
-      // delta / usage / phase / tool.result: deliberately dropped.
+      // delta / usage / phase: deliberately dropped.
     },
   }
 
