@@ -3106,7 +3106,7 @@ const en: Messages = {
   settingsPageBlocked: ({ reason }) => `The active tab cannot be read. ${reason}`,
   settingsElementPicker: 'Element picker',
   settingsElementPickerIntro:
-    'Show a crosshair button on web pages. Click it, then click an element: the element (children included) is copied to the clipboard and recorded for the local agent to read.',
+    'Show a crosshair button on web pages. Click an element to copy and record it for the local agent, or Ctrl/Cmd+click to select multiple elements without copying.',
   settingsElementPickerEnable: 'Show the picker button on pages',
   settingsElementPickerSelectOnly:
     'Select without copying — Ctrl/Cmd+click adds or removes elements; an ordinary click closes',
@@ -4804,7 +4804,7 @@ const zhCN: Messages = {
   settingsPageBlocked: ({ reason }) => `当前标签页无法读取。${reason}`,
   settingsElementPicker: '元素选择器',
   settingsElementPickerIntro:
-    '在网页上显示一个十字准星按钮。点击它，再点击页面元素：该元素（含子元素）会复制到剪贴板，并记录给本地 Agent 读取。',
+    '在网页上显示一个十字准星按钮。普通点击会复制元素并记录给本地 Agent；Ctrl/Cmd+点击可选择多个元素（不复制）。',
   settingsElementPickerEnable: '在网页上显示元素选择按钮',
   settingsElementPickerSelectOnly: '选中但不复制（Ctrl/Cmd+点击添加或移除元素，普通点击关闭）',
   settingsElementPickerFormat: '点击后复制的内容',

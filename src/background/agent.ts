@@ -686,7 +686,7 @@ export const TOOLS: WireTool[] = [
     function: {
       name: 'read_selected_element',
       description:
-        'Read the elements picked with the Browser Copilot crosshair: `elements` and aligned `targets` carry CSS selectors, tags, text and capped HTML; the first element also keeps `target`. Ctrl/Cmd+click selects multiple in select-only mode. `stale` means the tab navigated since a pick. Read-only.',
+        'Read the elements picked with the Browser Copilot crosshair: `elements` and aligned `targets` carry CSS selectors, tags, text and capped HTML; the first element also keeps `target`. Ctrl/Cmd+click selects multiple. `stale` means the tab navigated since a pick. Read-only.',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -3692,7 +3692,7 @@ export async function executeTool(
         return JSON.stringify({
           ok: false,
           error:
-            'No element has been picked on this tab yet. Ask the user to click the crosshair button on the page, click an element, then retry. In select-only mode, Ctrl/Cmd+click adds more elements (the picker must be enabled in Settings).',
+            'No element has been picked on this tab yet. Ask the user to click the crosshair button on the page, click an element, then retry. Ctrl/Cmd+click adds more elements (the picker must be enabled in Settings).',
         })
       }
       ctx.lastUrl = tab.url
