@@ -149,6 +149,7 @@ import type {
 } from '../lib/ops'
 import {
   DriverError,
+  type DriverTab,
   closeActiveTab,
   execOnActiveTab,
   listTabs,
@@ -156,6 +157,7 @@ import {
   ocrImage,
   pinActiveTab,
   resolveAutomationTab,
+  reuseTab,
   settleAfterNavigation,
   snapshotActiveTab,
   switchTab,
@@ -917,7 +919,8 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'open_url',
-      description: 'Navigate the active tab to a URL.',
+      description:
+        'Navigate the active tab to a URL. Use this for searches and ordinary navigation; reserve tab_new for pages that must stay open separately.',
       parameters: {
         type: 'object',
         properties: {
@@ -932,7 +935,8 @@ export const TOOLS: WireTool[] = [
     type: 'function',
     function: {
       name: 'tab_new',
-      description: 'Open a new tab (optionally navigating) and switch to it.',
+      description:
+        'Open a new tab (optionally navigating) and switch to it. At most five tabs opened by this conversation are kept per window; further calls reuse the oldest one.',
       parameters: {
         type: 'object',
         properties: { url: { type: 'string' } },
@@ -1646,6 +1650,32 @@ function storeLoadedGroups(conversationId: string, groups: readonly string[]): S
     const oldest = loadedToolGroupStore.keys().next().value
     if (oldest === undefined) break
     loadedToolGroupStore.delete(oldest)
+  }
+  return existing
+}
+
+/**
+ * Tabs this conversation opened, in creation order. The reference survives fresh
+ * per-turn contexts and is inherited by delegated agents, so one task cannot
+ * give every specialist its own tab allowance. Entries for closed tabs are
+ * pruned when reuse is attempted; no user's pre-existing tab is ever listed.
+ */
+export interface ConversationTabLedger {
+  tabs: { id: number; windowId?: number }[]
+}
+
+const conversationTabStore = new Map<string, ConversationTabLedger>()
+const CONVERSATION_TAB_STORE_CAP = 64
+const MAX_AGENT_OPEN_TABS = 5
+
+function storeConversationTabs(conversationId: string): ConversationTabLedger {
+  const existing = conversationTabStore.get(conversationId) ?? { tabs: [] }
+  conversationTabStore.delete(conversationId)
+  conversationTabStore.set(conversationId, existing)
+  while (conversationTabStore.size > CONVERSATION_TAB_STORE_CAP) {
+    const oldest = conversationTabStore.keys().next().value
+    if (oldest === undefined) break
+    conversationTabStore.delete(oldest)
   }
   return existing
 }
@@ -2497,6 +2527,8 @@ export interface AgentDeps {
    * keep the legacy global resolution.
    */
   scopeWindowId?: number
+  /** Shared by a root conversation and its delegated agents; survives fresh turns. */
+  tabLedger?: ConversationTabLedger
   /**
    * Enables the supervisor/delegation machinery for this turn (system-prompt
    * section + the on-demand "delegate" tool group + delegation budgets).
@@ -2664,6 +2696,8 @@ export interface ToolContext {
    * {@link normalScopeFromWindowId}.
    */
   scope?: ScopeWindow
+  /** Agent-created tabs available for reuse; absent only in isolated tool tests. */
+  tabLedger?: ConversationTabLedger
   /**
    * Plan-first gate state for this turn (see {@link planGateBlocks}). Present
    * only on interactive panel turns — unattended runs never arm it, and a
@@ -4500,12 +4534,43 @@ export async function executeTool(
     case 'tab_new': {
       throwIfAborted()
       const url = typeof args.url === 'string' ? args.url.trim() : undefined
-      const tab = await newTab(url || undefined, ctx.scope)
+      const ledger = ctx.tabLedger ?? (ctx.tabLedger = { tabs: [] })
+      const windowId = ctx.scope?.windowId
+      const ownedTabs = () => ledger.tabs.filter((entry) => entry.windowId === windowId)
+      let tab: DriverTab | undefined
+      let reused = false
+      // Once the conversation owns five tabs, every later request navigates the
+      // first one it created. Closed entries are pruned until another live tab
+      // can be reused or the ledger drops below the cap and needs a replacement.
+      while (ownedTabs().length >= MAX_AGENT_OPEN_TABS) {
+        const oldest = ownedTabs()[0]
+        if (!oldest) break
+        const existing = await reuseTab(oldest.id, url || undefined)
+        if (existing) {
+          tab = existing
+          reused = true
+          break
+        }
+        ledger.tabs.splice(ledger.tabs.indexOf(oldest), 1)
+      }
+      if (!tab) {
+        tab = await newTab(url || undefined, ctx.scope)
+        // Register before settling/observation so cancellation cannot leave an
+        // untracked tab outside the next turn's budget.
+        ledger.tabs.push({ id: tab.id, ...(windowId === undefined ? {} : { windowId }) })
+      }
       ctx.navigated = true
       ctx.lastUrl = tab.url
       ctx.snapshotTargets = undefined // old page's refs are gone
       await settleAfterNavigation(undefined, signal, ctx.scope)
-      const payload: Record<string, unknown> = { ok: true, tabId: tab.id, url: tab.url }
+      const payload: Record<string, unknown> = {
+        ok: true,
+        tabId: tab.id,
+        url: tab.url,
+        ...(reused
+          ? { reused: true, note: 'Reused the oldest tab opened by this conversation.' }
+          : {}),
+      }
       const observed = await captureObservation(ctx, args.withScreenshot === true, signal)
       if (observed) payload.observation = observed
       return JSON.stringify(payload)
@@ -5642,6 +5707,7 @@ export async function runAgentTurn(
     loadedGroups,
     navigated: false,
     disabled,
+    tabLedger: deps.tabLedger ?? storeConversationTabs(deps.conversationId),
     ...(enabledSkills ? { enabledSkills } : {}),
     failureStreaks: new Map(),
     ...(delegation ? { delegation } : {}),

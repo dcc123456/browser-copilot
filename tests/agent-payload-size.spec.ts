@@ -54,7 +54,7 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * without it a model mirrors a radio's own text into a checkbox and the page
  * reads that as "leave it unchecked".
  */
-const MAX_ADVERTISED_PAYLOAD_CHARS = 14_300
+const MAX_ADVERTISED_PAYLOAD_CHARS = 14_400
 /**
  * The full catalog (core + every on-demand group) must also stay bounded.
  * Raised 19_500 → 21_500 when the on-demand "delegate" group
@@ -120,7 +120,7 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 14_300
  * advertised round-1 payload does not move (measured 33_767).
  * Raised 33_800 → 33_850 for the same mixed-form read (+26; measured 33_826).
  */
-const MAX_CATALOG_CHARS = 33_850
+const MAX_CATALOG_CHARS = 34_050
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the
