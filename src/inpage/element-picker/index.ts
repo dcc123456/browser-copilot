@@ -24,10 +24,10 @@
  * editor window, so answering instantly would hide what was verified.
  *
  * Copy mode never draws the card: the dim overlay and the highlight are the
- * whole UI. A click copies the payload, reports the element to the worker
- * (`picker:selection` → `read_selected_element`) and closes. With `selectOnly`
- * set, the same click instead SELECTS the element — nothing is copied and the
- * highlight stays on the choice. Ctrl/Cmd+click toggles more elements, and an
+ * whole UI. An ordinary click copies the payload, reports the element to the
+ * worker (`picker:selection` → `read_selected_element`) and closes. With
+ * `selectOnly` set, that click instead SELECTS without copying and stays open.
+ * In either mode, Ctrl/Cmd+click toggles multiple elements without copying; an
  * ordinary next click or Escape dismisses, so a local agent reads exactly what
  * the user marked.
  *
@@ -538,8 +538,8 @@ export const startPicker: PickerStart = async (args) => {
   let locked: Element | null = null
   let hovered: Element | null = null
   const selectedElements: Element[] = []
-  /** Select-only mode: a selection was reported already, so the next ordinary
-   *  click only dismisses instead of selecting again. */
+  /** Copy mode: a persistent selection was reported already, so the next
+   *  ordinary click only dismisses instead of selecting again. */
   let selectionReported = false
   let curSelector = initial
   /**
@@ -821,7 +821,7 @@ export const startPicker: PickerStart = async (args) => {
     const additive = e.ctrlKey || e.metaKey
     // An ordinary press after the first report only dismisses; a modified press
     // still aims so it can toggle another element in the selection.
-    if (mode === 'copy' && selectOnly && selectionReported && !additive) return
+    if (mode === 'copy' && selectionReported && !additive) return
     const el = eventTarget(e)
     if (!el || el === host || host.contains(el)) return
     locked = el
@@ -869,7 +869,7 @@ export const startPicker: PickerStart = async (args) => {
   const onContextMenu = (e: MouseEvent) => {
     if (isOurUi(e)) return
     swallowPress(e)
-    if (mode !== 'copy' || !selectOnly || (!e.ctrlKey && !e.metaKey)) return
+    if (mode !== 'copy' || (!e.ctrlKey && !e.metaKey)) return
     const pressed = sawPointerPress || sawMousePress
     sawPointerPress = false
     sawMousePress = false
@@ -878,39 +878,37 @@ export const startPicker: PickerStart = async (args) => {
     commitCopy(e)
   }
   /**
-   * Copy mode: one click takes the element. Normally that means copy the payload
-   * (per `copyFormat`), report it, and close. In select-only mode nothing is
-   * copied: the first click reports the element and leaves the dim overlay and
-   * the highlight on the choice. Ctrl/Cmd+click toggles more elements; an
-   * ordinary next click or Escape dismisses without changing the recording.
+   * An ordinary click copies and closes, except in select-only mode where it
+   * selects and stays open. Ctrl/Cmd+click always toggles a multi-selection
+   * without copying; the next ordinary click or Escape closes that selection.
    */
   function commitCopy(e?: MouseEvent): void {
     const additive = e?.ctrlKey === true || e?.metaKey === true
-    if (selectOnly && selectionReported && !additive) {
+    if (selectionReported && !additive) {
       cleanup()
       return
     }
     const el = target()
     if (!el) return
-    if (selectOnly) {
-      if (additive) {
-        const existingIndex = selectedElements.indexOf(el)
-        if (existingIndex < 0 && selectedElements.length >= MAX_SELECTED_ELEMENTS) {
-          locked = selectedElements[selectedElements.length - 1] ?? null
-          hovered = null
-          refreshCopy()
-          showCopiedToast(STRINGS.selectionLimit, true)
-          return
-        }
-        if (existingIndex >= 0) selectedElements.splice(existingIndex, 1)
-        else selectedElements.push(el)
-        selectionReported = true
+    if (additive) {
+      const existingIndex = selectedElements.indexOf(el)
+      if (existingIndex < 0 && selectedElements.length >= MAX_SELECTED_ELEMENTS) {
         locked = selectedElements[selectedElements.length - 1] ?? null
         hovered = null
-        reportSelections()
         refreshCopy()
+        showCopiedToast(STRINGS.selectionLimit, true)
         return
       }
+      if (existingIndex >= 0) selectedElements.splice(existingIndex, 1)
+      else selectedElements.push(el)
+      selectionReported = true
+      locked = selectedElements[selectedElements.length - 1] ?? null
+      hovered = null
+      reportSelections()
+      refreshCopy()
+      return
+    }
+    if (selectOnly) {
       selectionReported = true
       selectedElements.splice(0, selectedElements.length, el)
       reportSelections()

@@ -579,6 +579,32 @@ describe('element picker: copy mode copies on the click', () => {
     expect(toast?.shadowRoot?.textContent).toContain('chars')
   })
 
+  it('Ctrl/Cmd+click selects multiple without copying in the default copy mode', async () => {
+    await mountCopy()
+    const buy = document.getElementById('buy')!
+    const blank = document.getElementById('blank')!
+    const shop = document.getElementById('shop')!
+
+    controlClickGesture(buy)
+    clickGesture(blank, { ctrlKey: true })
+    clickGesture(shop, { metaKey: true })
+
+    expect(execCommand).not.toHaveBeenCalled()
+    expect(document.getElementById('bc-element-picker')).not.toBeNull()
+    expect(sent[2]).toMatchObject({
+      selections: [{ selector: '#buy' }, { selector: '#blank' }, { selector: '#shop' }],
+    })
+    expect(card()?.querySelectorAll('[data-role="selected-highlight"]')).toHaveLength(3)
+
+    clickGesture(blank, { ctrlKey: true })
+    expect(sent[3]).toMatchObject({ selections: [{ selector: '#buy' }, { selector: '#shop' }] })
+
+    clickGesture(shop)
+    expect(document.getElementById('bc-element-picker')).toBeNull()
+    expect(execCommand).not.toHaveBeenCalled()
+    expect(sent).toHaveLength(4)
+  })
+
   it('copies only a CSS selector that resolves to the element', async () => {
     await mountCopy({ copyFormat: 'selector' })
 
