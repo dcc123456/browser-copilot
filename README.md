@@ -7,10 +7,16 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-Your AI assistant that actually _uses_ the web for you. Open the side panel,
-ask in plain language, and Browser Copilot reads the page you're on and takes
-action — clicking buttons, filling forms, scrolling, switching tabs, walking
-through a whole checkout or setup flow — while you watch or stay hands-off.
+**Browser Copilot is an AI browser-automation extension for Chrome and Firefox.**
+It combines a natural-language browser agent, a visual workflow builder, scheduled
+tasks, and an MCP server for coding agents. It runs in your real browser with
+your existing tabs and login sessions, supports any OpenAI-compatible model,
+and keeps your data on your machine.
+
+Open the side panel, ask in plain language, and Browser Copilot reads the page
+you're on and takes action — clicking buttons, filling forms, scrolling,
+switching tabs, walking through a whole checkout or setup flow — while you
+watch or stay hands-off.
 
 - 🧠 **Works with the model you already use.** Any OpenAI-compatible endpoint:
   DeepSeek, 火山方舟 Ark, OpenAI, OpenRouter, Moonshot, DashScope, SiliconFlow,
@@ -102,6 +108,7 @@ agent you connected over [MCP](#agent-integration-mcp).
 - [Saved data and privacy](#saved-data-and-privacy)
 - [Development](#development)
 - [Server runner](#server-runner)
+- [FAQ](#faq)
 - [Troubleshooting](#troubleshooting)
 - [Limitations](#limitations)
 
@@ -310,6 +317,28 @@ It cannot act in Chat or read-only mode, read `chrome://`/local-file/Web-Store
 pages, solve CAPTCHAs or bypass 2FA, guarantee arithmetic over long tables, or
 run a scheduled task when the browser is fully closed (alarms only fire while
 Chrome is open).
+
+### Example prompts
+
+- `Summarize this article, extract the main claims, and link each claim to its source section.`
+- `Fill this application with my saved profile, but stop before the final submit button.`
+- `Turn the steps you just completed into a reusable workflow and run it every weekday at 9 AM.`
+- `Read this pull request, list correctness risks, and apply my code-review checklist.`
+- Through MCP: `Open my local development server in Chrome and verify the sign-in flow.`
+
+### How it compares
+
+| Tool                                                      | Primary approach                                         | Where Browser Copilot differs                                                                                                            |
+| --------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Browser Copilot**                                       | AI agent + visual workflows inside your existing browser | Ready-to-install extension, natural-language actions, reusable workflows, schedules, skills, and MCP access in one local-first tool      |
+| [Automa](https://github.com/AutomaApp/automa)             | Visual, block-based browser workflows                    | Browser Copilot also lets an AI agent perform tasks and generate workflows, and imports Automa JSON                                      |
+| [Playwright](https://github.com/microsoft/playwright)     | Code-first browser automation and testing                | Browser Copilot is a user-facing extension with a side panel and visual editor; its optional Runner uses Playwright for server execution |
+| [Browser Use](https://github.com/browser-use/browser-use) | Developer framework for building AI browser agents       | Browser Copilot is an installable end-user product for your real browser, with no Python application to build                            |
+
+Choose Playwright or Browser Use when you are building a custom automation
+program. Choose Automa for a block-first workflow extension. Choose Browser
+Copilot when you want to describe a task, approve or automate the actions, and
+reuse the result without setting up a separate agent application.
 
 ---
 
@@ -941,6 +970,49 @@ chosen (with `chrome.storage.local` holding only writes that could not reach the
 folder yet) so data survives MV3 service-worker eviction at idle; mode and step
 cap are read per action so
 settings changes apply without a reload.
+
+---
+
+## FAQ
+
+### What is Browser Copilot used for?
+
+Browser Copilot is used for AI browser automation: reading and summarizing web
+pages, filling forms, completing multi-step web tasks, recording reusable
+workflows, running scheduled browser jobs, and giving MCP clients control of a
+real browser.
+
+### Does Browser Copilot require an API key?
+
+No. A new installation starts with the keyless, rate-limited Pollinations
+provider. You can instead connect an OpenAI-compatible API or a local model
+through Ollama or LM Studio.
+
+### Can Claude Code, Codex, or Trae control Chrome through Browser Copilot?
+
+Yes. Enable **Settings → Local agent access**, export the bundled MCP adapter,
+and add the generated configuration to your MCP client. The client can then
+read pages, click, fill forms, manage tabs, and run other enabled browser tools.
+
+### Does Browser Copilot send browsing data to a server?
+
+The project has no account system, telemetry, or cloud server. Page content is
+sent only to the model provider required for the requested task; the default
+Pollinations provider therefore receives prompts. Use a local model when page
+text must stay on your machine. Feishu receives task results only if enabled.
+
+### Is Browser Copilot free and open source?
+
+It is free for personal, research, educational, and other noncommercial use.
+The source is available under the PolyForm Noncommercial License 1.0.0, which
+is **source-available, not OSI-approved open source**. Commercial use requires
+a separate license.
+
+### Can it run browser automation on a schedule or server?
+
+Yes. Scheduled tasks and workflows run while your browser is open. The optional
+Node.js Runner provides Playwright-based server execution, an HTTP API, cron,
+webhooks, Docker deployment, and a web console.
 
 ---
 

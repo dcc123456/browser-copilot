@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://dcc123456.github.io/browser-copilot/</loc>
+    <lastmod>2026-11-16</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://dcc123456.github.io/browser-copilot/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://dcc123456.github.io/browser-copilot/index-zh.html" />
+  </url>
+  <url>
+    <loc>https://dcc123456.github.io/browser-copilot/index-zh.html</loc>
+    <lastmod>2026-11-16</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://dcc123456.github.io/browser-copilot/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://dcc123456.github.io/browser-copilot/index-zh.html" />
+  </url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/index.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/index-zh.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/getting-started.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/getting-started-zh.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/concepts.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/concepts-zh.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/operators-browser.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/operators-browser-zh.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/operators-interaction.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/operators-interaction-zh.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/operators-data.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/operators-data-zh.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/operators-conditions.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/operators-conditions-zh.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/operators-general.html</loc></url>
+  <url><loc>https://dcc123456.github.io/browser-copilot/docs/operators-general-zh.html</loc></url>
+</urlset>

@@ -3,19 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Browser Copilot — AI Assistant That Uses the Web for You</title>
+    <title>Browser Copilot — AI Browser Automation Chrome Extension & MCP Server</title>
     <meta
       name="description"
-      content="Open-source Chrome extension that reads pages, clicks buttons, fills forms, and automates workflows. Works with DeepSeek, OpenAI, Ollama and any OpenAI-compatible model. Private by design."
+      content="AI browser automation extension for Chrome and Firefox. Read pages, click, fill forms, build visual workflows, schedule tasks, and connect Claude Code or Codex through MCP. Supports OpenAI-compatible and local models."
     />
     <link rel="canonical" href="https://dcc123456.github.io/browser-copilot/" />
+    <link rel="alternate" hreflang="en" href="https://dcc123456.github.io/browser-copilot/" />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/index-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/"
+    />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Browser Copilot — AI Assistant That Uses the Web for You" />
+    <meta property="og:title" content="Browser Copilot — AI Browser Automation Chrome Extension" />
     <meta
       property="og:description"
-      content="Open-source Chrome extension that reads pages, clicks buttons, fills forms, and automates workflows. Works with any OpenAI-compatible model."
+      content="AI browser automation extension for Chrome and Firefox that reads pages, clicks buttons, fills forms, and automates workflows. Works with any OpenAI-compatible model."
     />
     <meta property="og:url" content="https://dcc123456.github.io/browser-copilot/" />
     <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.png" />
@@ -24,10 +35,10 @@
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Browser Copilot — AI Assistant That Uses the Web for You" />
+    <meta name="twitter:title" content="Browser Copilot — AI Browser Automation Chrome Extension" />
     <meta
       name="twitter:description"
-      content="Open-source Chrome extension that reads pages, clicks buttons, fills forms, and automates workflows."
+      content="AI browser automation extension for Chrome and Firefox that reads pages, clicks buttons, fills forms, and automates workflows."
     />
     <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.png" />
 
@@ -78,24 +89,31 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "Browser Copilot",
+        "alternateName": "Browser Copilot AI Browser Automation Extension",
         "applicationCategory": "BrowserApplication",
-        "operatingSystem": "Chrome",
-        "description": "AI side-panel assistant that reads and acts on any web page. Works with any OpenAI-compatible model.",
-        "url": "https://github.com/dcc123456/browser-copilot",
+        "operatingSystem": "Chrome, Firefox",
+        "description": "AI browser automation extension with natural-language page actions, visual workflows, scheduled tasks, local models, and MCP browser tools for coding agents.",
+        "url": "https://dcc123456.github.io/browser-copilot/",
+        "codeRepository": "https://github.com/dcc123456/browser-copilot",
+        "downloadUrl": "https://github.com/dcc123456/browser-copilot/releases",
         "license": "https://polyformproject.org/licenses/noncommercial/1.0.0/",
         "softwareVersion": "0.6.19",
+        "keywords": "AI browser automation, Chrome extension, Firefox extension, browser agent, visual workflow, MCP server, Claude Code, Codex, Playwright, DeepSeek, Ollama",
+        "isAccessibleForFree": true,
         "offers": {
           "@type": "Offer",
           "price": "0",
-          "priceCurrency": "USD"
+          "priceCurrency": "USD",
+          "description": "Free for noncommercial use; commercial use requires a separate license"
         },
         "featureList": [
-          "AI page reading and action",
-          "Visual workflow builder with 63 operators",
-          "Scheduled task automation",
-          "Skills system for reusable instructions",
+          "AI page reading and browser actions",
+          "Visual workflow builder with 56 executable operators",
+          "Scheduled browser automation",
+          "Reusable AI skills",
           "Feishu/Lark integration",
-          "MCP server for coding agents",
+          "MCP browser tools for Claude Code, Codex, Trae, and other clients",
+          "OpenAI-compatible and local models",
           "Local OCR with Tesseract.js"
         ]
       }
@@ -183,11 +201,11 @@
           class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-panel px-4 py-1.5"
         >
           <span class="h-2 w-2 rounded-full bg-ok"></span>
-          <span class="text-sm text-muted">v0.6.19 — Open Source</span>
+          <span class="text-sm text-muted">v0.6.19 — Source Available</span>
         </div>
         <h1 class="mb-6 text-5xl font-bold leading-tight tracking-tight md:text-6xl">
-          Your AI assistant that<br />
-          <span class="gradient-text">actually uses the web</span>
+          AI browser automation for<br />
+          <span class="gradient-text">your real browser</span>
         </h1>
         <p class="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-muted">
           Open the side panel, ask in plain language, and Browser Copilot reads the page you're on
@@ -307,8 +325,8 @@
             </div>
             <h3 class="mb-2 text-lg font-semibold">Visual Workflow Builder</h3>
             <p class="text-sm leading-relaxed text-muted">
-              Record yourself doing a task, or assemble it on a canvas from 63 operators — clicking,
-              filling, loops, conditions, AI-agent steps.
+              Record yourself doing a task, or assemble it on a canvas from 56 executable operators
+              — clicking, filling, loops, conditions, AI-agent steps.
             </p>
           </div>
           <!-- Feature 4 -->
@@ -384,8 +402,67 @@
       </div>
     </section>
 
+    <!-- Use cases -->
+    <section id="use-cases" class="border-t border-border bg-panel/30 py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mb-12 text-center">
+          <h2 class="mb-4 text-3xl font-bold md:text-4xl">
+            What can you automate with Browser Copilot?
+          </h2>
+          <p class="mx-auto max-w-3xl text-lg text-muted">
+            Use natural language for one-off tasks, then save successful browser actions as reusable
+            workflows.
+          </p>
+        </div>
+        <div class="grid gap-6 md:grid-cols-2">
+          <article class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-2 text-lg font-semibold">Research and summarize web pages</h3>
+            <p class="mb-4 text-sm leading-relaxed text-muted">
+              Read articles, documentation, pull requests, and release notes without copying page
+              text manually.
+            </p>
+            <blockquote class="border-l-2 border-accent pl-4 text-sm text-muted">
+              “Summarize this article, extract the main claims, and link each claim to its source
+              section.”
+            </blockquote>
+          </article>
+          <article class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-2 text-lg font-semibold">Fill forms and complete web tasks</h3>
+            <p class="mb-4 text-sm leading-relaxed text-muted">
+              Click, type, navigate, and reuse saved profiles while keeping passwords out of model
+              requests.
+            </p>
+            <blockquote class="border-l-2 border-accent pl-4 text-sm text-muted">
+              “Fill this application with my saved profile, but stop before the final submit
+              button.”
+            </blockquote>
+          </article>
+          <article class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-2 text-lg font-semibold">Build scheduled browser workflows</h3>
+            <p class="mb-4 text-sm leading-relaxed text-muted">
+              Record a task, generate it with AI, or draw it visually; then run it manually, on a
+              schedule, or from another tool.
+            </p>
+            <blockquote class="border-l-2 border-accent pl-4 text-sm text-muted">
+              “Turn these steps into a reusable workflow and run it every weekday at 9 AM.”
+            </blockquote>
+          </article>
+          <article class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-2 text-lg font-semibold">Give coding agents a real browser</h3>
+            <p class="mb-4 text-sm leading-relaxed text-muted">
+              Connect Claude Code, Codex, Trae, or another MCP client to your existing Chrome tabs
+              and login sessions.
+            </p>
+            <blockquote class="border-l-2 border-accent pl-4 text-sm text-muted">
+              “Open my local development server in Chrome and verify the sign-in flow.”
+            </blockquote>
+          </article>
+        </div>
+      </div>
+    </section>
+
     <!-- How It Works -->
-    <section id="how-it-works" class="border-t border-border bg-panel/30 py-24">
+    <section id="how-it-works" class="border-t border-border py-24">
       <div class="mx-auto max-w-6xl px-6">
         <div class="mb-16 text-center">
           <h2 class="mb-4 text-3xl font-bold md:text-4xl">Up and running in minutes</h2>
@@ -514,8 +591,63 @@
       </div>
     </section>
 
+    <!-- Comparison -->
+    <section id="compare" class="border-t border-border bg-panel/30 py-24">
+      <div class="mx-auto max-w-5xl px-6">
+        <div class="mb-10 text-center">
+          <h2 class="mb-4 text-3xl font-bold md:text-4xl">
+            Browser Copilot vs. other browser automation tools
+          </h2>
+          <p class="text-lg text-muted">
+            An installable AI agent and workflow product, not another automation framework to build
+            around.
+          </p>
+        </div>
+        <div class="overflow-x-auto rounded-xl border border-border bg-panel">
+          <table class="w-full min-w-2xl border-collapse text-left text-sm">
+            <thead class="border-b border-border text-ink">
+              <tr>
+                <th class="p-4 font-semibold">Tool</th>
+                <th class="p-4 font-semibold">Primary approach</th>
+                <th class="p-4 font-semibold">Best fit</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border text-muted">
+              <tr>
+                <th class="p-4 font-semibold text-ink">Browser Copilot</th>
+                <td class="p-4">AI agent + visual workflows in your real browser</td>
+                <td class="p-4">
+                  End users and coding agents wanting natural-language actions, schedules, skills,
+                  and MCP in one extension
+                </td>
+              </tr>
+              <tr>
+                <th class="p-4 font-semibold text-ink">Automa</th>
+                <td class="p-4">Block-based visual workflows</td>
+                <td class="p-4">
+                  Block-first browser automation; Browser Copilot can import Automa JSON
+                </td>
+              </tr>
+              <tr>
+                <th class="p-4 font-semibold text-ink">Playwright</th>
+                <td class="p-4">Code-first automation and testing</td>
+                <td class="p-4">
+                  Developers building scripted tests or custom automation programs
+                </td>
+              </tr>
+              <tr>
+                <th class="p-4 font-semibold text-ink">Browser Use</th>
+                <td class="p-4">Framework for AI browser agents</td>
+                <td class="p-4">Developers building a custom Python agent application</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- Docs -->
-    <section class="border-t border-border bg-panel/30 py-24">
+    <section class="border-t border-border py-24">
       <div class="mx-auto max-w-4xl px-6 text-center">
         <div
           class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-panel px-4 py-1.5"
@@ -525,8 +657,9 @@
         </div>
         <h2 class="mb-4 text-3xl font-bold md:text-4xl">Learn every operator</h2>
         <p class="mx-auto mb-8 max-w-2xl text-lg leading-relaxed text-muted">
-          The workflow reference covers all 63 operators — clicks, forms, loops, downloads, secrets,
-          OCR, and AI agents — including the Browser Copilot behavior upstream docs don't describe.
+          The workflow reference covers all 56 executable operators — clicks, forms, loops,
+          downloads, secrets, OCR, and AI agents — including the Browser Copilot behavior upstream
+          docs don't describe.
         </p>
         <div class="flex flex-wrap items-center justify-center gap-4">
           <a
@@ -545,12 +678,118 @@
       </div>
     </section>
 
+    <!-- FAQ -->
+    <section id="faq" class="border-t border-border bg-panel/30 py-24">
+      <div class="mx-auto max-w-3xl px-6">
+        <h2 class="mb-10 text-center text-3xl font-bold md:text-4xl">Frequently asked questions</h2>
+        <div class="space-y-4">
+          <details class="rounded-xl border border-border bg-panel p-6">
+            <summary class="cursor-pointer font-semibold">What is Browser Copilot?</summary>
+            <p class="mt-3 text-sm leading-relaxed text-muted">
+              Browser Copilot is an AI browser-automation extension for Chrome and Firefox. It reads
+              and acts on web pages, builds reusable visual workflows, runs scheduled tasks, and
+              exposes browser tools through MCP.
+            </p>
+          </details>
+          <details class="rounded-xl border border-border bg-panel p-6">
+            <summary class="cursor-pointer font-semibold">
+              Does Browser Copilot require an API key?
+            </summary>
+            <p class="mt-3 text-sm leading-relaxed text-muted">
+              No. A new installation starts with the keyless, rate-limited Pollinations provider.
+              You can also use an OpenAI-compatible API or local models through Ollama and LM
+              Studio.
+            </p>
+          </details>
+          <details class="rounded-xl border border-border bg-panel p-6">
+            <summary class="cursor-pointer font-semibold">
+              Can Claude Code or Codex control Chrome through Browser Copilot?
+            </summary>
+            <p class="mt-3 text-sm leading-relaxed text-muted">
+              Yes. Enable Local agent access, export the bundled MCP adapter, and add its
+              configuration to your MCP client. The client can then use the browser tools you have
+              enabled.
+            </p>
+          </details>
+          <details class="rounded-xl border border-border bg-panel p-6">
+            <summary class="cursor-pointer font-semibold">
+              Does Browser Copilot send browsing data to a server?
+            </summary>
+            <p class="mt-3 text-sm leading-relaxed text-muted">
+              The project has no account system, telemetry, or cloud server. Required page content
+              is sent to your selected model provider, including Pollinations by default. Use a
+              local model when page text must remain on your machine.
+            </p>
+          </details>
+          <details class="rounded-xl border border-border bg-panel p-6">
+            <summary class="cursor-pointer font-semibold">
+              Is Browser Copilot free and open source?
+            </summary>
+            <p class="mt-3 text-sm leading-relaxed text-muted">
+              It is free for noncommercial use. The source is available under PolyForm Noncommercial
+              1.0.0, which is source-available rather than OSI-approved open source. Commercial use
+              requires a separate license.
+            </p>
+          </details>
+        </div>
+      </div>
+    </section>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is Browser Copilot?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Browser Copilot is an AI browser-automation extension for Chrome and Firefox. It reads and acts on web pages, builds reusable visual workflows, runs scheduled tasks, and exposes browser tools through MCP."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does Browser Copilot require an API key?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. A new installation starts with the keyless, rate-limited Pollinations provider. You can also use an OpenAI-compatible API or local models through Ollama and LM Studio."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can Claude Code or Codex control Chrome through Browser Copilot?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Enable Local agent access, export the bundled MCP adapter, and add its configuration to your MCP client. The client can then use the browser tools you have enabled."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does Browser Copilot send browsing data to a server?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The project has no account system, telemetry, or cloud server. Required page content is sent to your selected model provider, including Pollinations by default. Use a local model when page text must remain on your machine."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is Browser Copilot free and open source?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "It is free for noncommercial use. The source is available under PolyForm Noncommercial 1.0.0, which is source-available rather than OSI-approved open source. Commercial use requires a separate license."
+            }
+          }
+        ]
+      }
+    </script>
+
     <!-- CTA -->
     <section class="border-t border-border py-24">
       <div class="mx-auto max-w-3xl px-6 text-center">
         <h2 class="mb-4 text-3xl font-bold md:text-4xl">Ready to automate your browser?</h2>
         <p class="mb-8 text-lg text-muted">
-          Free, open source, and private by design. Download now and start in under two minutes.
+          Free for noncommercial use and private by design. Download now and start in under two
+          minutes.
         </p>
         <div class="flex flex-wrap items-center justify-center gap-4">
           <a
@@ -585,6 +824,9 @@
         <div class="flex items-center gap-6">
           <a href="./docs/index.html" class="text-sm text-muted transition-colors hover:text-ink">
             Docs
+          </a>
+          <a href="./llms.txt" class="text-sm text-muted transition-colors hover:text-ink">
+            For AI agents
           </a>
           <a
             href="https://github.com/dcc123456/browser-copilot"

@@ -1,0 +1,30 @@
+# Browser Copilot
+
+> AI browser-automation extension for Chrome and Firefox. It combines natural-language browser actions, a visual workflow builder, scheduled tasks, reusable skills, and MCP browser tools for coding agents. It runs in the user's real browser, supports OpenAI-compatible and local models, and has no account system, telemetry, or project cloud server.
+
+Browser Copilot is free for noncommercial use under the PolyForm Noncommercial License 1.0.0. It is source-available, not OSI-approved open source. Commercial use requires a separate license.
+
+## Core documentation
+
+- [English README](https://github.com/dcc123456/browser-copilot/blob/main/README.md): installation, features, example prompts, comparisons, models, workflows, schedules, MCP, privacy, and FAQ
+- [中文 README](https://github.com/dcc123456/browser-copilot/blob/main/README.zh-CN.md): 中文安装、功能、示例、对比、模型、工作流、MCP、隐私与常见问答
+- [Getting started](https://dcc123456.github.io/browser-copilot/docs/getting-started.html): workflow creation and execution
+- [快速上手](https://dcc123456.github.io/browser-copilot/docs/getting-started-zh.html): 工作流创建与运行
+- [Operator reference](https://dcc123456.github.io/browser-copilot/docs/index.html): visual workflow operators
+- [MCP integration](https://github.com/dcc123456/browser-copilot/blob/main/examples/local-agent/README.md): connect Claude Code, Codex, Trae, and other MCP clients to a real browser
+- [Server runner](https://github.com/dcc123456/browser-copilot/blob/main/docs/server.md): Playwright-based HTTP API, schedules, webhooks, Docker, and web console
+- [Releases](https://github.com/dcc123456/browser-copilot/releases): Chrome and Firefox installation packages
+
+## Typical uses
+
+- Read and summarize articles, documentation, pull requests, and release notes.
+- Click, fill forms, navigate, and complete multi-step web tasks with configurable approvals.
+- Record, generate, or visually build reusable workflows and run them on schedules.
+- Let Claude Code, Codex, Trae, or another MCP client inspect and operate real browser tabs.
+- Run workflows remotely through the optional Node.js and Playwright Runner.
+
+## Comparisons
+
+- Unlike Playwright, Browser Copilot is an installable user-facing extension rather than a code-first automation and testing framework; its optional Runner uses Playwright.
+- Unlike Browser Use, it is an end-user browser product rather than a framework for building a custom Python agent.
+- Compared with Automa's block-first workflows, Browser Copilot adds a natural-language AI agent, AI workflow generation, skills, schedules, and MCP, and can import Automa JSON.

@@ -3,19 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Browser Copilot — 替你操作网页的 AI 助手</title>
+    <title>Browser Copilot — AI 浏览器自动化扩展、可视化工作流与 MCP 服务</title>
     <meta
       name="description"
-      content="开源 Chrome 扩展，能读取网页、点击按钮、填写表单、自动化工作流。支持 DeepSeek、OpenAI、Ollama 及任何 OpenAI 兼容模型。隐私优先，数据不出本机。"
+      content="面向 Chrome 和 Firefox 的 AI 浏览器自动化扩展：读取网页、点击、填表、搭建可视化工作流、定时执行，并通过 MCP 接入 Claude Code 或 Codex。支持 OpenAI 兼容与本地模型。"
     />
     <link rel="canonical" href="https://dcc123456.github.io/browser-copilot/index-zh.html" />
+    <link rel="alternate" hreflang="en" href="https://dcc123456.github.io/browser-copilot/" />
+    <link
+      rel="alternate"
+      hreflang="zh-CN"
+      href="https://dcc123456.github.io/browser-copilot/index-zh.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="x-default"
+      href="https://dcc123456.github.io/browser-copilot/"
+    />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Browser Copilot — 替你操作网页的 AI 助手" />
+    <meta property="og:title" content="Browser Copilot — AI 浏览器自动化扩展与 MCP 服务" />
     <meta
       property="og:description"
-      content="开源 Chrome 扩展，能读取网页、点击按钮、填写表单、自动化工作流。支持 DeepSeek、OpenAI、Ollama 等模型。"
+      content="面向 Chrome 和 Firefox 的 AI 浏览器自动化扩展，能读取网页、点击按钮、填写表单、自动化工作流。支持 DeepSeek、OpenAI、Ollama 等模型。"
     />
     <meta property="og:url" content="https://dcc123456.github.io/browser-copilot/index-zh.html" />
     <meta property="og:image" content="https://dcc123456.github.io/browser-copilot/og-image.png" />
@@ -24,10 +35,10 @@
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Browser Copilot — 替你操作网页的 AI 助手" />
+    <meta name="twitter:title" content="Browser Copilot — AI 浏览器自动化扩展与 MCP 服务" />
     <meta
       name="twitter:description"
-      content="开源 Chrome 扩展，能读取网页、点击按钮、填写表单、自动化工作流。"
+      content="面向 Chrome 和 Firefox 的 AI 浏览器自动化扩展，能读取网页、点击按钮、填写表单、自动化工作流。"
     />
     <meta name="twitter:image" content="https://dcc123456.github.io/browser-copilot/og-image.png" />
 
@@ -78,24 +89,31 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "Browser Copilot",
+        "alternateName": "Browser Copilot AI 浏览器自动化扩展",
         "applicationCategory": "BrowserApplication",
-        "operatingSystem": "Chrome",
-        "description": "AI 侧边栏助手，能读取并操作任意网页。支持任何 OpenAI 兼容模型。",
-        "url": "https://github.com/dcc123456/browser-copilot",
+        "operatingSystem": "Chrome, Firefox",
+        "description": "AI 浏览器自动化扩展，支持自然语言网页操作、可视化工作流、定时任务、本地模型，以及面向编码 Agent 的 MCP 浏览器工具。",
+        "url": "https://dcc123456.github.io/browser-copilot/index-zh.html",
+        "codeRepository": "https://github.com/dcc123456/browser-copilot",
+        "downloadUrl": "https://github.com/dcc123456/browser-copilot/releases",
         "license": "https://polyformproject.org/licenses/noncommercial/1.0.0/",
         "softwareVersion": "0.6.19",
+        "keywords": "AI 浏览器自动化, Chrome 扩展, Firefox 扩展, 浏览器 Agent, 可视化工作流, MCP 服务, Claude Code, Codex, Playwright, DeepSeek, Ollama",
+        "isAccessibleForFree": true,
         "offers": {
           "@type": "Offer",
           "price": "0",
-          "priceCurrency": "USD"
+          "priceCurrency": "USD",
+          "description": "非商业用途免费；商业使用需要单独授权"
         },
         "featureList": [
-          "AI 页面阅读与操作",
-          "63 种算子的可视化工作流构建器",
-          "定时任务自动化",
-          "可复用的技能系统",
+          "AI 页面阅读与浏览器操作",
+          "56 种可执行算子的可视化工作流构建器",
+          "定时浏览器自动化",
+          "可复用的 AI 技能",
           "飞书/Lark 集成",
-          "面向编程代理的 MCP 服务器",
+          "面向 Claude Code、Codex、Trae 等客户端的 MCP 浏览器工具",
+          "OpenAI 兼容模型与本地模型",
           "基于 Tesseract.js 的本地 OCR"
         ]
       }
@@ -181,11 +199,11 @@
           class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-panel px-4 py-1.5"
         >
           <span class="h-2 w-2 rounded-full bg-ok"></span>
-          <span class="text-sm text-muted">v0.6.19 — 开源</span>
+          <span class="text-sm text-muted">v0.6.19 — 源码可得 · 非商业许可</span>
         </div>
         <h1 class="mb-6 text-5xl font-bold leading-tight tracking-tight md:text-6xl">
-          替你<span class="gradient-text">真正操作网页</span>的<br />
-          AI 助手
+          面向<span class="gradient-text">真实浏览器</span>的<br />
+          AI 自动化扩展
         </h1>
         <p class="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-muted">
           打开侧边栏，用大白话说出需求，Browser Copilot 读取你正在看的页面并采取行动 —
@@ -300,8 +318,8 @@
             </div>
             <h3 class="mb-2 text-lg font-semibold">可视化工作流编辑器</h3>
             <p class="text-sm leading-relaxed text-muted">
-              录屏式记录一次操作，或在画布上用 63 种算子拼接工作流——点击、填写、循环、条件分支、AI
-              代理步骤，应有尽有。
+              录屏式记录一次操作，或在画布上用 56
+              种可执行算子拼接工作流——点击、填写、循环、条件分支、AI 代理步骤，应有尽有。
             </p>
           </div>
           <!-- Feature 4 -->
@@ -375,8 +393,58 @@
       </div>
     </section>
 
+    <!-- Use cases -->
+    <section id="use-cases" class="border-t border-border bg-panel/30 py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mb-12 text-center">
+          <h2 class="mb-4 text-3xl font-bold md:text-4xl">Browser Copilot 能自动化什么？</h2>
+          <p class="mx-auto max-w-3xl text-lg text-muted">
+            一次性任务直接用自然语言描述，成功的浏览器操作还能保存成可复用工作流。
+          </p>
+        </div>
+        <div class="grid gap-6 md:grid-cols-2">
+          <article class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-2 text-lg font-semibold">研究并总结网页</h3>
+            <p class="mb-4 text-sm leading-relaxed text-muted">
+              阅读文章、文档、PR 和发行说明，不必手工复制网页文字。
+            </p>
+            <blockquote class="border-l-2 border-accent pl-4 text-sm text-muted">
+              “总结这篇文章，提取主要观点，并给每个观点附上原文对应段落的链接。”
+            </blockquote>
+          </article>
+          <article class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-2 text-lg font-semibold">填写表单并完成网页任务</h3>
+            <p class="mb-4 text-sm leading-relaxed text-muted">
+              点击、输入、跳转并复用已存资料，密码不会进入模型请求。
+            </p>
+            <blockquote class="border-l-2 border-accent pl-4 text-sm text-muted">
+              “用我保存的资料填写这份申请，但在最终提交按钮前停下来。”
+            </blockquote>
+          </article>
+          <article class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-2 text-lg font-semibold">搭建定时浏览器工作流</h3>
+            <p class="mb-4 text-sm leading-relaxed text-muted">
+              录制任务、用 AI 生成或可视化搭建，然后手动、定时或从其他工具启动。
+            </p>
+            <blockquote class="border-l-2 border-accent pl-4 text-sm text-muted">
+              “把这些步骤保存成可复用工作流，每个工作日上午 9 点运行。”
+            </blockquote>
+          </article>
+          <article class="rounded-xl border border-border bg-panel p-6">
+            <h3 class="mb-2 text-lg font-semibold">把真实浏览器交给编码 Agent</h3>
+            <p class="mb-4 text-sm leading-relaxed text-muted">
+              让 Claude Code、Codex、Trae 或其他 MCP 客户端使用现有 Chrome 标签页与登录状态。
+            </p>
+            <blockquote class="border-l-2 border-accent pl-4 text-sm text-muted">
+              “在 Chrome 里打开我的本地开发服务，验证整个登录流程。”
+            </blockquote>
+          </article>
+        </div>
+      </div>
+    </section>
+
     <!-- How It Works -->
-    <section id="how-it-works" class="border-t border-border bg-panel/30 py-24">
+    <section id="how-it-works" class="border-t border-border py-24">
       <div class="mx-auto max-w-6xl px-6">
         <div class="mb-16 text-center">
           <h2 class="mb-4 text-3xl font-bold md:text-4xl">几分钟就能用起来</h2>
@@ -503,8 +571,55 @@
       </div>
     </section>
 
+    <!-- Comparison -->
+    <section id="compare" class="border-t border-border bg-panel/30 py-24">
+      <div class="mx-auto max-w-5xl px-6">
+        <div class="mb-10 text-center">
+          <h2 class="mb-4 text-3xl font-bold md:text-4xl">
+            Browser Copilot 与其他浏览器自动化工具的区别
+          </h2>
+          <p class="text-lg text-muted">
+            它是安装即用的 AI Agent 与工作流产品，而不是需要自行搭建的另一套自动化框架。
+          </p>
+        </div>
+        <div class="overflow-x-auto rounded-xl border border-border bg-panel">
+          <table class="w-full min-w-2xl border-collapse text-left text-sm">
+            <thead class="border-b border-border text-ink">
+              <tr>
+                <th class="p-4 font-semibold">工具</th>
+                <th class="p-4 font-semibold">主要方式</th>
+                <th class="p-4 font-semibold">适用对象</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border text-muted">
+              <tr>
+                <th class="p-4 font-semibold text-ink">Browser Copilot</th>
+                <td class="p-4">真实浏览器中的 AI Agent + 可视化工作流</td>
+                <td class="p-4">需要自然语言操作、定时任务、技能和 MCP 的终端用户与编码 Agent</td>
+              </tr>
+              <tr>
+                <th class="p-4 font-semibold text-ink">Automa</th>
+                <td class="p-4">以块为基础的可视化工作流</td>
+                <td class="p-4">以块为中心的浏览器自动化；Browser Copilot 可导入 Automa JSON</td>
+              </tr>
+              <tr>
+                <th class="p-4 font-semibold text-ink">Playwright</th>
+                <td class="p-4">代码优先的自动化与测试</td>
+                <td class="p-4">开发脚本测试或自定义自动化程序的开发者</td>
+              </tr>
+              <tr>
+                <th class="p-4 font-semibold text-ink">Browser Use</th>
+                <td class="p-4">AI 浏览器 Agent 开发框架</td>
+                <td class="p-4">开发自定义 Python Agent 应用的开发者</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- Docs -->
-    <section class="border-t border-border bg-panel/30 py-24">
+    <section class="border-t border-border py-24">
       <div class="mx-auto max-w-4xl px-6 text-center">
         <div
           class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-panel px-4 py-1.5"
@@ -514,7 +629,7 @@
         </div>
         <h2 class="mb-4 text-3xl font-bold md:text-4xl">逐个掌握每个算子</h2>
         <p class="mx-auto mb-8 max-w-2xl text-lg leading-relaxed text-muted">
-          工作流文档覆盖全部 63 个算子——点击、表单、循环、下载、凭证、OCR 与 AI
+          工作流文档覆盖全部 56 个可执行算子——点击、表单、循环、下载、凭证、OCR 与 AI
           Agent，并说明上游文档没有的 Browser Copilot 专属行为。
         </p>
         <div class="flex flex-wrap items-center justify-center gap-4">
@@ -534,12 +649,111 @@
       </div>
     </section>
 
+    <!-- FAQ -->
+    <section id="faq" class="border-t border-border bg-panel/30 py-24">
+      <div class="mx-auto max-w-3xl px-6">
+        <h2 class="mb-10 text-center text-3xl font-bold md:text-4xl">常见问答</h2>
+        <div class="space-y-4">
+          <details class="rounded-xl border border-border bg-panel p-6">
+            <summary class="cursor-pointer font-semibold">Browser Copilot 是什么？</summary>
+            <p class="mt-3 text-sm leading-relaxed text-muted">
+              Browser Copilot 是面向 Chrome 和 Firefox 的 AI
+              浏览器自动化扩展，可读取并操作网页、搭建可复用的可视化工作流、运行定时任务，并通过 MCP
+              提供浏览器工具。
+            </p>
+          </details>
+          <details class="rounded-xl border border-border bg-panel p-6">
+            <summary class="cursor-pointer font-semibold">
+              Browser Copilot 必须配置 API Key 吗？
+            </summary>
+            <p class="mt-3 text-sm leading-relaxed text-muted">
+              不必须。新安装默认启用免密钥、有限流的 Pollinations，也可以使用 OpenAI 兼容
+              API，或通过 Ollama、LM Studio 运行本地模型。
+            </p>
+          </details>
+          <details class="rounded-xl border border-border bg-panel p-6">
+            <summary class="cursor-pointer font-semibold">
+              Claude Code 或 Codex 能通过它控制 Chrome 吗？
+            </summary>
+            <p class="mt-3 text-sm leading-relaxed text-muted">
+              可以。开启本地 Agent 接入，导出内置 MCP 适配器并把配置加入 MCP
+              客户端，客户端即可使用你已启用的浏览器工具。
+            </p>
+          </details>
+          <details class="rounded-xl border border-border bg-panel p-6">
+            <summary class="cursor-pointer font-semibold">
+              Browser Copilot 会把浏览数据上传到服务器吗？
+            </summary>
+            <p class="mt-3 text-sm leading-relaxed text-muted">
+              项目没有账号系统、遥测或云服务器。所需页面内容会发给你选择的模型服务商，默认包括
+              Pollinations；页面文字必须留在本机时请使用本地模型。
+            </p>
+          </details>
+          <details class="rounded-xl border border-border bg-panel p-6">
+            <summary class="cursor-pointer font-semibold">Browser Copilot 免费、开源吗？</summary>
+            <p class="mt-3 text-sm leading-relaxed text-muted">
+              非商业用途免费。源码采用 PolyForm Noncommercial 1.0.0，属于源码可得而非 OSI
+              认证的开源许可；商业使用需要单独授权。
+            </p>
+          </details>
+        </div>
+      </div>
+    </section>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Browser Copilot 是什么？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Browser Copilot 是面向 Chrome 和 Firefox 的 AI 浏览器自动化扩展，可读取并操作网页、搭建可复用的可视化工作流、运行定时任务，并通过 MCP 提供浏览器工具。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Browser Copilot 必须配置 API Key 吗？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "不必须。新安装默认启用免密钥、有限流的 Pollinations，也可以使用 OpenAI 兼容 API，或通过 Ollama、LM Studio 运行本地模型。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Claude Code 或 Codex 能通过它控制 Chrome 吗？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "可以。开启本地 Agent 接入，导出内置 MCP 适配器并把配置加入 MCP 客户端，客户端即可使用你已启用的浏览器工具。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Browser Copilot 会把浏览数据上传到服务器吗？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "项目没有账号系统、遥测或云服务器。所需页面内容会发给你选择的模型服务商，默认包括 Pollinations；页面文字必须留在本机时请使用本地模型。"
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Browser Copilot 免费、开源吗？",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "非商业用途免费。源码采用 PolyForm Noncommercial 1.0.0，属于源码可得而非 OSI 认证的开源许可；商业使用需要单独授权。"
+            }
+          }
+        ]
+      }
+    </script>
+
     <!-- CTA -->
     <section class="border-t border-border py-24">
       <div class="mx-auto max-w-3xl px-6 text-center">
         <h2 class="mb-4 text-3xl font-bold md:text-4xl">准备好自动化你的浏览器了？</h2>
         <p class="mb-8 text-lg text-muted">
-          免费、开源、隐私优先。现在下载，两分钟内即可开始使用。
+          非商业用途免费、隐私优先。现在下载，两分钟内即可开始使用。
         </p>
         <div class="flex flex-wrap items-center justify-center gap-4">
           <a
@@ -577,6 +791,9 @@
             class="text-sm text-muted transition-colors hover:text-ink"
           >
             文档
+          </a>
+          <a href="./llms.txt" class="text-sm text-muted transition-colors hover:text-ink">
+            AI 检索入口
           </a>
           <a
             href="https://github.com/dcc123456/browser-copilot"
