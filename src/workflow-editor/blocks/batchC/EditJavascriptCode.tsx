@@ -13,7 +13,7 @@
  */
 
 import { Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Checkbox,
   Field,
@@ -29,6 +29,7 @@ import { arr, id } from './shared'
 import { useEditorLocale } from '../../locale-context'
 import { CODE_NODE_HELPERS } from '../../../lib/workflow/code-node-helpers'
 import { useAvailableVariables } from '../shared/SlashVariableMenu'
+import { formatJavaScriptCode } from '../../../lib/format-code'
 import HelperTip from '../../ui/HelperTip'
 import Modal from '../../ui/Modal'
 import CodeEditor from '../../ui/CodeEditor'
@@ -48,10 +49,40 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
   const [codeOpen, setCodeOpen] = useState(false)
   const [tab, setTab] = useState<'code' | 'preload'>('code')
   const [wrap, setWrap] = useState(false)
+  const [formatting, setFormatting] = useState(false)
+  const [formatStatus, setFormatStatus] = useState<'ok' | 'error' | null>(null)
+  const statusTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Clear the transient format status on unmount so the timer never fires
+  // against an unmounted panel.
+  useEffect(
+    () => () => {
+      if (statusTimer.current) clearTimeout(statusTimer.current)
+    },
+    [],
+  )
 
   const code = str(data, 'code')
   // Names only: the menu must never pull a credential value into the script.
   const scriptVariables = useAvailableVariables()
+
+  const formatCode = async () => {
+    if (!code.trim() || formatting) return
+    setFormatting(true)
+    setFormatStatus(null)
+    try {
+      const formatted = await formatJavaScriptCode(code)
+      if (formatted !== code) onChange({ code: formatted })
+      setFormatStatus('ok')
+    } catch {
+      // Syntax error or formatter failure: keep the original code untouched.
+      setFormatStatus('error')
+    } finally {
+      setFormatting(false)
+      if (statusTimer.current) clearTimeout(statusTimer.current)
+      statusTimer.current = setTimeout(() => setFormatStatus(null), 2500)
+    }
+  }
 
   const setScript = (index: number, patch: Partial<PreloadScript>) => {
     const next = scripts.slice()
@@ -175,14 +206,30 @@ export default function EditJavascriptCode({ data, onChange }: EditFormProps) {
             <div className="wf-code-helpers">
               <p className="wf-code-helpers-title">
                 <span>{t('availableFuncs')}</span>
-                <button
-                  type="button"
-                  className="wf-code-wrap-toggle"
-                  onClick={() => setWrap((w) => !w)}
-                >
-                  {t('wrapLine')}
-                </button>
+                <span className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="wf-code-wrap-toggle"
+                    title={t('formatCodeHint')}
+                    disabled={formatting || !code.trim()}
+                    onClick={formatCode}
+                  >
+                    {t('formatCode')}
+                  </button>
+                  <button
+                    type="button"
+                    className="wf-code-wrap-toggle"
+                    onClick={() => setWrap((w) => !w)}
+                  >
+                    {t('wrapLine')}
+                  </button>
+                </span>
               </p>
+              {formatStatus && (
+                <p className="mt-1 text-xs text-muted" role="status">
+                  {formatStatus === 'ok' ? t('codeFormatted') : t('formatCodeFailed')}
+                </p>
+              )}
               <div className="flex flex-wrap gap-1.5">
                 {CODE_NODE_HELPERS.map((helper) => (
                   <HelperTip
