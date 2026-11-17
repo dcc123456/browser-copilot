@@ -4,7 +4,31 @@
 
 用户要一个工作流：去 GitHub 发现好用的 AI 工具，生成一篇小红书图文草稿，说明这个工具的作用与适合人群，排版整洁；把工具名称/地址记录到本地配置的下载目录下的文件；下次运行按该文件过滤掉已发布过的工具。
 
-**安全边界**：只生成图文草稿并写入本地文件，**不公开发帖、不发布**。这是用户明确选择的"生成内容存草稿"方案。
+**安全边界**：图文草稿要**存进小红书账号的草稿箱**（用户 2026-11-17 澄清："去小红书上生成图文文章然后保存为草稿，不是保存到电脑上"），**不公开发帖、不发布**。仅去重台账 CSV 仍在本地下载目录（用户最初明确要求的去重依据）。
+
+## 修订 v2（2026-11-17 晚）：草稿从"存本地文件"改为"存小红书草稿箱"
+
+用户澄清草稿要进小红书账号本身。实测（真实 Chrome + 已登录账号）得到以下硬事实，全部经探针验证：
+
+- 创作中心 `https://creator.xiaohongshu.com/publish/publish` 已登录；图文笔记**必须先上传至少一张图片**才进入编辑页（否则只有上传控件，没有标题/正文字段）。
+- 页面有多个隐藏的"上传图文" tab 副本；可见副本用 `span.title` 文本 + `getBoundingClientRect()` 在视口内定位后 `.click()` 生效（探针 7/7 passed）。
+- 上传：`upload-file(sourceMode:'file-path'|'workflow-file', selector:'input.upload-input')` 成功进入编辑页；`workflow-file` 的 `fileVariable` 只接受变量名，var 里放 dataURL（`normalizeWorkflowFiles` 支持）。
+- 标题输入框：`input[placeholder="填写标题会有更多赞哦"]`；用原生 value setter + `input`/`change` 事件可写入。
+- 正文编辑器：`div.tiptap.ProseMirror`（contenteditable=true，Tiptap）；`document.execCommand('insertText', ...)` 在 `focus()` 后写入被 Vue 接受（探针 7/7 passed，回读 innerText 一致）。
+- **没有显式"存草稿"按钮**。草稿机制 = 离开编辑页即自动暂存：探针填好标题正文后关闭标签，草稿箱计数 (2)→(3)，草稿箱"图文笔记"列表出现对应标题与保存时间。确认这是"存草稿"的正确实现。
+- 草稿箱提示：草稿存于当前浏览器本地，图文最多 100 篇。
+- 封面图：`javascript-code` 用 canvas 画工具名/标题为竖版 PNG，`toDataURL()` 存变量，供 `upload-file(workflow-file)` 使用——使封面与工具匹配。
+- 安全截止：`verify_workflow` 默认在账号写入步骤前停；实测用 `commitCutoffOnly:true` + `allowDraftCommit:true` 可真实跑通"离开存草稿"且不发布。
+- **标题填写的关键坑（实测踩过）**：① 原生 value setter + `input`/`change` 事件 → DOM 值对、`assertFill` 通过，但小红书草稿存下来标题丢失（Vue v-model 未真正同步）；② `execCommand('insertText')` 对 `<input>` 无效（标题空，assertFill 失败）；③ **正确做法 = `forms` 块**（type:text-field, selector:`input[placeholder="填写标题会有更多赞哦"]`, value:`{{xhsTitle}}`），注入内核真实输入触发 Vue，草稿标题正确保存。正文 `div.tiptap.ProseMirror` 仍用 `execCommand('insertText')`（对 contenteditable 有效）——**标题用 forms、正文用 execCommand**。
+
+### 最终实测结果（v4，2026-11-17 18:33）
+
+- 工作流 id `mwkixl56-4pzuhiyp`，25 节点，`verify_workflow` **24/24 passed、`verified:true`**（runId `37ab4307-1413-4fbc-89fb-405c2a3f2841`，约 101s）。
+- 草稿箱实测：新增图文草稿「1.9万星！AG-UI让AI走进前端🤖」保存于 18:33:02，标题+正文均正确（AI 基于 AG-UI 工具生成）。
+- AI 文案字段：标题行 `标题：…` + 钩子 + `✨它能做什么` + `🎯适合谁用` + GitHub 地址 + 话题标签。
+- 封面：canvas 画工具名/标题为 1080×1440 PNG dataURL → `upload-file(workflow-file, fileVariable:coverDataUrl)`，与工具匹配。
+- 台账：本地 `xhs-ai-tool-ledger.csv` 去重闭环仍成立（本次选未发布的 AG-UI）。
+- 安全边界：全程未点"发布"，仅草稿箱写入 + 本地台账写入。
 
 ## 选型与证据 / Evidence (实测 2026-11-17)
 
@@ -21,17 +45,19 @@
 | GitHub 搜索页作为第二来源做容错 | 搜索页是 React 新版、DOM 用 `_R_` hash class 且对 `run_javascript` 报 CSP；不放进主关键路径，采不到自动跳过 |
 | 代码节点必须在触发 post 动作前 | 见节点顺序 |
 
-## 数据流 / Data flow
+## 数据流 / Data flow（v4：草稿进小红书草稿箱）
 
 1. Trending 页采集 → `candidateRows`（name/url/desc/stars/lang/source）
 2. 搜索页采集（容错）→ 合并进 `candidateRows`
-3. `parse-excel(file-path, ai-tools-ledger.csv)` → `publishedRows`（历史已发布）
+3. `parse-excel(file-path, xhs-ai-tool-ledger.csv)` → `publishedRows`（历史已发布）
 4. JS 合并去重：按规范化 URL + 名称排除已发布 → 按标注 star 与描述质量打分 → 选 1 个 `selectedTool`
-5. `ai-agent(prompt 注入工具信息, actOnPage:false)` → `xhsDraft`（小红书图文草稿）
-6. `save-local` 写草稿 `xhs-drafts/<工具名>.md`
-7. JS 生成新台账行 → `mergedLedger`（历史 + 新增）
-8. `export-data(csv)` 覆盖写回 `ai-tools-ledger.csv`
-9. 断言节点：草稿非空、台账含新工具 URL
+5. `ai-agent(prompt 注入工具信息, actOnPage:false)` → `xhsDraft`（小红书图文文案）
+6. JS 拆文案为 `xhsTitle`/`xhsBody`，并用 canvas 画工具名封面 → `coverDataUrl`
+7. `new-tab` 打开小红书创作中心 → 点击视口内可见的"上传图文" tab → `upload-file(workflow-file, coverDataUrl, selector:input.upload-input)` 上传封面进入编辑页
+8. `forms` 填标题（`input[placeholder="填写标题会有更多赞哦"]`），`javascript-code` 用 `execCommand('insertText')` 填正文（`div.tiptap.ProseMirror`）
+9. `new-tab` 离开编辑页 → 小红书自动存草稿箱（不发）
+10. JS 生成新台账行 → `mergedLedger`（历史 + 新增）→ `export-data(csv)` 覆盖写回 `xhs-ai-tool-ledger.csv`
+11. 断言节点：草稿文案非空、台账含新工具 URL
 
 ## 去重主键 / Dedup key
 
@@ -42,15 +68,19 @@
 ## 关键取舍 / Trade-offs
 
 - 搜索页只作补充来源并容错：GitHub 搜索页 DOM 不稳定且 CSP 拦 `run_javascript`，若纳入关键路径会让整个工作流脆弱。Trending 单源已足够产出候选。
-- `ai-agent actOnPage:false`：只生成文案、不在小红书页面点击填写，符合"存草稿不发"边界。
+- `ai-agent actOnPage:false`：只负责生成文案（标题/正文/话题），不直接操控页面；页面填写交给确定性的 `forms` + `javascript-code` 节点，避免 LLM 在小红书页面误触发布，符合"只存草稿不发"边界。
 - 用 JS 代码节点做去重与打分：项目无"按主键判存"原生块（`condition`/`eq` 表达不了数组语义），这是设计文档已确认的正当能力缺口用法，节点带 `justification` + `capabilityGap`。
 
 ## 验收 / Verification（实测 2026-11-17，真实 Chrome）
 
-工作流 id：`mwkixl56-4pzuhiyp`（13 节点），保存 0 warning。可恢复定义：`.workbuddy-ai/workflows/github-ai-tool-xhs-draft.json`。
+工作流 id：`mwkixl56-4pzuhiyp`（**v4：25 节点 / 24 边 / 0 悬空边**），保存 0 warning。可恢复定义：`.workbuddy-ai/workflows/github-ai-tool-xhs-draft.json`（已同步为 v4）。
 
-- 第一遍 `verify_workflow`：`passed (12/12 steps)`，`verified:true`，runId `1c3280d0`。产出草稿 `xhs-drafts/2026-11-17-180305-univer.md`（标题/作用/适合人群/地址/话题标签齐全），台账写入 `univer` 1 行。
-- 第二遍 `verify_workflow`：`passed (12/12 steps)`，`verified:true`，runId `46f0cfb8`。读到台账后**跳过 univer**，改选 `last30days-skill`，台账变 2 个不同工具，产出第二份草稿 `...-last30days-skill.md`。
-- 结论：去重闭环成立（第二遍不重复发布同一工具），AI 文案质量合格（未编造数据），全文案仅本地落盘、未公开发布。
+**v4 最终真实测试**：`verify_workflow` **24/24 steps passed、`verified:true`**（runId `37ab4307-1413-4fbc-89fb-405c2a3f2841`，约 101s），用 `commitCutoffOnly:true` + `allowDraftCommit:true` 真实写入草稿箱。草稿箱实证：图文分类新增「1.9万星！AG-UI让AI走进前端🤖」，保存于 18:33:02，标题+正文均正确（AI 基于 AG-UI 工具生成）。全程未点"发布"，未公开发帖。
+
+v1（本地草稿版，历史记录）验收数据，用于证明去重闭环与文案质量：
+
+- 第一遍 `verify_workflow`：`passed (12/12 steps)`，`verified:true`，runId `1c3280d0`。选中 `univer`，台账写入 1 行。
+- 第二遍 `verify_workflow`：`passed (12/12 steps)`，`verified:true`，runId `46f0cfb8`。读到台账后**跳过 univer**，改选 `last30days-skill`，台账变 2 个不同工具。
+- 结论：去重闭环成立（第二遍不重复选同一工具），AI 文案质量合格（未编造数据）。v4 沿用同一台账去重逻辑，本次选中未发布的 AG-UI 工具。
 - 实测耗时：每遍约 93–102 秒，主要消耗在 3 次 GitHub 导航 + ai-agent 长 prompt 生成。
-- 边界：用户选择"生成内容存草稿"，工作流全程用 `ai-agent(actOnPage:false)` + `save-local`/`export-data`，无发布/提交动作；`verify_workflow` 安全截止未触发。
+- 边界：草稿目标以 v4 为准（小红书草稿箱）；v1 的 `xhs-drafts/*.md` 仅为历史产物，不再是交付落点。全程无发布/提交动作。
