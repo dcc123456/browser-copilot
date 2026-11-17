@@ -66,6 +66,7 @@ import {
 } from '../lib/workflow/operator-categories'
 import type { BlockCategory } from '../lib/workflow/blocks/types'
 import { composeWorkflowFromDraft, hydrateDraft, persistDraft } from './operator-tool-handler'
+import { saveAuthoredWorkflow } from './workflow-authoring'
 import { executeWorkflow } from './workflow-engine/run-workflow'
 import { createTrialRunner } from './workflow-engine/repair/generation-trial'
 import { runOperatorToolWithExecution } from './operator-tool-run'
@@ -1427,6 +1428,29 @@ export const TOOLS: WireTool[] = [
               'Default true. When false, only return the composed JSON without persisting.',
           },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'save_workflow',
+      description:
+        'Save a workflow graph without page recording. Use for data-only workflows. Returns the id and warnings. / 直接保存手工编排的工作流图，无需页面录制，适用于纯数据工作流。返回 id 与警告。',
+      parameters: {
+        type: 'object',
+        properties: {
+          workflow: {
+            type: 'object',
+            description:
+              '{name, nodes:[{id,label,position:{x,y},data:{blockId,...params}}], edges:[{id,source,target,sourceHandle?,targetHandle?}], trigger?, description?, settings?}. Creates a new workflow.',
+          },
+          save: {
+            type: 'boolean',
+            description: 'Default true; false validates without saving.',
+          },
+        },
+        required: ['workflow'],
       },
     },
   },
@@ -4830,6 +4854,15 @@ export async function executeTool(
         name: out.workflow.name,
         nodeCount: out.workflow.drawflow.nodes.length,
       })
+    }
+
+    case 'save_workflow': {
+      throwIfAborted()
+      const out = await saveAuthoredWorkflow({
+        workflow: args.workflow,
+        save: args.save,
+      })
+      return JSON.stringify(out)
     }
 
     case PREPARE_WORKFLOW_GOAL_TOOL: {

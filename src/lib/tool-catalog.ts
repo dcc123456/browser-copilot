@@ -36,6 +36,7 @@ export interface ToolMeta {
  * editor share one definition.
  */
 export const BRIDGE_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  'save_workflow',
   'generate_workflow',
   'verify_workflow',
   'repair_workflow',
@@ -250,6 +251,12 @@ export const TOOL_META: ToolMeta[] = [
   },
   {
     name: 'compose_workflow',
+    category: 'data',
+    labelKey: 'toolOperator',
+    warningKey: 'toolOperatorWarn',
+  },
+  {
+    name: 'save_workflow',
     category: 'data',
     labelKey: 'toolOperator',
     warningKey: 'toolOperatorWarn',

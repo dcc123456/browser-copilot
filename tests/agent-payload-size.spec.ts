@@ -119,8 +119,11 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 14_400
  * threshold exists for. Both tools are in the on-demand `forms` group, so the
  * advertised round-1 payload does not move (measured 33_767).
  * Raised 33_800 → 33_850 for the same mixed-form read (+26; measured 33_826).
+ * Raised 34_050 → 34_650 for the bridge-only save_workflow schema (measured
+ * 34_629). It is not advertised to agent conversations, so this does not grow
+ * any per-turn payload; the core-surface assertions above still pin that cost.
  */
-const MAX_CATALOG_CHARS = 34_050
+const MAX_CATALOG_CHARS = 34_650
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the
