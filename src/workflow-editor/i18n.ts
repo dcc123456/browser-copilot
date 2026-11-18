@@ -91,6 +91,7 @@ export const EDITOR_STRINGS = {
     parametersSaved: 'Parameter values saved',
     parametersSaveFailed: 'Could not save parameter values',
     locateNode: 'Locate',
+    continueFromNode: 'Continue from here',
     dataTable: 'Data table',
     dataTableTitle: 'Workflow data table',
     dataTableIntro:
@@ -228,6 +229,7 @@ export const EDITOR_STRINGS = {
     nodeDeleted: 'Block deleted',
     nodeDuplicated: 'Block duplicated',
     runFromHereFinished: 'Run from here finished',
+    continueFromHereFinished: 'Continued from this block with its variables',
     noteDelete: 'Delete note',
     noteEdit: 'Edit note',
     workflowName: 'Workflow name',
@@ -537,6 +539,7 @@ export const EDITOR_STRINGS = {
     parametersSaved: '参数值已保存',
     parametersSaveFailed: '保存参数值失败',
     locateNode: '定位算子',
+    continueFromNode: '从这里继续',
     dataTable: '数据表',
     dataTableTitle: '工作流数据表',
     dataTableIntro:
@@ -670,6 +673,7 @@ export const EDITOR_STRINGS = {
     nodeDeleted: '算子已删除',
     nodeDuplicated: '算子已复制',
     runFromHereFinished: '从此处运行完成',
+    continueFromHereFinished: '已携带该算子的变量从此继续运行',
     noteDelete: '删除备注',
     noteEdit: '编辑备注',
     workflowName: '工作流名称',

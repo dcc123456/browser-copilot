@@ -316,6 +316,19 @@ export type Command =
       id: string
       /** Run the graph starting at this node id ("run from here"). */ startAt?: string
       /**
+       * Seed variables for a "continue from a run log row" run. Passed through
+       * to the engine as the initial variable bag; declared trigger inputs are
+       * still layered underneath. A checkpoint snapshot (see `sourceRunId`)
+       * takes precedence when both are present.
+       */
+      variables?: Record<string, unknown>
+      /**
+       * Run whose checkpoint at `startAt` carries the FULL variable bag to
+       * resume with. The background resolves it from the checkpoint store —
+       * the log's display `variables` are bounded and lose large data.
+       */
+      sourceRunId?: string
+      /**
        * Explicit target window (the editor popup's host window). Validated and
        * preferred over the sender-derived scope; the panel omits it and is
        * scoped by its own window instead.

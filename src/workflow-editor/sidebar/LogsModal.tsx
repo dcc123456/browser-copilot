@@ -128,6 +128,7 @@ export default function LogsModal({
   workflowId,
   debugMode,
   onLocateNode,
+  onContinueFrom,
   t,
 }: {
   open: boolean
@@ -136,6 +137,8 @@ export default function LogsModal({
   debugMode: boolean
   /** Center the canvas on a log row's node (editor only). */
   onLocateNode?: (nodeId: string) => void
+  /** Re-run from a log row's node with the source run's variables. */
+  onContinueFrom?: (nodeId: string, runId: string, vars?: Record<string, unknown>) => void
   t: TranslateFn
 }) {
   const [boards, setBoards] = useState<{ runs: RunView[]; finished: RunView[] }>({
@@ -334,6 +337,15 @@ export default function LogsModal({
             ? (nodeId) => {
                 setOpenRunId(null)
                 onLocateNode(nodeId)
+              }
+            : undefined
+        }
+        // Continue starts a run on the canvas, so uncover it like locate does.
+        onContinueFrom={
+          onContinueFrom
+            ? (nodeId, runId, vars) => {
+                setOpenRunId(null)
+                onContinueFrom(nodeId, runId, vars)
               }
             : undefined
         }

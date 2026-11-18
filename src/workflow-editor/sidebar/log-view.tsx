@@ -23,6 +23,7 @@ import {
   Flag,
   Info,
   Locate,
+  Play,
   Square,
   TriangleAlert,
   X,
@@ -442,12 +443,15 @@ export function TraceRow({
   debug,
   onInspect,
   onLocate,
+  onContinue,
 }: {
   entry: TraceEntry
   debug: boolean
   onInspect: (vars: Record<string, unknown>) => void
   /** Center the canvas on this row's node; absent outside the editor. */
   onLocate?: (nodeId: string) => void
+  /** Re-run the workflow from this row's node, carrying its variables. */
+  onContinue?: (nodeId: string, vars?: Record<string, unknown>) => void
 }) {
   const style = TYPE_STYLE[entry.type]
   const { bt, t } = useEditorLocale()
@@ -516,6 +520,20 @@ export function TraceRow({
         >
           <Locate size={11} />
           {t('locateNode')}
+        </button>
+      )}
+      {locateId !== undefined && onContinue !== undefined && (
+        <button
+          type="button"
+          className="ml-1 inline-flex shrink-0 items-center gap-1 rounded border border-border bg-accent-soft px-1.5 py-px text-[10px] leading-tight text-accent"
+          title={t('continueFromNode')}
+          onClick={(e) => {
+            e.stopPropagation()
+            onContinue(locateId, entry.vars)
+          }}
+        >
+          <Play size={11} />
+          {t('continueFromNode')}
         </button>
       )}
     </div>

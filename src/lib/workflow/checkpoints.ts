@@ -124,6 +124,34 @@ export function restoreVariables(cp: RunCheckpoint | undefined): Record<string, 
   return cp ? { ...cp.variables } : {}
 }
 
+/**
+ * Full variable bag captured at a specific node of a run — the seed for a
+ * "continue from this log row" run. Unlike the log's bounded display snapshot,
+ * this is the untraced deep clone the engine recorded at the checkpoint, so the
+ * resumed run sees the real data (large CSVs, full objects, dataTable, ...).
+ *
+ * Scans backward for the newest SETTLED checkpoint of that node: a point whose
+ * variable snapshot failed (`snapshotAvailable === false`) or that only reached
+ * an in-flight side-effect phase (`nodeStarted` / `sideEffectStarted`) is not a
+ * bag worth replaying. Failed / cancelled / ok / sideEffectObserved entries all
+ * carry a settled bag. Returns undefined when nothing usable was recorded.
+ *
+ * Pure: no chrome, no fs, no engine.
+ */
+export function variablesAtNode(
+  checkpoints: readonly RunCheckpoint[],
+  nodeId: string,
+): Record<string, unknown> | undefined {
+  for (let i = checkpoints.length - 1; i >= 0; i -= 1) {
+    const cp = checkpoints[i]!
+    if (cp.nodeId !== nodeId) continue
+    if (cp.snapshotAvailable === false) continue
+    if (cp.phase === 'nodeStarted' || cp.phase === 'sideEffectStarted') continue
+    return restoreVariables(cp)
+  }
+  return undefined
+}
+
 /** Where a crashed or interrupted run can pick up again. */
 export interface ResumePoint {
   /** The node to START FROM (the one after the last clean step). */

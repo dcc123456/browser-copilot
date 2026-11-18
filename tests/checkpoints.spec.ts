@@ -6,6 +6,7 @@ import {
   rollbackToLastValid,
   restoreVariables,
   resumePointOf,
+  variablesAtNode,
   type RunCheckpoint,
 } from '../src/lib/workflow/checkpoints'
 import type { Workflow } from '../src/lib/workflow/types'
@@ -315,5 +316,64 @@ describe('phase-aware resume (spec §14)', () => {
     ])
     expect(decision?.kind).toBe('ok')
     expect(decision?.kind === 'ok' && decision.nodeId).toBe('login')
+  })
+})
+
+describe('variablesAtNode (continue-from-log)', () => {
+  const atNode = (
+    stepIndex: number,
+    nodeId: string,
+    variables: Record<string, unknown>,
+    extra: Partial<RunCheckpoint> = {},
+  ): RunCheckpoint => ({
+    ...cp('run-x', stepIndex, 'ok'),
+    nodeId,
+    variables,
+    ...extra,
+  })
+
+  it('returns the full bag recorded at the newest settled checkpoint of that node', () => {
+    const list = [
+      atNode(0, 'a', { token: 'first' }),
+      atNode(1, 'b', { rows: [1, 2, 3] }),
+      atNode(2, 'b', { rows: [1, 2, 3, 4], big: 'x'.repeat(10) }),
+    ]
+    expect(variablesAtNode(list, 'b')).toEqual({ rows: [1, 2, 3, 4], big: 'x'.repeat(10) })
+  })
+
+  it('accepts failed / cancelled / sideEffectObserved entries', () => {
+    expect(variablesAtNode([atNode(0, 'a', { v: 1 }, { status: 'failed' })], 'a')).toEqual({ v: 1 })
+    expect(variablesAtNode([atNode(0, 'a', { v: 2 }, { status: 'cancelled' })], 'a')).toEqual({
+      v: 2,
+    })
+    expect(
+      variablesAtNode([atNode(0, 'a', { v: 3 }, { phase: 'sideEffectObserved' })], 'a'),
+    ).toEqual({ v: 3 })
+  })
+
+  it('skips snapshots that failed to capture', () => {
+    const list = [atNode(0, 'a', { good: true }), atNode(1, 'a', {}, { snapshotAvailable: false })]
+    expect(variablesAtNode(list, 'a')).toEqual({ good: true })
+  })
+
+  it('skips in-flight phases that never committed', () => {
+    const list = [
+      atNode(0, 'a', { settled: true }),
+      atNode(1, 'a', {}, { phase: 'nodeStarted' }),
+      atNode(2, 'a', {}, { phase: 'sideEffectStarted' }),
+    ]
+    expect(variablesAtNode(list, 'a')).toEqual({ settled: true })
+  })
+
+  it('returns undefined when the node has no usable checkpoint', () => {
+    expect(variablesAtNode([atNode(0, 'a', { v: 1 })], 'missing')).toBeUndefined()
+    expect(variablesAtNode([atNode(0, 'a', {}, { snapshotAvailable: false })], 'a')).toBeUndefined()
+  })
+
+  it("returns a copy, not the checkpoint's live bag", () => {
+    const list = [atNode(0, 'a', { v: 1 })]
+    const restored = variablesAtNode(list, 'a')!
+    restored.v = 99
+    expect(list[0]!.variables.v).toBe(1)
   })
 })

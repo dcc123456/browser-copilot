@@ -235,7 +235,7 @@ import {
 } from './workflow-engine/repair/generation-trial'
 import { createDriverConditionProbe } from './workflow-engine/condition-runtime'
 import { readPersistedCheckpoints } from './checkpoint-store'
-import { resumePointOf, workflowFingerprintOf } from '../lib/workflow/checkpoints'
+import { resumePointOf, variablesAtNode, workflowFingerprintOf } from '../lib/workflow/checkpoints'
 import { createAiTakeover } from './workflow-engine/ai-takeover'
 import { runDebugSession, DEFAULT_MAX_ROUNDS } from './workflow-engine/debug-session'
 import { runUnifiedDebug } from './workflow-engine/repair/unified-debug'
@@ -2148,12 +2148,28 @@ async function handleCommand(
       // triggers reach it with graphs that are already known-good, and a newly
       // added rule must not be able to break them.
       const gate = validateWorkflowForRun(workflow)
+      const startAt = (command as { startAt?: string }).startAt
+      // "Continue from a run log row": the display snapshot in `variables` is
+      // bounded, so prefer the FULL bag the engine checkpointed for this node.
+      // Resolve on the background where the checkpoint store lives; fall back
+      // to the caller's snapshot for old runs whose checkpoints were pruned.
+      let seedVariables = command.variables
+      if (startAt && command.sourceRunId) {
+        const inMemory = getCheckpointStore().load(command.sourceRunId)
+        const checkpoints =
+          inMemory.length > 0
+            ? inMemory
+            : await readPersistedCheckpoints(command.sourceRunId).catch(() => [])
+        const restored = variablesAtNode(checkpoints, startAt)
+        if (restored) seedVariables = restored
+      }
       const r = await executeWorkflow(workflow, {
         source: 'manual',
         // The gate's findings ride ON THE RUN: they land in the run log and
         // stop the engine at the first node that cannot work.
         preflight: gate.issues,
-        startAt: (command as { startAt?: string }).startAt,
+        startAt,
+        ...(seedVariables ? { variables: seedVariables } : {}),
         debug: workflow.settings?.debugMode === true,
         ...(command.testing ? { testing: true } : {}),
         // Panel run button: act inside the panel's window (undefined for the

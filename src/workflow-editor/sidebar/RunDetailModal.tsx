@@ -38,6 +38,7 @@ export default function RunDetailModal({
   debug,
   onClose,
   onLocateNode,
+  onContinueFrom,
   t,
 }: {
   run: RunView | null
@@ -45,6 +46,8 @@ export default function RunDetailModal({
   onClose: () => void
   /** Center the canvas on a row's node (editor only). */
   onLocateNode?: (nodeId: string) => void
+  /** Re-run from a row's node with its variables; carries the source run id. */
+  onContinueFrom?: (nodeId: string, runId: string, vars?: Record<string, unknown>) => void
   t: TranslateFn
 }) {
   const [inspectVars, setInspectVars] = useState<Record<string, unknown> | null>(null)
@@ -198,6 +201,11 @@ export default function RunDetailModal({
                     debug={debug}
                     onInspect={setInspectVars}
                     onLocate={onLocateNode}
+                    onContinue={
+                      onContinueFrom && run
+                        ? (nodeId, vars) => onContinueFrom(nodeId, run.runId, vars)
+                        : undefined
+                    }
                   />
                 ))}
               </div>

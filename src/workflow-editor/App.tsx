@@ -956,7 +956,10 @@ export default function EditorApp() {
   )
 
   const handleRun = useCallback(
-    async (startNodeId?: string) => {
+    async (
+      startNodeId?: string,
+      continuation?: { sourceRunId: string; variables?: Record<string, unknown> },
+    ) => {
       if (!workflowId) return
       // Automa refuses a second testing run: two paused runs would compete for
       // one debug bar, and only one of them could be driven.
@@ -1009,6 +1012,12 @@ export default function EditorApp() {
           type: 'workflows.run',
           id: workflowId,
           startAt: startNodeId,
+          ...(continuation
+            ? {
+                sourceRunId: continuation.sourceRunId,
+                ...(continuation.variables ? { variables: continuation.variables } : {}),
+              }
+            : {}),
           ...(windowId !== undefined ? { windowId } : {}),
           ...(testing ? { testing: true } : {}),
           promptToken,
@@ -1017,7 +1026,14 @@ export default function EditorApp() {
           const cert = (r.outcome as { certification?: VerificationReport }).certification
           if (cert) setCertReport(cert)
           if (r.outcome.ok)
-            toast.show(startNodeId ? t('runFromHereFinished') : t('runFinished'), 'ok')
+            toast.show(
+              continuation
+                ? t('continueFromHereFinished')
+                : startNodeId
+                  ? t('runFromHereFinished')
+                  : t('runFinished'),
+              'ok',
+            )
           else if (Object.keys(blockedNodes).length > 0) {
             // The run stopped in front of a block that cannot work. Which block
             // is on the run log (one row per node) and red on the canvas — the
@@ -2159,6 +2175,10 @@ export default function EditorApp() {
           onLocateNode={(nodeId) => {
             setLogsOpen(false)
             locateNode(nodeId)
+          }}
+          onContinueFrom={(nodeId, runId, variables) => {
+            setLogsOpen(false)
+            void handleRun(nodeId, { sourceRunId: runId, ...(variables ? { variables } : {}) })
           }}
           t={t}
         />
