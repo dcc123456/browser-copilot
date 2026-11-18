@@ -69,6 +69,7 @@ import type {
 } from '../../lib/workflow/operator-advise'
 import type { OperatorChatSession } from '../../lib/workflow/operator-chat-sessions'
 import { useEditorLocale } from '../locale-context'
+import ChangeDiffModal from './ChangeDiffModal'
 import { describePickFailure, requestElementPick } from '../blocks/shared/element-pick'
 import type { EditorStringKey, TranslateFn } from '../i18n'
 
@@ -314,11 +315,13 @@ function Landing({
   landing,
   showUndo,
   onUndo,
+  onInspectChanges,
   t,
 }: {
   landing: OperatorLanding
   showUndo: boolean
   onUndo: () => void
+  onInspectChanges?: (changes: readonly OperatorParamChange[]) => void
   t: TranslateFn
 }) {
   if (landing.problem)
@@ -344,6 +347,7 @@ function Landing({
     .map((entry) => `${entry.name}: ${entry.keys.join(', ')}`)
     .join(' | ')
   const pruned = landing.pruned.map((port) => port.label).join(', ')
+  const changed = landing.changed
   return (
     <div className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -370,10 +374,20 @@ function Landing({
           </button>
         )}
       </div>
-      {landing.changed && landing.changed.length > 0 && (
-        <p className="text-[11px] leading-snug text-muted">
-          {t('operatorAiChangedParams')} <span>{changesLine(landing.changed)}</span>
-        </p>
+      {changed && changed.length > 0 && (
+        <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] leading-snug text-muted">
+          <span>{t('operatorAiChangedParams')}</span>
+          <span className="break-all">{changesLine(changed)}</span>
+          {onInspectChanges && (
+            <button
+              className="shrink-0 text-accent underline decoration-dotted underline-offset-2"
+              onClick={() => onInspectChanges(changed)}
+              type="button"
+            >
+              {t('operatorAiViewChanges')}
+            </button>
+          )}
+        </div>
       )}
       {landing.skipped.length > 0 && (
         <p className="text-[11px] leading-snug text-warn">
@@ -488,6 +502,7 @@ export default function OperatorChatDock({
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [atBottom, setAtBottom] = useState(true)
+  const [inspectChanges, setInspectChanges] = useState<readonly OperatorParamChange[] | null>(null)
   // --- Saved chats, scoped to `workflowId` ---
   const [sessions, setSessions] = useState<OperatorChatSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -1309,6 +1324,7 @@ export default function OperatorChatDock({
             {turn.landing && (
               <Landing
                 landing={turn.landing}
+                onInspectChanges={setInspectChanges}
                 onUndo={() => {
                   onUndo()
                   setTurns((current) =>
@@ -1521,6 +1537,12 @@ export default function OperatorChatDock({
           )}
         </div>
       </footer>
+      <ChangeDiffModal
+        changes={inspectChanges}
+        onClose={() => setInspectChanges(null)}
+        open={inspectChanges !== null}
+        t={t}
+      />
     </section>
   )
 }

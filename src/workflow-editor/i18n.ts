@@ -365,6 +365,11 @@ export const EDITOR_STRINGS = {
     operatorAiAdded: 'Added {count} operator(s) to the flow',
     operatorAiChangedInPlace: 'Updated the selected step',
     operatorAiChangedParams: 'Changed:',
+    operatorAiViewChanges: 'View full changes',
+    operatorAiChangesTitle: 'Full changes',
+    operatorAiChangeBefore: 'before',
+    operatorAiChangeAfter: 'after',
+    operatorAiChangesEmpty: 'This answer did not change any parameter.',
     operatorAiSwappedStep: 'Replaced',
     operatorAiNoChange:
       'The answer did not change any parameter, so the step stays as it was. Name the parameter and its new value and ask again.',
@@ -800,6 +805,11 @@ export const EDITOR_STRINGS = {
     operatorAiAdded: '已向流程添加 {count} 个算子',
     operatorAiChangedInPlace: '已更新所选步骤',
     operatorAiChangedParams: '已修改：',
+    operatorAiViewChanges: '查看完整改动',
+    operatorAiChangesTitle: '完整改动',
+    operatorAiChangeBefore: '修改前',
+    operatorAiChangeAfter: '修改后',
+    operatorAiChangesEmpty: '这次回答没有修改任何参数。',
     operatorAiSwappedStep: '已替换：',
     operatorAiNoChange:
       '回答没有改变任何参数，该步骤保持原样；请说明要改哪个参数、改成什么值后再问。',

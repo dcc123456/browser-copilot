@@ -675,6 +675,49 @@ describe('V-operator-dock: the floating assistant', () => {
     expect(container.textContent).toContain('url: "https://a" → "https://b"')
   })
 
+  it('opens a full diff from the changed-params evidence', async () => {
+    const beforeCode =
+      "const output = await page.locator('#a').textContent() // a very long selector that the transcript has to truncate"
+    const afterCode =
+      "const output = await page.locator('#b').textContent() // a very long selector that the transcript has to truncate"
+    reply = okReply(
+      [{ blockId: 'javascript', data: { code: afterCode }, rationale: '' }],
+      '已修改代码',
+      'edit',
+    )
+    landing = {
+      kind: 'node',
+      added: 0,
+      applied: true,
+      skipped: [],
+      pruned: [],
+      missing: [],
+      changed: [{ key: 'code', before: beforeCode, after: afterCode }],
+    }
+    await render()
+    await ask('改选择器')
+
+    expect(container.textContent).toContain('operatorAiViewChanges')
+    expect(container.textContent).not.toContain(beforeCode)
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+
+    await click('operatorAiViewChanges')
+    const dialog = document.body.querySelector('[role="dialog"]')
+    expect(dialog?.textContent).toContain('operatorAiChangesTitle')
+    expect(dialog?.textContent).toContain('code')
+    expect(dialog?.textContent).toContain(beforeCode)
+    expect(dialog?.textContent).toContain(afterCode)
+    expect(dialog?.textContent).toContain('--- operatorAiChangeBefore')
+    expect(dialog?.textContent).toContain('+++ operatorAiChangeAfter')
+    expect(dialog?.textContent).toContain(`-${beforeCode}`)
+    expect(dialog?.textContent).toContain(`+${afterCode}`)
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+  })
+
   it('names both operators when the answer swaps the selected step', async () => {
     reply = okReply([{ blockId: 'event-click', data: {}, rationale: '' }], '换个算子', 'replace')
     landing = {
