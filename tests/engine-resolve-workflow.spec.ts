@@ -8,8 +8,8 @@ import type { Workflow } from '../src/lib/workflow/types'
  * The server's engine injection point: `WorkflowRunOptions.resolveWorkflow`
  * lets a Node runner source `execute-workflow` children from its own store
  * instead of the extension's chrome storage. This spec pins the contract:
- * injection resolves the child, shares variables, and propagates a missing
- * child as a non-fatal engine error line.
+ * injection resolves the child and shares variables. A missing child fails the
+ * parent instead of letting it report a false success with empty variables.
  */
 
 const setVariable: BlockExecutor = async (data, ctx) => {
@@ -22,6 +22,9 @@ const setVariable: BlockExecutor = async (data, ctx) => {
 const executors: Record<string, BlockExecutor> = {
   trigger: async () => null,
   'set-variable': setVariable,
+  fail: async () => {
+    throw new Error('child exploded')
+  },
 }
 
 function linearWorkflow(
@@ -91,8 +94,25 @@ describe('engine resolveWorkflow injection', () => {
       signal: new AbortController().signal,
       executors,
     })
-    expect(result.outcome).toBe('ok') // missing child is logged, not fatal
-    expect(result.steps?.some((s) => s.text.includes('未找到工作流 ghost'))).toBe(true)
+    expect(result.outcome).toBe('failed')
+    expect(result.error).toContain('未找到工作流 ghost')
+  })
+
+  it('fails the parent when the child fails instead of branching on missing data', async () => {
+    const child = linearWorkflow('child-fail', '失败子流程', [{ id: 'fail', blockId: 'fail' }])
+    const parent = linearWorkflow('parent-fail', '父', [
+      { id: 'sub', blockId: 'execute-workflow', data: { values: { workflowId: 'child-fail' } } },
+      { id: 'after', blockId: 'set-variable', data: { variableName: 'after', value: 'wrong' } },
+    ])
+    const result = await runWorkflow(parent, {
+      variables: {},
+      signal: new AbortController().signal,
+      executors,
+      resolveWorkflow: async (id) => (id === 'child-fail' ? child : null),
+    })
+    expect(result.outcome).toBe('failed')
+    expect(result.error).toContain('child exploded')
+    expect(result.variables?.['after']).toBeUndefined()
   })
 
   it('guards recursive references via parentWorkflowIds even with injection', async () => {
@@ -110,9 +130,8 @@ describe('engine resolveWorkflow injection', () => {
       resolveWorkflow: async (wfId) => (wfId === 'self' ? selfRef : null),
       onStep: (_kind, _nodeId, text) => lines.push(text),
     })
-    expect(result.outcome).toBe('ok')
+    expect(result.outcome).toBe('failed')
     expect(lines.some((text) => text.includes('自循环'))).toBe(true)
-    // The flow continued past the blocked recursion (in the nested run).
-    expect(result.variables?.['done']).toBe('yes')
+    expect(result.variables?.['done']).toBeUndefined()
   })
 })

@@ -946,7 +946,8 @@ describe('workflow phase 4 — execute-workflow', () => {
       onStep: (_k, _id, text) => steps.push(text),
       executors: { ...EXECUTORS, after: async () => null },
     })
-    expect(result.outcome).toBe('ok')
+    expect(result.outcome).toBe('failed')
+    expect(result.error).toContain('自循环')
     expect(vi.mocked(getWorkflow)).not.toHaveBeenCalled()
     expect(steps.some((s) => s.includes('自循环'))).toBe(true)
   })

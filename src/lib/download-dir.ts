@@ -25,6 +25,32 @@ import { normalizeDownloadFilePath } from './workflow/download-file-path'
 
 const DIRECTORY_KEY = 'download'
 
+// File System Access writes truncate the destination when createWritable opens.
+// A concurrent reader can therefore observe a valid but empty CSV. Keep one
+// operation queue per directory and make replacement atomic where the browser
+// supports FileSystemFileHandle.move (Chromium does).
+const directoryQueues = new WeakMap<FileSystemDirectoryHandle, Map<string, Promise<unknown>>>()
+
+function queuedDirectoryOperation<T>(
+  dir: FileSystemDirectoryHandle,
+  path: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const queues = directoryQueues.get(dir) ?? new Map<string, Promise<unknown>>()
+  directoryQueues.set(dir, queues)
+  const previous = queues.get(path) ?? Promise.resolve()
+  const result = previous.catch(() => undefined).then(operation)
+  const settled = result.finally(() => {
+    if (queues.get(path) === settled) queues.delete(path)
+  })
+  queues.set(path, settled)
+  return settled
+}
+
+async function waitForDirectoryWrite(dir: FileSystemDirectoryHandle, path: string): Promise<void> {
+  await (directoryQueues.get(dir)?.get(path) ?? Promise.resolve()).catch(() => undefined)
+}
+
 /** 导出保存策略：'auto' 跟随全局开关 + 是否配置目录，'force' 强推自动保存，'manual' 始终由用户确认。 */
 export type SaveMode = 'auto' | 'force' | 'manual'
 
@@ -271,6 +297,7 @@ export async function readDownloadedFileAtPath(
       for (const segment of segments.slice(0, -1)) {
         directory = await directory.getDirectoryHandle(segment, { create: false })
       }
+      await waitForDirectoryWrite(root, relativePath)
       const handle = await directory.getFileHandle(filename, { create: false })
       return { file: await handle.getFile(), source, relativePath }
     } catch {
@@ -290,26 +317,60 @@ export async function readDownloadedFileAtPath(
 }
 
 /**
- * 将一个文件写到下载目录。`create: true` 时若同名文件已存在会被覆盖。
- * `data` 可以是文本或二进制（截图等），底层 `createWritable().write` 两者都收。
- * 返回是否写入成功（如目录句柄无效或权限丢失时返回 `false`）。
- */ export async function writeFileToDownloadDir(
+ * 将一个文件写到下载目录。先写同目录临时文件，完整关闭后再原子替换目标。
+ * 目标在写入期间始终保留旧的完整版本；不支持原子移动的环境才退回直接写。
+ * 同一目录句柄与路径的操作串行，避免工作流并发时读写互相截断。
+ */
+export async function writeFileToDownloadDir(
   dir: FileSystemDirectoryHandle,
   filename: string,
   data: string | BufferSource,
 ): Promise<boolean> {
-  try {
-    const fileHandle = await dir.getFileHandle(filename, { create: true })
-    const writable = await fileHandle.createWritable()
+  const path = normalizeDownloadFilePath(filename)
+  if (!path) return false
+  return queuedDirectoryOperation(dir, path, async () => {
     try {
-      await writable.write(data as FileSystemWriteChunkType)
-    } finally {
-      await writable.close()
+      let directory = dir
+      const segments = path.split('/')
+      for (const segment of segments.slice(0, -1)) {
+        directory = await directory.getDirectoryHandle(segment, { create: true })
+      }
+      const targetName = segments[segments.length - 1]!
+      const fileHandle = await directory.getFileHandle(targetName, { create: true })
+      const temporaryName = `.${targetName}.browser-copilot.tmp`
+      const temporary = await directory.getFileHandle(temporaryName, { create: true })
+      const movable = temporary as FileSystemFileHandle & { move?: (name: string) => Promise<void> }
+      if (typeof movable.move === 'function') {
+        try {
+          const writable = await temporary.createWritable()
+          try {
+            await writable.write(data as FileSystemWriteChunkType)
+          } finally {
+            await writable.close()
+          }
+          await movable.move(targetName)
+        } finally {
+          // move() removes the temporary entry on success; cleanup is only for
+          // a failed write, where the previous target must remain untouched.
+          try {
+            await directory.removeEntry(temporaryName)
+          } catch {
+            // Already replaced, or the browser cannot remove it.
+          }
+        }
+      } else {
+        const writable = await fileHandle.createWritable()
+        try {
+          await writable.write(data as FileSystemWriteChunkType)
+        } finally {
+          await writable.close()
+        }
+      }
+      return true
+    } catch {
+      return false
     }
-    return true
-  } catch {
-    return false
-  }
+  })
 }
 
 /**

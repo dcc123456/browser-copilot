@@ -1782,7 +1782,23 @@ const exportData: BlockExecutor = async (data, ctx) => {
       // never ran or it writes under a different name.
       throw new Error(`export-data: 变量 ${variable} 还没有值，无法导出`)
     }
-    text = format === 'json' ? JSON.stringify(value) : String(value)
+    if (Array.isArray(value) && value.every((row) => row && typeof row === 'object')) {
+      // A variable holding spreadsheet rows is still tabular data. String(value)
+      // destroys every row into `[object Object]`, yielding a file that parses
+      // successfully but contains none of the original fields.
+      if (format !== 'json' && value.length === 0) {
+        throw new Error(`export-data: 变量 ${variable} 是空数组，无法导出 ${format} 表头`)
+      }
+      text = renderTable(
+        value as Record<string, unknown>[],
+        format,
+        delimiter,
+        data['addBOMHeader'] === true,
+      )
+      table = value as Record<string, unknown>[]
+    } else {
+      text = format === 'json' ? JSON.stringify(value) : String(value)
+    }
   } else {
     table = Array.isArray(ctx.variables['dataTable'])
       ? (ctx.variables['dataTable'] as Record<string, unknown>[])

@@ -458,6 +458,8 @@ export interface UnattendedVerificationRequest {
    * user's account; nothing upstream defaults it.
    */
   allowDraftCommit?: boolean
+  /** Bridge-only real execution. Requires the API's explicit confirmation token. */
+  executeAllSteps?: boolean
   /**
    * Values for the inputs the workflow DECLARES (its trigger `parameters`).
    *
@@ -630,6 +632,7 @@ async function replayOnce(
     ...(req.signal ? { signal: req.signal } : {}),
     ...(req.commitCutoffOnly ? { commitCutoffOnly: true } : {}),
     ...(req.allowDraftCommit ? { allowDraftCommit: true } : {}),
+    ...(req.executeAllSteps ? { executeAllSteps: true } : {}),
     ...(req.inputs ? { inputs: req.inputs } : {}),
   })
   const { workflow, record, result } = await trial(stored)

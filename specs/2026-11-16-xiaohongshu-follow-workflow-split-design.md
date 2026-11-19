@@ -255,3 +255,34 @@ trigger(manual)
 5. **未执行 WF-3 互动段**：点赞/收藏/关注/评论是真实、公开、不可回滚的账号操作，生成与试跑都会真做。按安全边界，在用户明确授权"在当前已登录账号上产生真实互动"之前不执行。
 
 **建议调整落地优先级**：① 稳定选择器写法已沉淀为 skill/prompt 模板（最高 ROI，已完成）；② 持久化文件读写统一改 `file-path`（已验证可行，不需要人工）；③ 纯数据段（WF-2/WF-4）改用手工编排或直接构造 JSON，不要再交给无人值守生成器；④ WF-3 取得账号操作授权后单独录制，并先 `maxNotes=1` 小流量试跑。
+
+## CSV 修复与有效版本（2026-11-17）
+
+- 根因：`export-data(dataToExport:'variable')` 曾对对象数组执行 `String(value)`，实际文件变成 `[object Object]`。现对象数组走真实表格序列化，空对象数组导出 CSV 直接失败，避免假成功；回归测试在 `tests/export-data-fields.spec.ts`。
+- 台账字段统一为 `authorId,authorName,authorUrl,noteId,noteTitle,noteUrl,likeCountAtCollection,action,comment,ts`；作者与笔记 URL 不保存查询参数和访问令牌，评论正文独立保存。损坏原文件保留为 `xhs-follow-ledger-corrupt-backup-2026-11-17.csv`。
+- 采集按 `section.note-item` 逐卡片关联字段，不再把单值 `attribute-value` 当整列读取。30 行真实数据已写后逐字段回读；采集 `mwkasazy-do36u0vq`（4/4）。
+- 筛选优先按稳定 `authorId`、作者名辅助判存，同时排除已评论笔记，支持“万”单位；候选 CSV 非空并逐字段回读。筛选 `mwkav7vq-wh3lpvma`（6/6）。
+- 落账按 `noteId + action` 去重，统一上述字段并回读；`mwkayaoz-hnc4og01` 幂等试跑 5/5，通过复用已有记录验证，仍只有两条台账，未新增互动。
+- 互动草稿 `mwkb0een-60mvvq2n` 更新作者 ID 二次核验、`#content-textarea`、评论正文可见后落账；本次未执行真实互动。
+- 总编排 `mwkb1bh6-5byjvq2q` 已串联采集和筛选，数据段真实通过；verify 安全截止在互动前，因此 3/4 是预期验证范围，不是完整互动已执行。旧版本 ID 均不要继续使用。
+- 并发实测又暴露 `createWritable` 先截断目标文件的问题，确实曾把台账写成空文件。`src/lib/download-dir.ts` 已改为临时文件完整写入关闭后原子替换，同一路径的读写排队；`tests/download-dir.spec.ts` 覆盖替换顺序与并发写入，相关 25 项测试通过。
+- 新构建 `6bcaea1bba2e7a95` 重载后，最终有效 ID：采集 `mwkbxxnv-xri7hlgp`（4/4）、筛选 `mwkbyh25-fsrbha2c`（6/6）、落账 `mwkbwnm4-r4rspzh4`（5/5）、总编排 `mwkbzckz-d8gc535i`（安全截止互动前）。落账与总编排并行重跑通过；最终只读验收 `mwkc0bya-npvpr0l8`（4/4）确认台账恰好两条、评论正文正确、采集与候选非空且排除有效。本轮未执行真实互动。
+
+## 假成功、运行清单与工作流恢复（2026-11-17）
+
+- 用户实际运行旧总编排 `mwkbzckz-d8gc535i` 显示成功但没有新数据。根因有两层：`verify_workflow` 的安全截止不能证明互动后的落账已执行；旧引擎还会吞掉缺失/失败的子流程，让父流程在空变量上继续走“无候选”分支并显示成功。
+- `engine.ts` 现在将子流程失败传播为父流程失败。新版重放确实在缺失采集 ID 处明确失败，而不是假成功；`engine-resolve-workflow.spec.ts`、`workflow-phase4.spec.ts` 等 70 项相关测试通过。
+- 工作流存储对照：旧采集 ID 在重载后仍缺失，新保存探针 `mwkcjr7q-ysizwaq7` 重载后 1/1 通过。备用 outbox 超过单项上限时原先静默丢弃并仍报告保存成功，已改为拒绝该次保存并明确提示重连目录；相关持久化 78 项测试通过。
+- 当前有效子流程：采集 `mwkcn7ay-b3rjud80`、筛选 `mwkcnzfn-liqidzrc`。可恢复定义保存在 `.workbuddy-ai/workflows/xhs-*.json`，不再只存在于对话记录。
+- 新总编排 `mwkcoh2n-7dkx0547` 为只读数据链，不再把“有候选”直接连到真实互动。互动与落账必须由用户另行明确确认，避免数据整理误触账号操作。
+- 总编排已两次完整通过 6/6（含扩展重载后），实际生成并回读 `xhs-last-run.csv`，字段 `collectedCount,candidateCount,interactionsAdded,ledgerTotal`。独立验收 `mwkcqc58-yyiyrlfw` 对运行清单、台账、采集、候选四份 CSV 回读并逐字段断言，5/5 通过，数量一致且 `interactionsAdded=0`。
+- 本轮未新增点赞、收藏、关注或评论；运行清单与候选文件是数据落袋，不代表真实账号互动新增。
+
+## 第二次真实互动验收（2026-11-17）
+
+- 新增真实执行入口 `run_workflow`：仅在用户明确授权且 `confirm:"execute-real-workflow"` 时使用 `executeAllSteps:true` 取消安全截止。`verify_workflow` / `repair_workflow` 默认安全截止保持不变。
+- 本次目标为封哥看AI出海（作者 ID `66d5e2c5000000001d023b2e`）的笔记 `6a687ff9000000000f0118d1`《一个人靠批量改图，每月收入接近7000美元》。
+- 实际页面核验通过：点赞为 `like-active` / `liked`，收藏为 `collected`，关注区域显示“已关注”，评论正文已出现：“批量改图这个案例挺有启发，细分需求加自动化确实值得研究。”
+- 过程中真实发现并修复三处页面问题：短 `/explore/` 链接可能跳 404，候选打开应使用卡片原始带 `xsec_token` 的搜索访问 URL（台账仍存干净 URL）；通用作者链接选择器会读取顶栏“我”，必须限定 `.note-container .author-container` / `.note-content`；关注按钮改为 `.note-detail-follow-btn button.follow-button`，确认 `.note-detail-follow-btn` 显示“已关注”。评论发送后增加短暂等待再核验正文。
+- 分阶段执行期间没有把点赞、收藏部分成功冒充完整成功。关注、评论完成并可见后，去重落账 `mwkdw9xu-wg6rf6uu` 完整 5/5 通过，实际新增 `follow`、`comment` 两行；回读对十字段逐行断言，台账总数由 2 增至 4。
+- 运行清单 `mwkdxubj-ccupvpqi` 完整 6/6 通过，`interactionsAdded=2`、`ledgerTotal=4`。可恢复模板 `.workbuddy-ai/workflows/xhs-interact.json` 已更新作者定位和关注选择器。通用单条全流程仍需按本次经验重建并独立验收，当前确认成功的是实际互动和分阶段恢复后的落账闭环。

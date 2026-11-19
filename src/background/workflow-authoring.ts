@@ -13,7 +13,7 @@ import {
   type AuthoredGraphInput,
 } from '../lib/workflow/authored-graph'
 import { validateWorkflowForRun } from '../lib/workflow/validation'
-import { saveWorkflow } from '../lib/workflow/storage'
+import { getWorkflow, saveWorkflow, carryStoredWorkflowFields } from '../lib/workflow/storage'
 import { newId } from '../lib/storage'
 import type { Workflow } from '../lib/workflow/types'
 
@@ -27,15 +27,20 @@ export interface SaveAuthoredWorkflowResult {
   warnings?: string[]
 }
 
+export interface SaveAuthoredWorkflowArgs {
+  workflow?: unknown
+  save?: unknown
+  workflowId?: unknown
+}
+
 /**
  * Validate and persist an authored graph. Blocking findings (bad shape, broken
  * edges, unknown blocks) refuse the write; run-level findings are returned as
  * warnings and never block, matching compose_workflow's save policy.
  */
-export async function saveAuthoredWorkflow(args: {
-  workflow?: unknown
-  save?: unknown
-}): Promise<SaveAuthoredWorkflowResult> {
+export async function saveAuthoredWorkflow(
+  args: SaveAuthoredWorkflowArgs,
+): Promise<SaveAuthoredWorkflowResult> {
   const graph = args.workflow
   if (!graph || typeof graph !== 'object' || Array.isArray(graph)) {
     return { ok: false, error: 'save_workflow needs a `workflow` object.' }
@@ -50,7 +55,15 @@ export async function saveAuthoredWorkflow(args: {
   }
 
   const now = Date.now()
-  const workflow = assembleAuthoredWorkflow(input, { id: newId(), createdAt: now, updatedAt: now })
+  const requestedId = typeof args.workflowId === 'string' ? args.workflowId.trim() : ''
+  const existing = requestedId ? await getWorkflow(requestedId) : undefined
+  const assembled = assembleAuthoredWorkflow(input, {
+    id: existing?.id ?? (requestedId || newId()),
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  })
+  const workflow =
+    assembled && existing ? carryStoredWorkflowFields(assembled, existing) : assembled
   if (!workflow) {
     return { ok: false, error: 'Could not assemble a workflow from the supplied graph.' }
   }

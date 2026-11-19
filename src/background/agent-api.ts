@@ -370,6 +370,7 @@ export async function processAgentRequest(
         if (
           req.tool === 'generate_workflow' ||
           req.tool === 'verify_workflow' ||
+          req.tool === 'run_workflow' ||
           req.tool === 'repair_workflow'
         ) {
           const poll = (args as { conversationId?: unknown }).conversationId
@@ -403,6 +404,29 @@ export async function processAgentRequest(
             }
           }
           const budgetMs = (args as { budgetMs?: unknown }).budgetMs
+          if (req.tool === 'run_workflow') {
+            if (settings.disabledTools.includes('run_workflow')) {
+              return { ok: false, error: 'run_workflow is disabled in Settings → Tools.' }
+            }
+            if (args['confirm'] !== 'execute-real-workflow' && args['confirm'] !== 'run') {
+              return {
+                ok: false,
+                error:
+                  '真实运行需要 confirm:"execute-real-workflow"。该操作会执行点赞、关注、评论、提交等不可撤销步骤；安全重放请用 verify_workflow。',
+              }
+            }
+            return {
+              ok: true,
+              data: startVerificationRun({
+                workflowId,
+                ...(scope ? { scopeWindowId: scope.windowId } : {}),
+                ...(typeof budgetMs === 'number' && budgetMs > 0 ? { budgetMs } : {}),
+                ...closeTabsArg(args),
+                ...inputsArg(args),
+                executeAllSteps: true,
+              }),
+            }
+          }
           const run = {
             workflowId,
             ...(scope ? { scopeWindowId: scope.windowId } : {}),

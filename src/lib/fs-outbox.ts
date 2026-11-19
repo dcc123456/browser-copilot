@@ -161,9 +161,9 @@ async function discardOversizedOutbox(): Promise<boolean> {
  * entry, not many. Serialized on the outbox key itself so two concurrent
  * enqueues cannot drop one another's entry.
  *
- * Bounded: an entry over {@link OUTBOX_ENTRY_BUDGET} is refused (the write
- * stays lost, as it would be with no fallback at all — but parking it would
- * take the whole worker down with it), and past {@link OUTBOX_BUDGET} entries
+ * Bounded: an entry over {@link OUTBOX_ENTRY_BUDGET} is refused with an error
+ * so the caller can never report a successful save that will vanish on reload.
+ * Past {@link OUTBOX_BUDGET} entries
  * are evicted cheapest-first: checkpoints before transcripts before anything
  * structural, oldest within each class. The entry just written is never the
  * victim.
@@ -178,8 +178,10 @@ export async function enqueueOutbox(key: string, value: unknown): Promise<void> 
     return
   }
   if (bytes > OUTBOX_ENTRY_BUDGET) {
-    console.warn(`[fs-outbox] ${key} (${bytes} chars) exceeds the buffer limit; dropped`)
-    return
+    throw new Error(
+      `无法暂存 ${key}（${bytes} 字符），本地目录连接恢复前这次保存不会生效。` +
+        '请先在「设置 → 数据存储」重新连接目录，再重试保存。',
+    )
   }
   await withKeyLock(OUTBOX_KEY, async () => {
     const all = await readOutboxMap()

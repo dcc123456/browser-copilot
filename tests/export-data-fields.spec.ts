@@ -154,6 +154,34 @@ describe('export-data: dataToExport selects the source', () => {
     expect(onlyFile()[1]).toBe('hello')
   })
 
+  it('serializes an array of records as CSV rather than [object Object]', async () => {
+    const { ctx } = makeCtx({ report: ROWS })
+    await exportData(
+      {
+        name: 'r.csv',
+        type: 'csv',
+        dataToExport: 'variable',
+        variableName: 'report',
+        addBOMHeader: true,
+      },
+      ctx,
+    )
+
+    expect(onlyFile()[1]).toBe('\uFEFF标题,热度\na,1\n"b,c",2')
+  })
+
+  it('refuses an empty record array for CSV instead of writing a headerless file', async () => {
+    const { ctx } = makeCtx({ report: [] })
+    await expect(
+      exportData(
+        { name: 'r.csv', type: 'csv', dataToExport: 'variable', variableName: 'report' },
+        ctx,
+      ),
+    ).rejects.toThrow(/report.*空/)
+
+    expect(writtenFiles.size).toBe(0)
+  })
+
   it('refuses variable mode without a variable name instead of exporting the table', async () => {
     const { ctx } = makeCtx()
     await expect(

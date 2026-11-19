@@ -86,7 +86,7 @@ afterEach(() => {
 describe('fs-outbox size budget', () => {
   it('refuses a payload too large to park instead of rewriting the map with it', async () => {
     await enqueueOutbox('cp:run-a', payload(FILLER))
-    await enqueueOutbox('cp:run-b', payload(2_500_000))
+    await expect(enqueueOutbox('cp:run-b', payload(2_500_000))).rejects.toThrow('这次保存不会生效')
 
     expect(await parkedKeys()).toEqual(['cp:run-a'])
     // The refused write is the ONLY loss — the buffer it would have destroyed

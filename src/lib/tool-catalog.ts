@@ -39,6 +39,7 @@ export const BRIDGE_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'save_workflow',
   'generate_workflow',
   'verify_workflow',
+  'run_workflow',
   'repair_workflow',
   'reload_extension',
 ])
@@ -269,6 +270,12 @@ export const TOOL_META: ToolMeta[] = [
   },
   {
     name: 'verify_workflow',
+    category: 'data',
+    labelKey: 'toolOperator',
+    warningKey: 'toolOperatorWarn',
+  },
+  {
+    name: 'run_workflow',
     category: 'data',
     labelKey: 'toolOperator',
     warningKey: 'toolOperatorWarn',

@@ -1056,7 +1056,7 @@ async function runCore(
     }
     if (blockId === 'execute-workflow') {
       markCompleted(nodeId)
-      return runSubWorkflow(current, params, defaultNext)
+      return runSubWorkflow(params, defaultNext)
     }
     // A group holds its children in its own `data.blocks`, so an executor that
     // returns one next-node id cannot express them: the children are registered
@@ -1950,25 +1950,22 @@ async function runCore(
    * top-level catch — it can never break a loop in the parent.
    */
   async function runSubWorkflow(
-    execNode: WorkflowNode,
     params: Record<string, unknown>,
     defaultNext: string | null,
   ): Promise<string | null> {
     const childId = String(params['workflowId'] ?? '')
     if (parentWorkflowIds.has(childId)) {
-      emit('error', execNode.id, `execute-workflow: 检测到工作流自循环 ${childId}`)
-      return defaultNext
+      throw new Error(`execute-workflow: 检测到工作流自循环 ${childId}`)
     }
     const child = resolveWorkflow ? await resolveWorkflow(childId) : await getWorkflow(childId)
     if (!child) {
-      emit('error', execNode.id, `execute-workflow: 未找到工作流 ${childId}`)
-      return defaultNext
+      throw new Error(`execute-workflow: 未找到工作流 ${childId}`)
     }
 
     const childStack = new Set(parentWorkflowIds)
     childStack.add(childId)
     onSubWorkflow?.('enter', childId)
-    await runCore(child, {
+    const childResult = await runCore(child, {
       variables,
       signal: signalToUse,
       scope: runScope,
@@ -1995,6 +1992,15 @@ async function runCore(
       onStep: onStep ? (kind, nodeId, text) => onStep(kind, nodeId, `[子] ${text}`) : undefined,
     })
     onSubWorkflow?.('exit', childId)
+    // A parent that keeps walking after a failed child can branch on stale or
+    // missing variables and still report success — e.g. "no candidates" when
+    // collection never ran. Child failure is the parent's failure unless the
+    // graph explicitly uses an error-handling branch around this node.
+    if (childResult.outcome !== 'ok') {
+      throw new Error(
+        `execute-workflow: 子工作流 ${childId} 失败: ${childResult.error ?? childResult.summary}`,
+      )
+    }
     return defaultNext
   }
 

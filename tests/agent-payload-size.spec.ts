@@ -122,8 +122,10 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 14_400
  * Raised 34_050 → 34_650 for the bridge-only save_workflow schema (measured
  * 34_629). It is not advertised to agent conversations, so this does not grow
  * any per-turn payload; the core-surface assertions above still pin that cost.
+ * Raised 34_650 → 35_700 for the bridge-only explicitly-confirmed run_workflow
+ * schema; like save_workflow it is not advertised inside agent turns.
  */
-const MAX_CATALOG_CHARS = 34_650
+const MAX_CATALOG_CHARS = 35_700
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the

@@ -6,9 +6,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const saveWorkflow = vi.fn().mockResolvedValue(undefined)
+const getWorkflow = vi.fn().mockResolvedValue(undefined)
+const carryStoredWorkflowFields = vi.fn((...updates: unknown[]) => updates[0])
 vi.mock('../src/lib/storage', () => ({ newId: () => 'w-new' }))
 vi.mock('../src/lib/workflow/storage', () => ({
   saveWorkflow: (...args: unknown[]) => saveWorkflow(...args),
+  getWorkflow: (...args: unknown[]) => getWorkflow(...args),
+  carryStoredWorkflowFields: (...args: unknown[]) => carryStoredWorkflowFields(...args),
 }))
 
 import { saveAuthoredWorkflow } from '../src/background/workflow-authoring'
@@ -38,7 +42,11 @@ const graph = {
   ],
 }
 
-beforeEach(() => saveWorkflow.mockReset().mockResolvedValue(undefined))
+beforeEach(() => {
+  saveWorkflow.mockReset().mockResolvedValue(undefined)
+  getWorkflow.mockReset().mockResolvedValue(undefined)
+  carryStoredWorkflowFields.mockClear()
+})
 
 describe('saveAuthoredWorkflow', () => {
   it('persists a valid graph and returns its id', async () => {
@@ -83,5 +91,19 @@ describe('saveAuthoredWorkflow', () => {
   it('rejects a missing workflow object', async () => {
     expect((await saveAuthoredWorkflow({})).ok).toBe(false)
     expect(saveWorkflow).not.toHaveBeenCalled()
+  })
+
+  it('updates an existing id in place and preserves its creation time', async () => {
+    getWorkflow.mockResolvedValue({ id: 'w-existing', name: 'Old', createdAt: 123 })
+    const out = await saveAuthoredWorkflow({ workflow: graph, workflowId: 'w-existing' })
+    expect(out).toMatchObject({ ok: true, workflowId: 'w-existing' })
+    expect(saveWorkflow.mock.calls[0]![0]).toMatchObject({ id: 'w-existing', createdAt: 123 })
+    expect(carryStoredWorkflowFields).toHaveBeenCalledTimes(1)
+  })
+
+  it('restores a missing record under the requested id', async () => {
+    const out = await saveAuthoredWorkflow({ workflow: graph, workflowId: 'w-missing' })
+    expect(out).toMatchObject({ ok: true, workflowId: 'w-missing' })
+    expect(saveWorkflow.mock.calls[0]![0]).toMatchObject({ id: 'w-missing' })
   })
 })

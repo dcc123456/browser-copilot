@@ -102,6 +102,8 @@ export interface GenerationTrialDeps {
    * stops the run — the line the caller cannot cross on the user's behalf.
    */
   allowDraftCommit?: boolean
+  /** Execute the whole graph after explicit authorization at the bridge boundary. */
+  executeAllSteps?: boolean
 }
 
 /**
@@ -143,11 +145,13 @@ export async function runGenerationTrial(
     return { workflow, record: skippedTrialRecord('disabled by settings', at) }
   }
   const totalSteps = executionPath(workflow).length
-  const cutoffNodeId = deps.allowDraftCommit
-    ? draftCommitCutoffNodeId(workflow)
-    : deps.commitCutoffOnly
-      ? commitCutoffNodeId(workflow)
-      : trialCutoffNodeId(workflow)
+  const cutoffNodeId = deps.executeAllSteps
+    ? undefined
+    : deps.allowDraftCommit
+      ? draftCommitCutoffNodeId(workflow)
+      : deps.commitCutoffOnly
+        ? commitCutoffNodeId(workflow)
+        : trialCutoffNodeId(workflow)
   if (trialHasNothingToProve(workflow, cutoffNodeId ?? null)) {
     return {
       workflow,
@@ -317,6 +321,8 @@ export function createTrialRunner(deps: {
   commitCutoffOnly?: boolean
   /** See {@link GenerationTrialDeps.allowDraftCommit}. */
   allowDraftCommit?: boolean
+  /** Explicit caller authorization for the real graph, with no safety cutoff. */
+  executeAllSteps?: boolean
   /** See {@link GenerationTrialDeps.inputs}. */
   inputs?: Record<string, unknown>
 }): TrialRunner {
@@ -331,6 +337,7 @@ export function createTrialRunner(deps: {
       ...(deps.signal ? { signal: deps.signal } : {}),
       ...(deps.commitCutoffOnly ? { commitCutoffOnly: true } : {}),
       ...(deps.allowDraftCommit ? { allowDraftCommit: true, commitCutoffOnly: true } : {}),
+      ...(deps.executeAllSteps ? { executeAllSteps: true } : {}),
       ...(deps.inputs ? { inputs: deps.inputs } : {}),
     })
 }

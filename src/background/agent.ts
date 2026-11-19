@@ -1449,6 +1449,10 @@ export const TOOLS: WireTool[] = [
             type: 'boolean',
             description: 'Default true; false validates without saving.',
           },
+          workflowId: {
+            type: 'string',
+            description: 'Optional existing id to update in place; omit to create a new workflow.',
+          },
         },
         required: ['workflow'],
       },
@@ -1558,6 +1562,26 @@ export const TOOLS: WireTool[] = [
               '{{topic}} 引用会报 UNRESOLVED_INPUT。',
           },
         },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_workflow',
+      description:
+        'Execute a saved workflow for real, without the verification safety cutoff. Requires {workflowId,confirm:"execute-real-workflow"} after explicit user authorization. Poll with conversationId. / 真实执行已保存工作流，无安全截止；须获得用户明确授权后传入指定确认文本。',
+      parameters: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string' },
+          confirm: { type: 'string', description: 'Literal execute-real-workflow.' },
+          conversationId: { type: 'string' },
+          budgetMs: { type: 'number' },
+          closeTabsAtEnd: { type: 'boolean' },
+          inputs: { type: 'object' },
+        },
+        required: ['workflowId', 'confirm'],
       },
     },
   },
@@ -4861,6 +4885,7 @@ export async function executeTool(
       const out = await saveAuthoredWorkflow({
         workflow: args.workflow,
         save: args.save,
+        workflowId: args.workflowId,
       })
       return JSON.stringify(out)
     }

@@ -469,6 +469,22 @@ describe('commit cutoff (the run-to-draft policy)', () => {
     expect(draftCommitCutoffNodeId(chain([typing, declared]))).toBe(declared.id)
   })
 
+  it('runs every step only under the explicit real-execution option', async () => {
+    const submit = unsafeStep()
+    const wf = chain([readStep(), submit])
+    const execute = vi.fn(async () =>
+      resultOf({ completedNodeIds: wf.drawflow.nodes.slice(1).map((n) => n.id) }),
+    )
+
+    const out = await runGenerationTrial(wf, { execute, executeAllSteps: true })
+
+    expect(execute).toHaveBeenCalledWith(
+      wf,
+      expect.not.objectContaining({ stopBefore: expect.anything() }),
+    )
+    expect(out.record).toMatchObject({ outcome: 'passed', full: true, coveredSteps: 2 })
+  })
+
   it('runs a script that only reads the page, the way get-text does', () => {
     // Round 20's cutoff: a diagnostic step that reported each candidate tab's tag,
     // class, rect and visibility so the NEXT step could pick a locator. It writes
