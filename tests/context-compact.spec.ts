@@ -173,6 +173,28 @@ describe('compactHistory', () => {
     )
   })
 
+  it('treats an agent note as reclaimable, not as a user turn boundary', async () => {
+    const history: WireMessage[] = [
+      { role: 'user', content: 'one' },
+      { role: 'assistant', content: 'answer one' },
+      { role: 'user', content: 'two' },
+      { role: 'assistant', content: 'answer two' },
+      { role: 'user', content: '[[agent-note]]\n[no progress detected]' },
+      { role: 'assistant', content: 'answer note' },
+      { role: 'user', content: 'three' },
+    ]
+    await compactHistory(history, opts({ keepRecentTurns: 1, summarize: async () => 'S' }))
+    // The note is gone (folded into the summary), and it did not add a segment
+    // that keepRecentTurns would preserve forever.
+    expect(
+      history.some(
+        (message) =>
+          message.role === 'user' && String(message.content).startsWith('[[agent-note]]'),
+      ),
+    ).toBe(false)
+    expect(history.some((message) => message.content === 'one')).toBe(true)
+  })
+
   it('falls back to a mechanical digest when the summarizer fails', async () => {
     const history = seeded()
     const outcome = await compactHistory(

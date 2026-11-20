@@ -124,6 +124,7 @@ import {
   REPEAT_FAILURE_LIMIT,
   toolOutputSucceeded,
 } from '../lib/tool-error'
+import { wrapAgentNote } from '../lib/agent-note'
 import {
   emptyProgressState,
   evaluateProgress,
@@ -6459,10 +6460,11 @@ async function observeProgress(
     })
     history.push({
       role: 'user',
-      content:
+      content: wrapAgentNote(
         '[The page state has been unreadable for several actions, so progress cannot be judged. ' +
-        'Do not call more page tools. Tell the user what is blocking you (URL, what you tried, ' +
-        'what they should do) and stop.]',
+          'Do not call more page tools. Tell the user what is blocking you (URL, what you tried, ' +
+          'what they should do) and stop.]',
+      ),
       displayContent: '',
     })
     return
@@ -6471,7 +6473,7 @@ async function observeProgress(
     if (evaluation.action === 'block') ctx.progressBlocked = fingerprintOf(name, args)
     history.push({
       role: 'user',
-      content: progressReminderText(evaluation.state.unchanged),
+      content: wrapAgentNote(progressReminderText(evaluation.state.unchanged)),
       displayContent: '',
     })
     deps.send({

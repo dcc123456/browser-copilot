@@ -1,3 +1,4 @@
+import { isAgentNoteText } from './agent-note'
 import type { WireMessage, WireToolCall } from './llm'
 
 /**
@@ -302,6 +303,9 @@ export async function compactHistory(
     const entry = history[i]
     if (entry?.role !== 'user') continue
     if (typeof entry.content === 'string' && isCompactionSummaryText(entry.content)) continue
+    // Agent notes are not turns either: they must not pin a fake user turn that
+    // keepRecentTurns then preserves forever.
+    if (typeof entry.content === 'string' && isAgentNoteText(entry.content)) continue
     starts.push(i)
   }
   const segments: Array<[number, number]> = []
@@ -328,7 +332,11 @@ export async function compactHistory(
         entry.role === 'user' &&
         typeof entry.content === 'string' &&
         isCompactionSummaryText(entry.content)
-      if (entry.role !== 'user' || isOldSummary) removable.push(i)
+      // A progress reminder is agent-generated; keeping it would grow the
+      // transcript one fake user turn per warning, so it is reclaimed too.
+      const isAgentNote =
+        entry.role === 'user' && typeof entry.content === 'string' && isAgentNoteText(entry.content)
+      if (entry.role !== 'user' || isOldSummary || isAgentNote) removable.push(i)
     }
   }
   removable.sort((left, right) => left - right)

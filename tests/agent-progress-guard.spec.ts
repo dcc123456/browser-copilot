@@ -6,6 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { runAgentTurn } from '../src/background/agent'
+import { toHistoryMessages } from '../src/background/restore'
 import type { AgentServerMessage } from '../src/lib/messages'
 import { streamCompletion } from '../src/lib/llm'
 import type { StreamResult } from '../src/lib/llm'
@@ -139,6 +140,19 @@ describe('no-progress guard in the loop', () => {
     // Seven clicks executed (threshold 3 warns, 6 blocks the NEXT repeat).
     expect(clickCount).toBe(7)
     expect(statuses.some((text) => text.includes('No progress detected'))).toBe(true)
+    // The reminder is identifiable in the stored transcript and never enters
+    // the history panel as something the user said.
+    expect(
+      history.some(
+        (message) =>
+          message.role === 'user' && String(message.content).startsWith('[[agent-note]]'),
+      ),
+    ).toBe(true)
+    expect(
+      toHistoryMessages(history as never).some((message) =>
+        message.text.startsWith('[[agent-note]]'),
+      ),
+    ).toBe(false)
     expect(
       history.some(
         (message) =>

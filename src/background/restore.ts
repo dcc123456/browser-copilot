@@ -9,6 +9,7 @@
  */
 
 import type { AttachmentSummary } from '../lib/attachments'
+import { isAgentNoteText } from '../lib/agent-note'
 import { isCompactionSummaryText } from '../lib/context-compact'
 import { toAttachmentSummaries } from '../lib/attachments'
 import type { WireMessage } from '../lib/llm'
@@ -115,7 +116,7 @@ export function toRestoreMessages(
       if (
         entry.role === 'user' &&
         typeof entry.content === 'string' &&
-        isCompactionSummaryText(entry.content)
+        (isCompactionSummaryText(entry.content) || isAgentNoteText(entry.content))
       ) {
         return false
       }
