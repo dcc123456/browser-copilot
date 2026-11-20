@@ -157,6 +157,11 @@ export function evaluateProgress(
   }
 }
 
+/** Whether a tool's own effect is exempt from the progress judge. */
+export function isWaitClassTool(name: string): boolean {
+  return WAIT_CLASS_TOOLS.has(name)
+}
+
 /** The model-facing reminder injected after a stagnation threshold. */
 export function progressReminderText(rounds: number): string {
   return (

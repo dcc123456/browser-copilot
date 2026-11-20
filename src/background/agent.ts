@@ -125,6 +125,13 @@ import {
   toolOutputSucceeded,
 } from '../lib/tool-error'
 import {
+  emptyProgressState,
+  evaluateProgress,
+  isWaitClassTool,
+  progressReminderText,
+  type ProgressState,
+} from '../lib/progress-signal'
+import {
   appendProgressStep,
   beginTask,
   emptyTaskProgress,
@@ -2786,6 +2793,12 @@ export interface ToolContext {
    * say what is done instead of re-exploring it.
    */
   taskProgress?: TaskProgress
+  /** Result-based progress judge state for this turn (spec R1). */
+  progress?: ProgressState
+  /** Fingerprint of the identical call a stagnation block refused. */
+  progressBlocked?: string
+  /** Set once the page stopped reporting a signature: every page action is refused. */
+  progressBlocker?: boolean
 }
 
 /**
@@ -5835,6 +5848,7 @@ export async function runAgentTurn(
     ...(enabledSkills ? { enabledSkills } : {}),
     failureStreaks: new Map(),
     taskProgress,
+    progress: emptyProgressState(),
     ...(delegation ? { delegation } : {}),
     ...(deps.subAgent ? { subAgent: deps.subAgent } : {}),
     ...(toolAllowSet ? { toolAllowSet } : {}),
@@ -6365,6 +6379,8 @@ function auditOf(
  */
 async function recordTaskStep(
   ctx: ToolContext,
+  deps: AgentDeps,
+  history: WireMessage[],
   name: string,
   args: Record<string, unknown>,
   summary: string,
@@ -6390,6 +6406,82 @@ async function recordTaskStep(
   }
   ctx.taskProgress = next
   await saveTaskProgress(next)
+  await observeProgress(ctx, deps, history, name, args, ok)
+}
+
+/**
+ * Samples the page's result signature after an executed action and folds it
+ * into the no-progress judge (spec R1).
+ *
+ * The signature is read from the page, never inferred from the call: a click
+ * that "succeeded" without changing anything is exactly what the judge exists
+ * to catch. A failed read becomes `null`, which the judge escalates after a
+ * few rounds instead of silently treating it as progress.
+ */
+async function observeProgress(
+  ctx: ToolContext,
+  deps: AgentDeps,
+  history: WireMessage[],
+  name: string,
+  args: Record<string, unknown>,
+  ok: boolean,
+): Promise<void> {
+  const state = ctx.progress
+  if (!state) return
+  let signature: string | null = state.signature
+  if (!isWaitClassTool(name)) {
+    try {
+      const result = await execOnActiveTab(
+        { action: 'progress_signature' },
+        deps.signal,
+        undefined,
+        ctx.scope,
+      )
+      signature = result.ok && typeof result.data === 'string' ? result.data : null
+    } catch {
+      signature = null
+    }
+  }
+  const evaluation = evaluateProgress(state, {
+    tool: name,
+    callKey: fingerprintOf(name, args),
+    ok,
+    signature,
+  })
+  ctx.progress = evaluation.state
+  if (evaluation.action === 'blocker') {
+    ctx.progressBlocker = true
+    deps.send({
+      type: 'status',
+      text:
+        'The page state can no longer be read, so progress cannot be judged. ' +
+        'Stopping the page actions — the model must report what is blocking it.',
+    })
+    history.push({
+      role: 'user',
+      content:
+        '[The page state has been unreadable for several actions, so progress cannot be judged. ' +
+        'Do not call more page tools. Tell the user what is blocking you (URL, what you tried, ' +
+        'what they should do) and stop.]',
+      displayContent: '',
+    })
+    return
+  }
+  if (evaluation.action === 'remind' || evaluation.action === 'block') {
+    if (evaluation.action === 'block') ctx.progressBlocked = fingerprintOf(name, args)
+    history.push({
+      role: 'user',
+      content: progressReminderText(evaluation.state.unchanged),
+      displayContent: '',
+    })
+    deps.send({
+      type: 'status',
+      text:
+        evaluation.action === 'block'
+          ? 'No progress detected — the repeated call will be refused until the approach changes.'
+          : 'No progress detected — asking the model to change approach.',
+    })
+  }
 }
 
 /**
@@ -6462,6 +6554,37 @@ async function runOneToolCall(
   // selectorFromArgs) builds replayable selectors from `args.target`. Persist
   // the resolved durable target so a ref-only call does not lose the locator.
   args = hydrateRecordArgs(ctx, args)
+
+  // Progress gates (spec R1): an explicit blocker refuses every page action,
+  // and a stagnation block refuses only the identical call — a different
+  // action is exactly the response we want.
+  if (ctx.progressBlocker && isPageAction(name)) {
+    pushResult(
+      JSON.stringify({
+        error:
+          'The page state cannot be read, so progress cannot be judged. Do not call page tools; ' +
+          'report the blocker (URL, what you tried, what the user should do) and stop.',
+        errorType: 'PERMISSION',
+      }),
+    )
+    sendToolResult({ type: 'tool.result', name, summary: 'Blocked (page state unreadable)' })
+    return
+  }
+  if (ctx.progressBlocked) {
+    if (ctx.progressBlocked === fingerprintOf(name, args)) {
+      pushResult(
+        JSON.stringify({
+          error:
+            'This exact call already ran several times with no page/state change, so it is blocked. ' +
+            'Take a fresh snapshot, change the parameters or the tool, or stop and report where you are stuck.',
+          errorType: 'UNKNOWN',
+        }),
+      )
+      sendToolResult({ type: 'tool.result', name, summary: 'Blocked (no progress, same call)' })
+      return
+    }
+    ctx.progressBlocked = undefined
+  }
 
   // Emitted here, not at stream time: the arguments are only fully assembled
   // (refs resolved) in this function, and a human-readable intent is what makes
@@ -7137,7 +7260,15 @@ async function runOneToolCall(
       describeDetail(audit.name, audit.args, ctx.snapshotTargets, output),
       audit.args,
     )
-    await recordTaskStep(ctx, name, args, describeAction(name, args, ctx.snapshotTargets), ok)
+    await recordTaskStep(
+      ctx,
+      deps,
+      history,
+      name,
+      args,
+      describeAction(name, args, ctx.snapshotTargets),
+      ok,
+    )
   } catch (error) {
     // A termination must unwind the whole turn, not be recorded as a failed
     // tool step — otherwise the loop keeps going after the user cancelled.
@@ -7162,7 +7293,15 @@ async function runOneToolCall(
       [...describeDetail(audit.name, audit.args, ctx.snapshotTargets), `Error: ${message}`],
       audit.args,
     )
-    await recordTaskStep(ctx, name, args, describeAction(name, args, ctx.snapshotTargets), false)
+    await recordTaskStep(
+      ctx,
+      deps,
+      history,
+      name,
+      args,
+      describeAction(name, args, ctx.snapshotTargets),
+      false,
+    )
   }
 }
 

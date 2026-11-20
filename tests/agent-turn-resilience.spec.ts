@@ -102,8 +102,13 @@ describe('repeated unchangeable failures', () => {
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
     await runAgentTurn(history as never, deps() as never)
 
-    // The fourth call is refused before the driver runs.
-    expect(execOnActiveTabMock).toHaveBeenCalledTimes(3)
+    // The fourth call is refused before the driver runs. Count CLICKS only:
+    // the loop also samples `progress_signature`, a read-only probe.
+    expect(
+      execOnActiveTabMock.mock.calls.filter(
+        (call) => (call[0] as { action?: string }).action === 'click',
+      ),
+    ).toHaveLength(3)
     const results = toolContents(history)
     expect(results).toHaveLength(4)
     expect(results[3]).toMatch(/retrying cannot change/)
@@ -128,7 +133,11 @@ describe('repeated unchangeable failures', () => {
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
     await runAgentTurn(history as never, deps() as never)
 
-    expect(execOnActiveTabMock).toHaveBeenCalledTimes(4)
+    expect(
+      execOnActiveTabMock.mock.calls.filter(
+        (call) => (call[0] as { action?: string }).action === 'click',
+      ),
+    ).toHaveLength(4)
     expect(toolContents(history).join(' ')).not.toMatch(/retrying cannot change/)
   })
 })
