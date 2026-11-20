@@ -2991,8 +2991,9 @@ export function retireOldPageReads(
       const parsed = JSON.parse(content) as { url?: string; title?: string }
       url = parsed.url ?? ''
     } catch {
-      /* not JSON — leave it */
-      continue
+      // A page read the emergency hard cap already shortened is no longer valid
+      // JSON. It is still a page read, so it must still be retired; leaving it
+      // raw is what let truncated reads accumulate after every cap.
     }
     projected[i] = {
       ...msg,

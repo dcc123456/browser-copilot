@@ -58,6 +58,25 @@ describe('retireOldPageReads', () => {
     }
   })
 
+  it('retires a page read whose body the emergency hard cap already shortened', () => {
+    // After a hard cap the content ends with `…[truncated]` and no longer
+    // parses as JSON. It is still a page read, and leaving it raw is what let
+    // truncated reads accumulate after every cap.
+    const history: WireMessage[] = [
+      {
+        role: 'tool',
+        tool_call_id: 'a',
+        name: 'read_current_page',
+        content: `{"url":"https://example.com","text":"${'X'.repeat(2_000)}\u2026[truncated]`,
+      },
+      readTool('b', 'LATEST PAGE'),
+    ]
+    const projected = retireOldPageReads(history, false)
+    expect(String(projected[0]!.content)).toContain('"retired":true')
+    // The transcript keeps the truncated (never the original) text.
+    expect(String(history[0]!.content)).toContain('\u2026[truncated]')
+  })
+
   it('is idempotent and never grows the transcript', () => {
     const history: WireMessage[] = [readTool('a', 'X'.repeat(10_000))]
     const projected = retireOldPageReads(history, true)
