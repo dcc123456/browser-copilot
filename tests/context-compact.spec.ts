@@ -4,6 +4,7 @@ import {
   COMPACT_THRESHOLD_TOKENS,
   compactHistory,
   compactThresholdFor,
+  projectCompaction,
   shouldCompact,
   type CompactOptions,
 } from '../src/lib/context-compact'
@@ -76,6 +77,20 @@ describe('shouldCompact', () => {
     expect(compactThresholdFor(0)).toBe(COMPACT_THRESHOLD_TOKENS)
     expect(compactThresholdFor(900)).toBe(COMPACT_THRESHOLD_TOKENS)
     expect(compactThresholdFor(Number.NaN)).toBe(COMPACT_THRESHOLD_TOKENS)
+  })
+})
+
+describe('projectCompaction', () => {
+  it('builds the request projection without touching the stored history', async () => {
+    const history = seeded()
+    const snapshot = JSON.parse(JSON.stringify(history)) as WireMessage[]
+    const projected = await projectCompaction(history, opts({ summarize: async () => 'S' }))
+    expect(projected?.removed).toBe(2)
+    expect(projected?.messages.some((m) => m.role === 'user' && m.content === `${MARKER}\nS`)).toBe(
+      true,
+    )
+    // The transcript that gets persisted keeps every original message.
+    expect(history).toEqual(snapshot)
   })
 })
 

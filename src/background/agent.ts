@@ -38,7 +38,8 @@ import {
   compactHistory,
   compactThresholdFor,
   estimateInputTokens,
-  hardCapHistory,
+  projectCompaction,
+  projectHardCap,
   shouldCompact,
   type CompactOutcome,
 } from '../lib/context-compact'
@@ -111,7 +112,7 @@ import {
 import { inspectImage, preprocessImage, recognizeImage, resolveVisionTarget } from '../lib/vision'
 import { evaluateArithmetic } from '../lib/ocr-candidates'
 import { fetchImageAsDataUrl } from '../lib/fetch-image'
-import { assessActionRisk, type RiskTargetInfo } from '../lib/action-risk'
+import { assessActionRisk, isIrreversibleCall, type RiskTargetInfo } from '../lib/action-risk'
 import { DEFAULT_SYSTEM_PROMPT } from '../lib/system-prompt'
 import {
   buildToolErrorContext,
@@ -128,9 +129,9 @@ import {
   beginTask,
   emptyTaskProgress,
   fingerprintOf,
-  isIrreversibleReason,
   noteDestructiveOp,
   renderResumeNote,
+  type DestructiveOperation,
   type TaskProgress,
 } from '../lib/task-progress'
 import {
@@ -5781,6 +5782,10 @@ export async function runAgentTurn(
   // compactable turn, so repeated triggers in one stretch would only burn
   // summarizer calls on an unchanged history.
   let compactedThisTurn = false
+  // A successful compaction must affect every later request this turn, not
+  // only the one that triggered it. Keep the projected snapshot plus the
+  // history index it was taken at; later rounds append what arrived after.
+  let compactedView: { messages: WireMessage[]; fromIndex: number } | null = null
   // One reactive compaction+retry per turn: when the provider itself returns
   // an input-length 400 (the estimate missed — non-reporting endpoint or a
   // different real window), aggressively compact to the provider's reported
@@ -6031,6 +6036,11 @@ export async function runAgentTurn(
     // it reflects the transcript this round actually sends — never written back.
     const retireAll = ctx.navigated
     ctx.navigated = false
+    // What this request sends. Compaction and retirement only ever project into
+    // this variable; `history` (and therefore storage) keeps the original text.
+    let requestHistory: WireMessage[] = compactedView
+      ? [...compactedView.messages, ...history.slice(compactedView.fromIndex)]
+      : history
 
     // Context compaction: when the last request's prompt_tokens reached 90% of
     // the model's window, replace older turns with an LLM summary before this
@@ -6051,11 +6061,15 @@ export async function runAgentTurn(
       shouldCompact(lastKnownInputTokens(deps.conversationId), contextWindow)
     ) {
       compactedThisTurn = true
-      deps.send({ type: 'status', text: compactionText.status })
-      await compactHistory(history, {
+      const projected = await projectCompaction(history, {
         marker: compactionText.marker,
         summarize: (transcript) => summarizeTranscript(summarizerConfig, transcript),
       })
+      if (projected) {
+        compactedView = { messages: projected.messages, fromIndex: history.length }
+        requestHistory = projected.messages
+        deps.send({ type: 'status', text: compactionText.status })
+      }
     }
 
     // Recomputed per round: a `load_tools` or `use_operators` call in this turn
@@ -6089,31 +6103,33 @@ export async function runAgentTurn(
     // conversation's window; the emergency hard cap is the backstop.
     if (!deps.subAgent) {
       const requestTokens = (): number =>
-        estimateInputTokens([{ role: 'system', content: systemPrompt }, ...history], {
+        estimateInputTokens([{ role: 'system', content: systemPrompt }, ...requestHistory], {
           text: JSON.stringify(tools ?? []),
         })
       if (requestTokens() >= compactThreshold && !compactedThisTurn) {
         compactedThisTurn = true
-        deps.send({ type: 'status', text: compactionText.status })
-        await compactHistory(history, {
+        const projected = await projectCompaction(history, {
           marker: compactionText.marker,
           summarize: (transcript) => summarizeTranscript(summarizerConfig, transcript),
         })
+        if (projected) {
+          compactedView = { messages: projected.messages, fromIndex: history.length }
+          requestHistory = projected.messages
+          deps.send({ type: 'status', text: compactionText.status })
+        }
       }
-      // Final backstop regardless of the turn flag: if the estimate still
-      // crosses the threshold (compaction returned null or was not enough),
-      // truncate message content in place so the request physically fits.
+      // Final backstop regardless of the turn flag: if the projection still
+      // crosses the threshold, truncate ITS content so the request fits. The
+      // stored transcript keeps the full text either way.
       if (requestTokens() >= compactThreshold) {
-        hardCapHistory(history, compactThreshold - 4_096)
+        requestHistory = projectHardCap(requestHistory, compactThreshold - 4_096).messages
       }
     }
 
-    // Built from the history the guards above may have just rewritten: compacting
-    // an array that had already been copied into the request would summarize the
-    // transcript and then send it anyway. Retirement is a projection of this
-    // request only; `history` (and therefore storage) keeps the original reads.
-    const requestHistory = retireOldPageReads(history, retireAll)
-    const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...requestHistory]
+    // Two projections, one request: compaction (older turns summarized) then
+    // page-read retirement. Neither writes back, so storage keeps the originals.
+    const outgoingHistory = retireOldPageReads(requestHistory, retireAll)
+    const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...outgoingHistory]
 
     let result: StreamResult
     let replyText: string
@@ -6138,15 +6154,19 @@ export async function runAgentTurn(
         // measured against the window the provider just stated, so the request
         // that 400s here is the last one that has to.
         rememberContextWindow(deps.conversationId, providerLimit)
-        deps.send({ type: 'status', text: compactionText.status })
-        await compactHistory(history, {
+        const projected = await projectCompaction(history, {
           marker: compactionText.marker,
           keepRecentTurns: 1,
           summarize: (transcript) => summarizeTranscript(summarizerConfig, transcript),
         })
+        if (projected) {
+          compactedView = { messages: projected.messages, fromIndex: history.length }
+          requestHistory = projected.messages
+          deps.send({ type: 'status', text: compactionText.status })
+        }
         // Leave headroom (80%) for the system prompt, schemas and the answer.
         const budget = Math.floor(providerLimit * 0.8)
-        hardCapHistory(history, budget - 4_096)
+        requestHistory = projectHardCap(requestHistory, budget - 4_096).messages
         recordLastInputTokens(deps.conversationId, budget)
         continue
       }
@@ -6357,20 +6377,39 @@ async function recordTaskStep(
     ok,
     ...(ctx.lastUrl ? { url: ctx.lastUrl } : {}),
   })
-  if (ok) {
-    const risk = assessActionRisk(name, args, (stepArgs) =>
-      riskTargetOf(stepArgs, ctx.snapshotTargets),
-    )
-    if (risk.risky && risk.reason !== undefined && isIrreversibleReason(risk.reason)) {
-      next = noteDestructiveOp(next, {
-        tool: name,
-        summary,
-        fingerprint: fingerprintOf(name, args),
-      })
-    }
+  if (
+    ok &&
+    isIrreversibleCall(name, args, (stepArgs) => riskTargetOf(stepArgs, ctx.snapshotTargets))
+  ) {
+    next = noteDestructiveOp(next, {
+      tool: name,
+      summary,
+      fingerprint: fingerprintOf(name, args),
+    })
   }
   ctx.taskProgress = next
   await saveTaskProgress(next)
+}
+
+/**
+ * The already-executed irreversible call this attempt would duplicate, if any.
+ *
+ * The fingerprint is computed from the SAME hydrated arguments the audit path
+ * records, so a ref and its resolved target cannot look like two different
+ * actions to the guard.
+ */
+function repeatedIrreversibleOp(
+  ctx: ToolContext,
+  name: string,
+  args: Record<string, unknown>,
+): DestructiveOperation | undefined {
+  const progress = ctx.taskProgress
+  if (!progress || progress.destructiveOps.length === 0) return undefined
+  if (!isIrreversibleCall(name, args, (stepArgs) => riskTargetOf(stepArgs, ctx.snapshotTargets))) {
+    return undefined
+  }
+  const fingerprint = fingerprintOf(name, args)
+  return progress.destructiveOps.find((op) => op.fingerprint === fingerprint)
 }
 
 async function runOneToolCall(
@@ -6438,6 +6477,28 @@ async function runOneToolCall(
     const message = `The "${name}" tool is disabled in settings.`
     pushResult(JSON.stringify({ error: message }))
     sendToolResult({ type: 'tool.result', name, summary: `Blocked (${name} disabled)` })
+    return
+  }
+
+  // Replay guard (spec R1④ / R4⑤): an irreversible call that already ran in
+  // this conversation may not run again with the same arguments. The list is
+  // durable, so this also covers a task resumed after a panel/worker restart.
+  const repeated = repeatedIrreversibleOp(ctx, name, args)
+  if (repeated) {
+    pushResult(
+      JSON.stringify({
+        error:
+          `This exact irreversible action (${repeated.summary}) already ran earlier in this conversation, ` +
+          'so it is blocked from running a second time. Do not retry it. If the user explicitly wants it ' +
+          'repeated, tell them what is already done and let them trigger it themselves.',
+        errorType: 'PERMISSION',
+      }),
+    )
+    sendToolResult({
+      type: 'tool.result',
+      name,
+      summary: `Blocked (repeats an irreversible action: ${repeated.summary})`,
+    })
     return
   }
 

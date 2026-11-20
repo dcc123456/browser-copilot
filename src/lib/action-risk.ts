@@ -34,6 +34,43 @@ export interface ActionRisk {
   reason?: ActionRiskReason
 }
 
+/**
+ * Commit-shaped labels the replay guard must treat as irreversible.
+ *
+ * Deliberately broader than the confirmation vocabulary above and deliberately
+ * NOT wired into {@link assessActionRisk}: blocking a replayed submit and
+ * interrupting a semi-auto user are different decisions with different false
+ * positive costs. `submit`/`提交` and `confirm`/`确认` are the gap that let a
+ * submit button through unclassified.
+ */
+const COMMIT_LIKE =
+  /\b(submit|confirm|place order|checkout|pay|buy|purchase|send|publish|post|share|delete|remove|unsubscribe|subscribe|renew|transfer|withdraw)\b|提交|确认|下单|支付|付款|购买|发送|发布|发表|分享|删除|移除|退订|订阅|续费|转账|提现/i
+
+/**
+ * Does repeating this exact call duplicate an external effect?
+ *
+ * Used only by the replay guard (spec R1④ / R4⑤): an action that already ran
+ * may not run again with the same arguments, across turns. Element commits are
+ * judged by the label the snapshot resolved, so a bare `click(ref)` whose
+ * target is unknown is NOT treated as irreversible — a false positive there
+ * would block legitimate repeated clicks on an unlabelled element.
+ */
+export function isIrreversibleCall(
+  name: string,
+  args: Record<string, unknown>,
+  resolve?: RiskTargetResolver,
+): boolean {
+  if (name === 'press_key') {
+    const key = typeof args['key'] === 'string' ? args['key'].toLowerCase() : ''
+    return SUBMITTING_KEYS.has(key)
+  }
+  if (name !== 'click') return false
+  const info = resolve?.(args)
+  const { text } = readTarget(info)
+  if (!text) return false
+  return keywordReason(text) !== undefined || COMMIT_LIKE.test(text)
+}
+
 /** What the snapshot knows about the element an action targets. */
 export interface RiskTargetInfo {
   /** Accessible name from the snapshot (`Pay now`, `Password`). */

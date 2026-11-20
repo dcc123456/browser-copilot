@@ -123,31 +123,43 @@ export function estimateInputTokens(
  * provider's own length error routes it through `compactHistory`, which keeps
  * user turns too. Returns the number of characters removed.
  */
-export function hardCapHistory(history: WireMessage[], tokenBudget: number): number {
-  if (estimateInputTokens(history) <= tokenBudget) return 0
+export function projectHardCap(
+  history: readonly WireMessage[],
+  tokenBudget: number,
+): { messages: WireMessage[]; removed: number } {
+  // Copy-on-write: the caller's transcript (and storage) must never see a
+  // `[truncated]` marker. Only the request projection is shortened.
+  const projected = [...history]
+  if (estimateInputTokens(projected) <= tokenBudget) return { messages: projected, removed: 0 }
   let removed = 0
-  const truncate = (message: WireMessage): boolean => {
-    if (typeof message.content !== 'string' || message.content.length <= 300) return false
-    const excessTokens = estimateInputTokens(history) - tokenBudget
+  const truncate = (index: number): boolean => {
+    const message = projected[index]
+    if (!message || typeof message.content !== 'string' || message.content.length <= 300) {
+      return false
+    }
+    const excessTokens = estimateInputTokens(projected) - tokenBudget
     // Convert the token excess to chars at the dense rate (+ margin), but keep
     // at least 300 chars of the message.
     const wantedCut = Math.ceil(excessTokens / 0.9) + 16
     const cut = Math.min(message.content.length - 300, wantedCut)
-    message.content = `${message.content.slice(0, message.content.length - cut)}\u2026[truncated]`
+    projected[index] = {
+      ...message,
+      content: `${message.content.slice(0, message.content.length - cut)}\u2026[truncated]`,
+    }
     removed += cut
     return true
   }
   // Keep truncating the oldest non-user messages that still hold content,
   // iterating until the budget fits or none of them is cuttable.
   let progressed = true
-  while (progressed && estimateInputTokens(history) > tokenBudget) {
+  while (progressed && estimateInputTokens(projected) > tokenBudget) {
     progressed = false
-    for (const message of history) {
-      if (estimateInputTokens(history) <= tokenBudget) return removed
-      if (message.role !== 'user' && truncate(message)) progressed = true
+    for (let index = 0; index < projected.length; index += 1) {
+      if (estimateInputTokens(projected) <= tokenBudget) return { messages: projected, removed }
+      if (projected[index]?.role !== 'user' && truncate(index)) progressed = true
     }
   }
-  return removed
+  return { messages: projected, removed }
 }
 
 export interface CompactOutcome {
@@ -233,6 +245,24 @@ function boundTranscript(lines: string[]): string {
  * Returns null when there is nothing to compact (too few turns, or the
  * compactable span holds no non-user messages).
  */
+/**
+ * Builds the compacted transcript for ONE request without touching `history`.
+ *
+ * Compaction used to rewrite the caller's array in place, and that array is
+ * exactly what `saveConversation` persists. A long task therefore lost the
+ * page text it had already read, and a resumed task could only re-read it.
+ * The request sends this projection; storage keeps the originals.
+ */
+export async function projectCompaction(
+  history: readonly WireMessage[],
+  options: CompactOptions,
+): Promise<{ messages: WireMessage[]; removed: number; summary: string } | null> {
+  const working = [...history]
+  const outcome = await compactHistory(working, options)
+  if (!outcome) return null
+  return { messages: working, removed: outcome.removed, summary: outcome.summary }
+}
+
 export async function compactHistory(
   history: WireMessage[],
   options: CompactOptions,

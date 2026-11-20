@@ -3,7 +3,7 @@ import {
   estimateInputTokens,
   estimateMessageTokens,
   estimateTextTokens,
-  hardCapHistory,
+  projectHardCap,
 } from '../src/lib/context-compact'
 import type { WireMessage, WireToolCall } from '../src/lib/llm'
 describe('estimateTextTokens (proactive auto-compress)', () => {
@@ -39,31 +39,32 @@ describe('estimateInputTokens', () => {
     expect(total).toBeGreaterThan(estimateTextTokens('提交订单'))
   })
 })
-describe('hardCapHistory emergency bound', () => {
+describe('projectHardCap emergency bound', () => {
   it('leaves fitting history untouched', () => {
     const history: WireMessage[] = [{ role: 'user', content: 'hi' }]
-    expect(hardCapHistory(history, 10_000)).toBe(0)
+    expect(projectHardCap(history, 10_000).removed).toBe(0)
   })
-  it('truncates oversized non-user content to fit the budget without deleting messages', () => {
+  it('truncates oversized non-user content in the projection without deleting messages', () => {
     const history: WireMessage[] = [
       { role: 'user', content: 'task' },
       { role: 'assistant', content: 'a'.repeat(20_000) },
     ]
     const originalLength = history.length
-    const removed = hardCapHistory(history, 2_000)
+    const { messages, removed } = projectHardCap(history, 2_000)
     expect(removed).toBeGreaterThan(0)
-    expect(history.length).toBe(originalLength) // no message dropped
-    expect(estimateInputTokens(history)).toBeLessThanOrEqual(2_000)
-    expect(String((history[1] as { content: string }).content).endsWith('[truncated]')).toBe(true)
+    expect(messages.length).toBe(originalLength) // no message dropped
+    expect(estimateInputTokens(messages)).toBeLessThanOrEqual(2_000)
+    expect(String((messages[1] as { content: string }).content).endsWith('[truncated]')).toBe(true)
+    // The transcript that gets persisted is not the projection.
+    expect(String((history[1] as { content: string }).content).endsWith('[truncated]')).toBe(false)
   })
   it('never rewrites user content, even when the budget cannot be met', () => {
-    // User turns are the transcript's spine: this bound runs on the same array
-    // that gets persisted, so cutting into user text would silently rewrite the
-    // user's own history. An unmet budget is the honest outcome instead (the
-    // provider's length error routes it to `compactHistory`, which keeps user
-    // turns too).
+    // User turns are the transcript's spine: cutting into user text would
+    // silently rewrite the user's own history. An unmet budget is the honest
+    // outcome instead (the provider's length error routes it to compaction,
+    // which keeps user turns too).
     const history: WireMessage[] = [{ role: 'user', content: '字'.repeat(5_000) }]
-    expect(hardCapHistory(history, 1_000)).toBe(0)
+    expect(projectHardCap(history, 1_000).removed).toBe(0)
     expect(history[0]).toEqual({ role: 'user', content: '字'.repeat(5_000) })
   })
 })
