@@ -13,7 +13,7 @@ import {
   validateAttachmentMeta,
 } from '../src/lib/attachments'
 import { toApiMessages, type WireMessage } from '../src/lib/llm'
-import { getUserDisplayText, toRestoreMessages } from '../src/background/restore'
+import { getUserDisplayText, toHistoryMessages, toRestoreMessages } from '../src/background/restore'
 import { wrapSkillDirective } from '../src/lib/skills'
 import type { Skill } from '../src/lib/types'
 
@@ -422,6 +422,38 @@ describe('toRestoreMessages', () => {
     const out = toRestoreMessages(history)
     expect(out[1]).toMatchObject({ role: 'tool', toolOk: false })
     expect(out[1]!.text).not.toContain('Failed')
+  })
+
+  it('never renders a stored compaction summary as a user turn', () => {
+    const history: WireMessage[] = [
+      { role: 'user', content: 'real question' },
+      {
+        role: 'user',
+        content:
+          '[[compaction-summary]]\n[Context compacted] Summary of the earlier conversation:\nold stuff',
+      },
+      { role: 'assistant', content: 'answer' },
+    ]
+    const out = toRestoreMessages(history)
+    expect(out.map((entry) => entry.text)).toEqual(['real question', 'answer'])
+    expect(JSON.stringify(out)).not.toContain('[[compaction-summary]]')
+  })
+
+  it('omits tool replay lines from the history mapping and drops empty user turns', () => {
+    const history: WireMessage[] = [
+      { role: 'user', content: '' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'click', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'c1', content: '{"ok":true}' },
+      { role: 'assistant', content: 'done' },
+    ]
+    const historyView = toHistoryMessages(history)
+    expect(historyView).toEqual([{ role: 'assistant', text: 'done' }])
+    // The live restore view keeps the tool card.
+    expect(toRestoreMessages(history).some((entry) => entry.role === 'tool')).toBe(true)
   })
 
   it('passes plain user and assistant turns through unchanged', () => {

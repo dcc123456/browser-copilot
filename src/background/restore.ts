@@ -9,6 +9,7 @@
  */
 
 import type { AttachmentSummary } from '../lib/attachments'
+import { isCompactionSummaryText } from '../lib/context-compact'
 import { toAttachmentSummaries } from '../lib/attachments'
 import type { WireMessage } from '../lib/llm'
 import { toolOutputSucceeded } from '../lib/tool-error'
@@ -81,7 +82,19 @@ export function getUserDisplayText(entry: UserTurnLike): string {
  * and user attachments are reduced to summaries (no inline text content) so
  * reopening a conversation stays cheap.
  */
-export function toRestoreMessages(history: readonly WireMessage[]): RestoreMessage[] {
+export interface RestoreMapOptions {
+  /**
+   * Include tool replay lines. `conversations.get` (history panel) shows only
+   * user/assistant turns; the live restore view keeps the tool cards.
+   */
+  includeTools?: boolean
+}
+
+export function toRestoreMessages(
+  history: readonly WireMessage[],
+  options: RestoreMapOptions = {},
+): RestoreMessage[] {
+  const includeTools = options.includeTools !== false
   // Build a tool_call_id -> tool name map from the assistant turns, so a
   // replayed tool result can be labeled with its action instead of dumped as
   // raw JSON. The stored tool content is the raw result string; the
@@ -94,7 +107,26 @@ export function toRestoreMessages(history: readonly WireMessage[]): RestoreMessa
     }
   }
   return history
-    .filter((entry) => entry.role === 'user' || entry.role === 'assistant' || entry.role === 'tool')
+    .filter((entry) => {
+      if (entry.role === 'tool') return includeTools
+      if (entry.role !== 'user' && entry.role !== 'assistant') return false
+      // A stored compaction summary is role `user` only for wire-format
+      // reasons; the user never said it, so no renderer may show it as a turn.
+      if (
+        entry.role === 'user' &&
+        typeof entry.content === 'string' &&
+        isCompactionSummaryText(entry.content)
+      ) {
+        return false
+      }
+      // Attachment-only turns are kept (their files still render); a truly
+      // empty user turn has nothing to show.
+      if (entry.role === 'user') {
+        const text = getUserDisplayText(entry)
+        if (!text.trim() && (entry.attachments?.length ?? 0) === 0) return false
+      }
+      return true
+    })
     .map((entry) => {
       if (entry.role === 'tool') {
         const name = toolNames.get(entry.tool_call_id) ?? 'tool'
@@ -119,4 +151,32 @@ export function toRestoreMessages(history: readonly WireMessage[]): RestoreMessa
         text: typeof entry.content === 'string' ? entry.content : '',
       }
     })
+}
+
+/**
+ * The history panel's mapping (`conversations.get`): user/assistant turns only,
+ * through the same filter as the live restore view. Exported so the "a summary
+ * is never returned as a user turn" contract is testable without the worker
+ * entry point.
+ */
+export interface HistoryMessage {
+  role: 'user' | 'assistant'
+  text: string
+  attachments?: AttachmentSummary[]
+  skillName?: string
+}
+
+export function toHistoryMessages(history: readonly WireMessage[]): HistoryMessage[] {
+  return (
+    toRestoreMessages(history, { includeTools: false })
+      .map(({ role, text, attachments, skillName }): HistoryMessage => ({
+        role: role === 'assistant' ? 'assistant' : 'user',
+        text,
+        ...(attachments ? { attachments } : {}),
+        ...(skillName ? { skillName } : {}),
+      }))
+      // The history panel lists spoken turns only: an assistant turn that carried
+      // just tool calls has no text of its own to show.
+      .filter((entry) => entry.text.trim().length > 0)
+  )
 }

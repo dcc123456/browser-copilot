@@ -12,9 +12,8 @@ import type { LocaleSetting } from '../lib/i18n'
 
 import type { WireMessage } from '../lib/llm'
 import { LlmError, listModels, testConnection } from '../lib/llm'
-import type { AttachmentDescriptor } from '../lib/attachments'
-import { rejectionMessage, sanitizeAttachments, toAttachmentSummaries } from '../lib/attachments'
-import { getUserDisplayText, toRestoreMessages } from './restore'
+import { rejectionMessage, sanitizeAttachments } from '../lib/attachments'
+import { toHistoryMessages, toRestoreMessages } from './restore'
 import { workerMessages } from './worker-messages'
 import { streamModel } from './model-transport'
 import {
@@ -1729,33 +1728,9 @@ async function handleCommand(
         (async () => (await listConversations()).find((entry) => entry.id === command.id))(),
         loadConversation(command.id),
       ])
-      const visible = messages
-        .filter(
-          (
-            entry,
-          ): entry is {
-            role: 'user' | 'assistant'
-            content: string
-            attachments?: AttachmentDescriptor[]
-            skillName?: string
-          } =>
-            (entry.role === 'user' || entry.role === 'assistant') &&
-            typeof entry.content === 'string' &&
-            // Keep attachment-only user turns (empty text) so their files
-            // still render when the conversation is reopened.
-            (entry.content.trim().length > 0 ||
-              (entry.role === 'user' && (entry.attachments?.length ?? 0) > 0)),
-        )
-        .map((entry) => ({
-          role: entry.role,
-          // Hide model-only envelopes (skill directive, selection block);
-          // falls back to legacy unwrapping for older transcripts.
-          text: entry.role === 'user' ? getUserDisplayText(entry) : entry.content,
-          ...(entry.role === 'user' && entry.attachments?.length
-            ? { attachments: toAttachmentSummaries(entry.attachments) }
-            : {}),
-          ...(entry.role === 'user' && entry.skillName ? { skillName: entry.skillName } : {}),
-        }))
+      // One shared mapping with the live restore path, so a stored summary can
+      // never be rendered as something the user said in either view.
+      const visible = toHistoryMessages(messages)
       return {
         type: 'conversations.get' as const,
         id: command.id,
