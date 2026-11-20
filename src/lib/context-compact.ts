@@ -294,9 +294,15 @@ export async function compactHistory(
 
   // Turn starts: every user message opens a turn; anything before the first
   // user message (not produced by the chat pipeline) is its own segment.
+  // A stored compaction summary is role `user` only for wire-format reasons —
+  // it is not a turn boundary, or every compaction would add a fake turn that
+  // `keepRecentTurns` then keeps forever.
   const starts: number[] = []
   for (let i = 0; i < history.length; i += 1) {
-    if (history[i]?.role === 'user') starts.push(i)
+    const entry = history[i]
+    if (entry?.role !== 'user') continue
+    if (typeof entry.content === 'string' && isCompactionSummaryText(entry.content)) continue
+    starts.push(i)
   }
   const segments: Array<[number, number]> = []
   const firstStart = starts[0]
@@ -313,9 +319,19 @@ export async function compactHistory(
   const removable: number[] = []
   for (const [from, to] of segments.slice(0, compactable)) {
     for (let i = from; i < to; i += 1) {
-      if (history[i]?.role !== 'user') removable.push(i)
+      const entry = history[i]
+      if (!entry) continue
+      // Older compaction summaries are reclaimable: they are recorded as user
+      // turns only for the wire format, and leaving them pins one fake user
+      // turn per compaction. Their text is folded into the new summary below.
+      const isOldSummary =
+        entry.role === 'user' &&
+        typeof entry.content === 'string' &&
+        isCompactionSummaryText(entry.content)
+      if (entry.role !== 'user' || isOldSummary) removable.push(i)
     }
   }
+  removable.sort((left, right) => left - right)
   const firstRemoved = removable[0]
   if (firstRemoved === undefined) return null
 

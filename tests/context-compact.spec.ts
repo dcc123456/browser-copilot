@@ -129,6 +129,50 @@ describe('compactHistory', () => {
     expect(history.some((m) => m.role === 'assistant' && m.content === 'old answer')).toBe(false)
   })
 
+  it('reclaims the previous compaction summary instead of pinning a fake user turn', async () => {
+    const history: WireMessage[] = [
+      { role: 'user', content: 'one' },
+      { role: 'assistant', content: 'answer one' },
+      { role: 'user', content: 'two' },
+      { role: 'assistant', content: 'answer two' },
+      { role: 'user', content: 'three' },
+      { role: 'assistant', content: 'answer three' },
+      { role: 'user', content: 'four' },
+    ]
+    await compactHistory(history, opts({ keepRecentTurns: 1, summarize: async () => 'FIRST' }))
+    const countAfterFirst = history.filter(
+      (message) => message.role === 'user' && isCompactionSummaryText(String(message.content)),
+    ).length
+    expect(countAfterFirst).toBe(1)
+    // More turns arrive, then the user compacts again.
+    history.push({ role: 'assistant', content: 'answer four' })
+    history.push({ role: 'user', content: 'five' })
+    history.push({ role: 'assistant', content: 'answer five' })
+    history.push({ role: 'user', content: 'six' })
+    const seen: string[] = []
+    await compactHistory(
+      history,
+      opts({
+        keepRecentTurns: 1,
+        summarize: async (transcript) => {
+          seen.push(transcript)
+          return 'SECOND'
+        },
+      }),
+    )
+    const summaries = history.filter(
+      (message) => message.role === 'user' && isCompactionSummaryText(String(message.content)),
+    )
+    expect(summaries).toHaveLength(1)
+    expect(String(summaries[0]?.content)).toContain('SECOND')
+    // The old summary was fed into the new one, not dropped silently.
+    expect(seen.at(-1)).toContain('FIRST')
+    // Real user turns are still never removed.
+    expect(history.some((message) => message.role === 'user' && message.content === 'one')).toBe(
+      true,
+    )
+  })
+
   it('falls back to a mechanical digest when the summarizer fails', async () => {
     const history = seeded()
     const outcome = await compactHistory(
