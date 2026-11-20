@@ -7,6 +7,15 @@
  * history, a retirement that skipped hard-capped reads). This test drives
  * `runAgentTurn` itself, forces a 400 so compaction really runs, and then
  * measures 100 rounds.
+ *
+ * Red-evidence limitation (2026-11-20): the `a87b939` regression (a hard-capped
+ * page read was never retired) cannot be reproduced through this loop test,
+ * because `snapshot_page` caps page text at 3k characters in `compactSnapshot`
+ * — no request built through it can hard-cap a read in the first place. That
+ * regression is covered by the unit-level red→green in
+ * `tests/agent-context.spec.ts` (red on `bdcafbc`, green after) plus this
+ * test's loop-level invariants; constructing a loop-level red would need a
+ * production-constant change, which the ruling forbids.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { runAgentTurn } from '../src/background/agent'
