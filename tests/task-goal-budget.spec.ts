@@ -14,6 +14,9 @@ import {
   recordGoalRound,
   remainingGoalRounds,
   renewGoalBudget,
+  archiveGoal,
+  finishGoalIfComplete,
+  startsNewGoal,
   type TaskProgress,
 } from '../src/lib/task-progress'
 
@@ -140,6 +143,38 @@ describe('K quota counter (QA audit)', () => {
   })
 })
 
+describe('goal lifecycle (R-1..R-4)', () => {
+  it('a new message after a paused goal starts a fresh task', () => {
+    const spent = recordGoalRound(beginTask(emptyTaskProgress('c', 1), 'task A', 1, 5), 2)
+    const paused = archiveGoal(
+      { ...spent, goal: { ...spent.goal!, status: 'paused' } },
+      'abandoned',
+    )
+    expect(startsNewGoal(paused)).toBe(true)
+    const next = beginTask(paused, 'task B', 3)
+    expect(next.goal?.summary).toBe('task B')
+    expect(next.goal?.roundsStarted).toBe(0)
+    expect(next.goal?.maxRounds).toBe(20)
+    expect(next.steps).toEqual([])
+    expect(next.goal?.autoRenewals).toBe(0)
+  })
+
+  it('a message during an active goal continues the same task', () => {
+    const active = recordGoalRound(beginTask(emptyTaskProgress('c', 1), 'task A', 1, 5), 2)
+    expect(startsNewGoal(active)).toBe(false)
+  })
+
+  it('closes an active goal only when no step is unfinished', () => {
+    const active = beginTask(emptyTaskProgress('c', 1), 'task', 1, 5)
+    expect(finishGoalIfComplete(active).goal?.status).toBe('done')
+    const withFailure = {
+      ...active,
+      steps: [{ at: 2, tool: 'click', summary: 'click', ok: false }],
+    }
+    expect(finishGoalIfComplete(withFailure).goal?.status).toBe('active')
+  })
+})
+
 describe('goal report and migration', () => {
   it('reports the six budget facts including the next actions', () => {
     const progress = recordGoalRound(
@@ -164,7 +199,7 @@ describe('goal report and migration', () => {
     // Six items: goal, done (with evidence), unfinished, stop reason, cost,
     // next actions. The report is the single source for the pause card.
     expect(report?.completedSteps).toEqual([])
-    expect(report?.unfinished).toEqual(['Continue the goal from the last completed step.'])
+    expect(report?.unfinished).toEqual([])
   })
 
   it('restores autoRenewals and stagnation from storage instead of zeroing them', () => {

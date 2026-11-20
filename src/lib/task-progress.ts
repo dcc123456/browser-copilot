@@ -136,6 +136,35 @@ export function beginTask(
   }
 }
 
+/**
+ * A goal lives as long as its TASK, not the conversation (spec R10 R-1/R-3).
+ * A non-active goal is finished: a new user instruction archives it and starts
+ * a fresh goal instead of inheriting a budget/paused state from the old task.
+ */
+export function archiveGoal(
+  progress: TaskProgress,
+  status: 'done' | 'abandoned' = 'abandoned',
+  now = Date.now(),
+): TaskProgress {
+  if (!progress.goal) return progress
+  return { ...progress, goal: { ...progress.goal, status }, updatedAt: now }
+}
+
+/** Whether an incoming message starts a new task rather than continuing one. */
+export function startsNewGoal(progress: TaskProgress): boolean {
+  const goal = progress.goal
+  return goal === undefined || goal.status !== 'active'
+}
+
+/** R-3: a turn that finished its work closes the goal; otherwise it stays active. */
+export function finishGoalIfComplete(progress: TaskProgress, now = Date.now()): TaskProgress {
+  const goal = progress.goal
+  if (!goal || goal.status !== 'active') return progress
+  const hasUnfinished = progress.steps.some((step) => !step.ok)
+  if (hasUnfinished) return progress
+  return { ...progress, goal: { ...goal, status: 'done' }, updatedAt: now }
+}
+
 /** Records one spent round against the goal budget. */
 export function recordGoalRound(progress: TaskProgress, now = Date.now()): TaskProgress {
   if (!progress.goal) return progress
@@ -252,12 +281,9 @@ export function goalBudgetReport(
     goal: goal.summary,
     completed: completed.length,
     completedSteps: completed.slice(-RESUME_STEP_LINES),
-    unfinished:
-      failed.length > 0
-        ? failed
-            .slice(-RESUME_STEP_LINES)
-            .map((step) => `retry ${step.tool}: ${step.summary}${step.url ? ` @ ${step.url}` : ''}`)
-        : ['Continue the goal from the last completed step.'],
+    unfinished: failed
+      .slice(-RESUME_STEP_LINES)
+      .map((step) => `retry ${step.tool}: ${step.summary}${step.url ? ` @ ${step.url}` : ''}`),
     stopReason,
     remainingRounds: remainingGoalRounds(progress),
     usedRounds: goal.roundsStarted,

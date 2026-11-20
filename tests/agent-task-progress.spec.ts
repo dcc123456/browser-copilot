@@ -309,6 +309,42 @@ describe('durable task progress in the agent loop', () => {
     ).toBe(true)
   })
 
+  it('starts a fresh goal for a new message after a paused one', async () => {
+    loadMock.mockResolvedValue({
+      version: 2,
+      conversationId: 'conv-new-task',
+      goal: {
+        summary: 'old task',
+        startedAt: 1000,
+        maxRounds: 5,
+        roundsStarted: 5,
+        status: 'paused',
+        budgetLog: [{ at: 2000, kind: 'auto-renew', actor: 'strategy', roundsAdded: 5 }],
+        autoRenewals: 1,
+      },
+      steps: [{ at: 1500, tool: 'click', summary: 'old step', ok: true }],
+      destructiveOps: [],
+      updatedAt: 2000,
+    })
+    streamMock.mockResolvedValueOnce({
+      content: 'new task underway',
+      reasoning: '',
+      toolCalls: [],
+      finishReason: 'stop',
+      usage: null,
+    } as never)
+
+    await runAgentTurn(
+      [{ role: 'user', content: 'a different task' }] as never,
+      deps('conv-new-task') as never,
+    )
+    const saved = saveMock.mock.calls.at(-1)?.[0]
+    expect(saved?.goal?.summary).toBe('a different task')
+    expect(saved?.goal?.roundsStarted).toBe(0)
+    expect(saved?.goal?.autoRenewals).toBe(0)
+    expect(saved?.steps).toEqual([])
+  })
+
   it('records an executed irreversible action so the next turn can block it', async () => {
     streamMock
       .mockResolvedValueOnce({

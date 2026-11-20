@@ -134,11 +134,14 @@ import {
 } from '../lib/progress-signal'
 import {
   appendProgressStep,
+  archiveGoal,
   beginTask,
   emptyTaskProgress,
   fingerprintOf,
+  finishGoalIfComplete,
   noteDestructiveOp,
   renderResumeNote,
+  startsNewGoal,
   type DestructiveOperation,
   type TaskProgress,
 } from '../lib/task-progress'
@@ -5769,8 +5772,12 @@ export async function runAgentTurn(
     string | undefined
   const storedProgress = await loadTaskProgress(deps.conversationId)
   let taskProgress = storedProgress ?? emptyTaskProgress(deps.conversationId)
-  if (!taskProgress.goal && lastUserText) {
-    taskProgress = beginTask(taskProgress, lastUserText)
+  // A goal lives as long as its task (spec R10 R-1/R-2): a new message after a
+  // paused/finished goal archives it and starts a fresh one, while a message
+  // during an ACTIVE goal belongs to the same task and keeps its budget.
+  if (!taskProgress.goal || startsNewGoal(taskProgress)) {
+    if (taskProgress.goal) taskProgress = archiveGoal(taskProgress, 'abandoned')
+    taskProgress = beginTask(taskProgress, lastUserText?.trim() || 'Current task')
   }
   const isResumed =
     storedProgress !== undefined &&
@@ -6212,7 +6219,14 @@ export async function runAgentTurn(
       // the supplement instead of the task ending with it unread. The round
       // budget bounds the continuation; a note left over when the turn truly
       // cannot go on is handed back to the panel, never dropped.
-      if (applySupplements() === 0) return totalUsage.totalTokens > 0 ? totalUsage : null
+      if (applySupplements() === 0) {
+        // R-3: a turn that answered with no unfinished steps closes its goal;
+        // otherwise the goal stays active and the next message continues it.
+        taskProgress = finishGoalIfComplete(ctx.taskProgress ?? taskProgress)
+        ctx.taskProgress = taskProgress
+        await saveTaskProgress(taskProgress)
+        return totalUsage.totalTokens > 0 ? totalUsage : null
+      }
       continue
     }
 
