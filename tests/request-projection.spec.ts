@@ -89,7 +89,9 @@ function history(): WireMessage[] {
 }
 
 /** The exact composition the loop uses for one outgoing request. */
-async function project(source: readonly WireMessage[]): Promise<WireMessage[]> {
+async function project(
+  source: readonly WireMessage[],
+): Promise<{ messages: WireMessage[]; compacted: boolean }> {
   const compacted = await projectCompaction(source, {
     marker: MARKER,
     keepRecentTurns: 1,
@@ -97,7 +99,7 @@ async function project(source: readonly WireMessage[]): Promise<WireMessage[]> {
   })
   const base = compacted?.messages ?? source
   const retired = retireOldPageReads(base, false)
-  return projectHardCap(retired, 8_000).messages
+  return { messages: projectHardCap(retired, 8_000).messages, compacted: compacted !== null }
 }
 
 describe('request projection stability (AC-15)', () => {
@@ -108,10 +110,13 @@ describe('request projection stability (AC-15)', () => {
     const first = await project(source)
     const second = await project(source)
 
+    // QA's warning: this gate must run on a COMPACTED turn, otherwise the
+    // determinism assertion is trivially true and proves nothing.
+    expect(first.compacted).toBe(true)
     // 1. Deterministic: two identical runs send identical bytes.
-    expect(JSON.stringify(second)).toBe(JSON.stringify(first))
+    expect(JSON.stringify(second.messages)).toBe(JSON.stringify(first.messages))
     // 2. The projection carries the compaction summary and retired reads...
-    expect(first.some((message) => String(message.content).includes('earlier turns summary'))).toBe(
+    expect(first.messages.some((message) => String(message.content).includes('earlier turns summary'))).toBe(
       true,
     )
     // The projection is not the stored transcript: it differs wherever a turn
@@ -121,7 +126,7 @@ describe('request projection stability (AC-15)', () => {
     //    original observation (no stub, no truncation marker).
     expect(source).toEqual(snapshot)
     expect(JSON.stringify(source)).not.toContain('"retired":true')
-    expect(JSON.stringify(source)).not.toContain('[truncated]')
+    expect(JSON.stringify(source)).not.toContain('[context-truncated]')
   })
 
   it('leaves source messages byte-identical after a hard cap', () => {
@@ -131,7 +136,7 @@ describe('request projection stability (AC-15)', () => {
     ]
     const capped = projectHardCap(source, 2_000)
     expect(capped.removed).toBeGreaterThan(0)
-    expect(String(capped.messages[1]?.content).endsWith('[truncated]')).toBe(true)
-    expect(String(source[1]?.content)).not.toContain('[truncated]')
+    expect(String(capped.messages[1]?.content).endsWith('[context-truncated]')).toBe(true)
+    expect(String(source[1]?.content)).not.toContain('[context-truncated]')
   })
 })
