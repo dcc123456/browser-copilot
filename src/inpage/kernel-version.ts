@@ -19,8 +19,11 @@
  *    fillable control), `fill_form` (write a whole form in one injection) and
  *    `verify_fields` (read the batch back). A build-5 kernel has no branch for
  *    them and would answer an unknown action with its generic failure.
+ * 7: `progress_signature` (result-based progress digest) joined the vocabulary.
+ *    A build-6 kernel has no branch for it, and the no-progress detector would
+ *    read "unknown action" as an unreadable page on every round.
  *
  * @module inpage/kernel-version
  */
 
-export const KERNEL_VERSION = 6
+export const KERNEL_VERSION = 7

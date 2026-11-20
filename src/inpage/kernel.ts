@@ -1751,6 +1751,65 @@ export function runOp(op: Op): OpResult {
 
   // --- Snapshot --------------------------------------------------------------
 
+  /**
+   * Result-based progress digest (spec R1): URL + interactive controls + text.
+   *
+   * Deliberately EXCLUDES scroll position: scrolling without revealing new
+   * content must not look like progress. Values are hashed, never returned, and
+   * a password field contributes nothing so its digest cannot leak a secret.
+   */
+  function progressSignature(): string {
+    const hash = (text: string): string => {
+      let value = 0x811c9dc5
+      for (let i = 0; i < text.length; i += 1) {
+        value ^= text.charCodeAt(i)
+        value = Math.imul(value, 0x01000193) >>> 0
+      }
+      return value.toString(16).padStart(8, '0')
+    }
+    const controls = document.querySelectorAll(
+      'a,button,input,select,textarea,[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="tab"],[contenteditable="true"]',
+    )
+    const parts: string[] = []
+    const limit = Math.min(controls.length, 200)
+    for (let i = 0; i < limit; i += 1) {
+      const element = controls[i] as HTMLElement & {
+        value?: string
+        checked?: boolean
+      }
+      const type = (element.getAttribute('type') ?? '').toLowerCase()
+      const name = (
+        element.getAttribute('aria-label') ??
+        element.getAttribute('name') ??
+        element.textContent ??
+        ''
+      )
+        .trim()
+        .slice(0, 80)
+      const value = type === 'password' ? '' : String(element.value ?? '').slice(0, 80)
+      parts.push(
+        [
+          element.tagName,
+          element.getAttribute('role') ?? '',
+          type,
+          name,
+          value,
+          element.hasAttribute('disabled') ? '1' : '0',
+          element.checked ? '1' : '0',
+        ].join('\u0001'),
+      )
+    }
+    const text = document.body ? (document.body.textContent ?? '') : ''
+    const capped = text.length > 50_000 ? text.slice(0, 50_000) : text
+    return [
+      location.href,
+      document.readyState,
+      String(text.length),
+      hash(capped),
+      hash(parts.join('\u0002')),
+    ].join('|')
+  }
+
   function buildSnapshot(maxChars: number, maxElements: number): PageSnapshot {
     const interactiveSelector = [
       'a[href]',
@@ -2151,6 +2210,9 @@ export function runOp(op: Op): OpResult {
         document.documentElement.getElementsByTagName('*').length
       }|${(document.body ? (document.body.textContent ?? '') : '').length}`
       return { ...base(), ok: true, found: true, data: sig }
+    }
+    if (op.action === 'progress_signature') {
+      return { ...base(), ok: true, found: true, data: progressSignature() }
     }
     if (op.action === 'actionability') {
       // One-shot readiness probe for the driver's pre-action poll. The kernel

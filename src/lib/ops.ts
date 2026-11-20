@@ -153,6 +153,7 @@ export type ActionName =
   | 'trigger_event'
   | 'capture'
   | 'page_signature'
+  | 'progress_signature'
   | 'actionability'
   | 'upload_files'
   | 'drop_files'
