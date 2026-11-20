@@ -15,7 +15,8 @@ import {
   remainingGoalRounds,
   renewGoalBudget,
   archiveGoal,
-  finishGoalIfComplete,
+  completeGoal,
+  MAX_ARCHIVED_GOALS,
   startsNewGoal,
   type TaskProgress,
 } from '../src/lib/task-progress'
@@ -164,14 +165,32 @@ describe('goal lifecycle (R-1..R-4)', () => {
     expect(startsNewGoal(active)).toBe(false)
   })
 
-  it('closes an active goal only when no step is unfinished', () => {
+  it('completes only on an explicit declaration with locatable evidence', () => {
     const active = beginTask(emptyTaskProgress('c', 1), 'task', 1, 5)
-    expect(finishGoalIfComplete(active).goal?.status).toBe('done')
-    const withFailure = {
-      ...active,
-      steps: [{ at: 2, tool: 'click', summary: 'click', ok: false }],
+    // No declaration, and even "no failed steps", must NOT be treated as done.
+    expect(active.goal?.status).toBe('active')
+    // Empty evidence is refused.
+    expect(completeGoal(active, { evidence: [] })).toBeUndefined()
+    expect(completeGoal(active, { evidence: [{ kind: 'text', value: '   ' }] })).toBeUndefined()
+    const done = completeGoal(active, {
+      summary: 'task done',
+      evidence: [
+        { kind: 'url', value: 'https://example.test/order/42' },
+        { kind: 'text', value: 'Order confirmed' },
+      ],
+    })
+    expect(done?.goal?.status).toBe('done')
+    expect(done?.goal?.evidence).toHaveLength(2)
+  })
+
+  it('keeps a bounded archive of finished goals', () => {
+    let progress = emptyTaskProgress('c', 1)
+    for (let index = 0; index < 5; index += 1) {
+      progress = beginTask(progress, `task ${index}`, index, 5)
+      progress = archiveGoal(progress, 'done', index + 1)
     }
-    expect(finishGoalIfComplete(withFailure).goal?.status).toBe('active')
+    expect(progress.archivedGoals).toHaveLength(MAX_ARCHIVED_GOALS)
+    expect(progress.archivedGoals?.at(-1)?.summary).toBe('task 4')
   })
 })
 

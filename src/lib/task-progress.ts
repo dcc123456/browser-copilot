@@ -73,12 +73,34 @@ export interface TaskGoal {
    * the cap). A quota counter must be monotonic and unbounded.
    */
   autoRenewals: number
+  /** Locatable evidence submitted with the completion declaration. */
+  evidence?: GoalEvidence[]
 }
 
 /** Default per-goal round budget when the user has not set one. */
 export const DEFAULT_GOAL_MAX_ROUNDS = 20
 /** Bounded: a long task cannot grow its change log without limit. */
 export const MAX_BUDGET_LOG = 20
+/** Default increment when a budget is renewed without an explicit size. */
+export const DEFAULT_GOAL_RENEW_ROUNDS = 20
+/** How many finished goals stay readable ("what did the last task do?"). */
+export const MAX_ARCHIVED_GOALS = 3
+
+/** Evidence a completion claim must carry; the system only checks it is locatable. */
+export interface GoalEvidence {
+  kind: 'url' | 'element' | 'text'
+  value: string
+}
+
+/** A finished goal, kept bounded so "what did the previous task do" stays answerable. */
+export interface ArchivedGoal {
+  summary: string
+  startedAt: number
+  status: 'done' | 'abandoned'
+  endedAt: number
+  completedSteps: TaskProgressStep[]
+  autoRenewals: number
+}
 
 export interface TaskProgress {
   version: 2
@@ -90,6 +112,8 @@ export interface TaskProgress {
    * irreversible action must stay blocking for the whole conversation.
    */
   destructiveOps: DestructiveOperation[]
+  /** Bounded history of finished goals (newest last). */
+  archivedGoals?: ArchivedGoal[]
   updatedAt: number
 }
 
@@ -146,8 +170,22 @@ export function archiveGoal(
   status: 'done' | 'abandoned' = 'abandoned',
   now = Date.now(),
 ): TaskProgress {
-  if (!progress.goal) return progress
-  return { ...progress, goal: { ...progress.goal, status }, updatedAt: now }
+  const goal = progress.goal
+  if (!goal) return progress
+  const recorded: ArchivedGoal = {
+    summary: goal.summary,
+    startedAt: goal.startedAt,
+    status,
+    endedAt: now,
+    completedSteps: progress.steps.filter((step) => step.ok).slice(-12),
+    autoRenewals: goal.autoRenewals,
+  }
+  return {
+    ...progress,
+    goal: { ...goal, status },
+    archivedGoals: [...(progress.archivedGoals ?? []), recorded].slice(-MAX_ARCHIVED_GOALS),
+    updatedAt: now,
+  }
 }
 
 /** Whether an incoming message starts a new task rather than continuing one. */
@@ -156,16 +194,37 @@ export function startsNewGoal(progress: TaskProgress): boolean {
   return goal === undefined || goal.status !== 'active'
 }
 
-/** R-3: a turn that finished its work closes the goal; otherwise it stays active. */
-export function finishGoalIfComplete(progress: TaskProgress, now = Date.now()): TaskProgress {
+/** Records one spent round against the goal budget. */
+/**
+ * Completion is a DECLARATION, never an inference (spec R10 / AC-17): the
+ * caller must submit locatable evidence, and "no failed step" is not "done" —
+ * inferring that would mark every quiet turn done and reset budget and K on
+ * the next message. Returns undefined when the evidence is unusable.
+ */
+export function completeGoal(
+  progress: TaskProgress,
+  input: { summary?: string; evidence: GoalEvidence[] },
+  now = Date.now(),
+): TaskProgress | undefined {
   const goal = progress.goal
-  if (!goal || goal.status !== 'active') return progress
-  const hasUnfinished = progress.steps.some((step) => !step.ok)
-  if (hasUnfinished) return progress
-  return { ...progress, goal: { ...goal, status: 'done' }, updatedAt: now }
+  if (!goal || goal.status !== 'active') return undefined
+  const usable = input.evidence
+    .map((entry) => ({ kind: entry.kind, value: entry.value.trim() }))
+    .filter((entry) => entry.value.length > 0)
+  if (usable.length === 0) return undefined
+  const summary = input.summary?.trim() || goal.summary
+  return {
+    ...progress,
+    goal: {
+      ...goal,
+      summary: summary.slice(0, 400),
+      status: 'done',
+      evidence: usable.slice(0, 8),
+    },
+    updatedAt: now,
+  }
 }
 
-/** Records one spent round against the goal budget. */
 export function recordGoalRound(progress: TaskProgress, now = Date.now()): TaskProgress {
   if (!progress.goal) return progress
   return {
@@ -382,6 +441,16 @@ function coerceStep(value: unknown): TaskProgressStep | null {
   }
 }
 
+function coerceEvidence(value: unknown): GoalEvidence | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const kind = asString(record['kind'])
+  const text = asString(record['value']).trim()
+  if (!text) return null
+  if (kind !== 'url' && kind !== 'element' && kind !== 'text') return null
+  return { kind, value: text.slice(0, 2_000) }
+}
+
 function coerceStagnation(value: unknown): ProgressState | undefined {
   if (!value || typeof value !== 'object') return undefined
   const record = value as Record<string, unknown>
@@ -470,6 +539,14 @@ export function coerceTaskProgress(value: unknown): TaskProgress | undefined {
           : 'active',
         budgetLog,
         autoRenewals: Math.max(0, Math.floor(asNumber(raw['autoRenewals']))),
+        ...(Array.isArray(raw['evidence'])
+          ? {
+              evidence: raw['evidence']
+                .map((entry) => coerceEvidence(entry))
+                .filter((entry): entry is GoalEvidence => entry !== null)
+                .slice(0, 8),
+            }
+          : {}),
         ...(coerceStagnation(raw['stagnation'])
           ? { stagnation: coerceStagnation(raw['stagnation'])! }
           : {}),

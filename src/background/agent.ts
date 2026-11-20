@@ -138,7 +138,6 @@ import {
   beginTask,
   emptyTaskProgress,
   fingerprintOf,
-  finishGoalIfComplete,
   noteDestructiveOp,
   renderResumeNote,
   startsNewGoal,
@@ -6220,11 +6219,9 @@ export async function runAgentTurn(
       // budget bounds the continuation; a note left over when the turn truly
       // cannot go on is handed back to the panel, never dropped.
       if (applySupplements() === 0) {
-        // R-3: a turn that answered with no unfinished steps closes its goal;
-        // otherwise the goal stays active and the next message continues it.
-        taskProgress = finishGoalIfComplete(ctx.taskProgress ?? taskProgress)
-        ctx.taskProgress = taskProgress
-        await saveTaskProgress(taskProgress)
+        // Completion is a declaration, never inferred here: the goal stays
+        // active until an explicit completion with locatable evidence arrives.
+        await saveTaskProgress(ctx.taskProgress ?? taskProgress)
         return totalUsage.totalTokens > 0 ? totalUsage : null
       }
       continue
