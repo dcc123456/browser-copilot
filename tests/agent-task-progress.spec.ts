@@ -106,9 +106,16 @@ beforeEach(() => {
 describe('durable task progress in the agent loop', () => {
   it('puts a resumed task state in front of the model on the first request', async () => {
     loadMock.mockResolvedValue({
-      version: 1,
+      version: 2,
       conversationId: 'conv-resume',
-      goal: { summary: 'Submit the order for order 42', startedAt: 1000 },
+      goal: {
+        summary: 'Submit the order for order 42',
+        startedAt: 1000,
+        maxRounds: 20,
+        roundsStarted: 0,
+        status: 'active',
+        budgetLog: [],
+      },
       steps: [{ at: 2000, tool: 'click', summary: 'Click Pay now', ok: true }],
       destructiveOps: [],
       updatedAt: 2000,

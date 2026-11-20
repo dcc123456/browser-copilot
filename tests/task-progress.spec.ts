@@ -27,7 +27,14 @@ describe('task progress record', () => {
     expect(empty.goal).toBeUndefined()
     expect(empty.steps).toEqual([])
     const started = beginTask(empty, '  Book the cheapest flight  ', 2000)
-    expect(started.goal).toEqual({ summary: 'Book the cheapest flight', startedAt: 2000 })
+    expect(started.goal).toMatchObject({
+      summary: 'Book the cheapest flight',
+      startedAt: 2000,
+      maxRounds: 20,
+      roundsStarted: 0,
+      status: 'active',
+      budgetLog: [],
+    })
     expect(started.steps).toEqual([])
   })
 
@@ -93,7 +100,7 @@ describe('stored value coercion', () => {
   it('rejects garbage instead of crashing a resumed turn', () => {
     expect(coerceTaskProgress(null)).toBeUndefined()
     expect(coerceTaskProgress({})).toBeUndefined()
-    expect(coerceTaskProgress({ version: 2, conversationId: 'x' })).toBeUndefined()
+    expect(coerceTaskProgress({ version: 3, conversationId: 'x' })).toBeUndefined()
     expect(coerceTaskProgress({ version: 1, conversationId: '' })).toBeUndefined()
   })
 

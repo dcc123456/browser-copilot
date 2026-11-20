@@ -36,13 +36,38 @@ export interface DestructiveOperation {
   summary: string
 }
 
+export type GoalStatus = 'active' | 'paused' | 'done' | 'abandoned'
+
+/** One budget change, kept so auto-renewal can never be silent (spec R10). */
+export interface GoalBudgetChange {
+  at: number
+  kind: 'renew' | 'auto-renew' | 'edit'
+  /** Rounds added by this change. */
+  roundsAdded?: number
+  /** Who triggered it. */
+  actor: 'user' | 'strategy'
+  /** For auto-renewal: evidence that the previous segment made progress. */
+  evidence?: string
+}
+
 export interface TaskGoal {
   summary: string
   startedAt: number
+  /** Explicit round budget; the only termination-by-count the product allows. */
+  maxRounds: number
+  /** Rounds already spent against the budget (metric + budget accounting). */
+  roundsStarted: number
+  status: GoalStatus
+  budgetLog: GoalBudgetChange[]
 }
 
+/** Default per-goal round budget when the user has not set one. */
+export const DEFAULT_GOAL_MAX_ROUNDS = 20
+/** Bounded: a long task cannot grow its change log without limit. */
+export const MAX_BUDGET_LOG = 20
+
 export interface TaskProgress {
-  version: 1
+  version: 2
   conversationId: string
   goal?: TaskGoal
   steps: TaskProgressStep[]
@@ -64,7 +89,7 @@ const MAX_RESUME_NOTE_CHARS = 1_600
 const RESUME_STEP_LINES = 12
 
 export function emptyTaskProgress(conversationId: string, now = Date.now()): TaskProgress {
-  return { version: 1, conversationId, steps: [], destructiveOps: [], updatedAt: now }
+  return { version: 2, conversationId, steps: [], destructiveOps: [], updatedAt: now }
 }
 
 /** Sets (or replaces) the task goal. Steps belong to one goal, so they restart with it. */
@@ -72,13 +97,138 @@ export function beginTask(
   progress: TaskProgress,
   goalSummary: string,
   now = Date.now(),
+  maxRounds = DEFAULT_GOAL_MAX_ROUNDS,
 ): TaskProgress {
   const summary = goalSummary.trim().slice(0, 400)
+  const budget =
+    Number.isFinite(maxRounds) && maxRounds > 0 ? Math.floor(maxRounds) : DEFAULT_GOAL_MAX_ROUNDS
   return {
     ...progress,
-    ...(summary ? { goal: { summary, startedAt: now } } : {}),
+    ...(summary
+      ? {
+          goal: {
+            summary,
+            startedAt: now,
+            maxRounds: budget,
+            roundsStarted: 0,
+            status: 'active' as const,
+            budgetLog: [],
+          },
+        }
+      : {}),
     steps: [],
     updatedAt: now,
+  }
+}
+
+/** Records one spent round against the goal budget. */
+export function recordGoalRound(progress: TaskProgress, now = Date.now()): TaskProgress {
+  if (!progress.goal) return progress
+  return {
+    ...progress,
+    goal: { ...progress.goal, roundsStarted: progress.goal.roundsStarted + 1 },
+    updatedAt: now,
+  }
+}
+
+export function remainingGoalRounds(progress: TaskProgress): number {
+  if (!progress.goal) return 0
+  return Math.max(0, progress.goal.maxRounds - progress.goal.roundsStarted)
+}
+
+export function goalBudgetExhausted(progress: TaskProgress): boolean {
+  return progress.goal !== undefined && remainingGoalRounds(progress) <= 0
+}
+
+/**
+ * Renews the budget by an INCREMENT. Never resets `roundsStarted`, the step
+ * list, or the stagnation counter (which a caller keeps with the goal): a
+ * renewal extends the same task, it does not start a new one.
+ */
+export function renewGoalBudget(
+  progress: TaskProgress,
+  rounds: number,
+  actor: GoalBudgetChange['actor'],
+  now = Date.now(),
+  evidence?: string,
+): TaskProgress {
+  const goal = progress.goal
+  if (!goal || !Number.isFinite(rounds) || rounds <= 0) return progress
+  const added = Math.floor(rounds)
+  const entry: GoalBudgetChange = {
+    at: now,
+    kind: actor === 'user' ? 'renew' : 'auto-renew',
+    roundsAdded: added,
+    actor,
+    ...(evidence ? { evidence: evidence.slice(0, 300) } : {}),
+  }
+  return {
+    ...progress,
+    goal: {
+      ...goal,
+      maxRounds: goal.maxRounds + added,
+      status: goal.status === 'paused' ? 'active' : goal.status,
+      budgetLog: [...goal.budgetLog, entry].slice(-MAX_BUDGET_LOG),
+    },
+    updatedAt: now,
+  }
+}
+
+export interface AutoRenewDecision {
+  allowed: boolean
+  reason: 'not-paused' | 'attended' | 'k-exhausted' | 'no-progress' | 'allowed'
+}
+
+/**
+ * K is an unattended-only strategy (spec R10): with a human present the user
+ * renews; without one, renewal requires PROGRESS in the segment that just ran —
+ * otherwise auto-renewal would turn "stuck" into "silently burn another batch".
+ */
+export function autoRenewDecision(
+  progress: TaskProgress,
+  options: { unattended: boolean; k: number; progressDetected: boolean },
+): AutoRenewDecision {
+  const goal = progress.goal
+  if (!goal || goal.status !== 'paused') return { allowed: false, reason: 'not-paused' }
+  if (!options.unattended) return { allowed: false, reason: 'attended' }
+  if (options.k <= 0) return { allowed: false, reason: 'k-exhausted' }
+  const used = goal.budgetLog.filter((entry) => entry.kind === 'auto-renew').length
+  if (used >= options.k) return { allowed: false, reason: 'k-exhausted' }
+  if (!options.progressDetected) return { allowed: false, reason: 'no-progress' }
+  return { allowed: true, reason: 'allowed' }
+}
+
+export interface GoalBudgetReport {
+  goal: string
+  completed: number
+  steps: TaskProgressStep[]
+  remainingRounds: number
+  usedRounds: number
+  maxRounds: number
+  nextActions: ('renew' | 'change-goal' | 'stop')[]
+}
+
+/**
+ * The six-item budget report (spec R10): goal, done, remaining, stop reason,
+ * cost, next actions. Pure so the panel card and the status line render the
+ * same facts.
+ */
+export function goalBudgetReport(
+  progress: TaskProgress,
+  cost?: TaskCost,
+): GoalBudgetReport | undefined {
+  const goal = progress.goal
+  if (!goal) return undefined
+  const completed = progress.steps.filter((step) => step.ok)
+  return {
+    goal: goal.summary,
+    completed: completed.length,
+    steps: completed.slice(-RESUME_STEP_LINES),
+    remainingRounds: remainingGoalRounds(progress),
+    usedRounds: goal.roundsStarted,
+    maxRounds: goal.maxRounds,
+    nextActions: ['renew', 'change-goal', 'stop'],
+    ...(cost ? { cost } : {}),
   }
 }
 
@@ -171,6 +321,26 @@ function coerceStep(value: unknown): TaskProgressStep | null {
   }
 }
 
+function coerceBudgetChange(value: unknown): GoalBudgetChange | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const kind = asString(record['kind'])
+  const actor = asString(record['actor'])
+  if (!['renew', 'auto-renew', 'edit'].includes(kind)) return null
+  if (actor !== 'user' && actor !== 'strategy') return null
+  return {
+    at: asNumber(record['at']),
+    kind: kind as GoalBudgetChange['kind'],
+    ...(asNumber(record['roundsAdded']) > 0
+      ? { roundsAdded: Math.floor(asNumber(record['roundsAdded'])) }
+      : {}),
+    actor,
+    ...(asString(record['evidence'])
+      ? { evidence: asString(record['evidence']).slice(0, 300) }
+      : {}),
+  }
+}
+
 function coerceOp(value: unknown): DestructiveOperation | null {
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
@@ -192,17 +362,37 @@ function coerceOp(value: unknown): DestructiveOperation | null {
 export function coerceTaskProgress(value: unknown): TaskProgress | undefined {
   if (!value || typeof value !== 'object') return undefined
   const record = value as Record<string, unknown>
-  if (record['version'] !== 1) return undefined
+  // Version 1 had no goal budget; migrate it with the default budget rather
+  // than discarding the user's progress.
+  if (record['version'] !== 1 && record['version'] !== 2) return undefined
   const conversationId = asString(record['conversationId']).trim()
   if (!conversationId) return undefined
   const rawGoal = record['goal']
   let goal: TaskGoal | undefined
   if (rawGoal && typeof rawGoal === 'object') {
-    const summary = asString((rawGoal as Record<string, unknown>)['summary']).trim()
+    const raw = rawGoal as Record<string, unknown>
+    const summary = asString(raw['summary']).trim()
     if (summary) {
+      const maxRounds = asNumber(raw['maxRounds'])
+      const status = asString(raw['status'])
+      const budgetLog = Array.isArray(raw['budgetLog'])
+        ? raw['budgetLog']
+            .map((entry) => coerceBudgetChange(entry))
+            .filter((entry): entry is GoalBudgetChange => entry !== null)
+            .slice(-MAX_BUDGET_LOG)
+        : []
       goal = {
         summary: summary.slice(0, 400),
-        startedAt: asNumber((rawGoal as Record<string, unknown>)['startedAt']),
+        startedAt: asNumber(raw['startedAt']),
+        maxRounds:
+          Number.isFinite(maxRounds) && maxRounds > 0
+            ? Math.floor(maxRounds)
+            : DEFAULT_GOAL_MAX_ROUNDS,
+        roundsStarted: Math.max(0, Math.floor(asNumber(raw['roundsStarted']))),
+        status: (['active', 'paused', 'done', 'abandoned'] as const).includes(status as GoalStatus)
+          ? (status as GoalStatus)
+          : 'active',
+        budgetLog,
       }
     }
   }
@@ -213,7 +403,7 @@ export function coerceTaskProgress(value: unknown): TaskProgress | undefined {
     ? record['destructiveOps'].map(coerceOp).filter((op): op is DestructiveOperation => op !== null)
     : []
   return {
-    version: 1,
+    version: 2,
     conversationId,
     ...(goal ? { goal } : {}),
     steps: steps.slice(-MAX_TASK_STEPS),
