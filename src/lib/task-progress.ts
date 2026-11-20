@@ -59,6 +59,13 @@ export interface TaskGoal {
   roundsStarted: number
   status: GoalStatus
   budgetLog: GoalBudgetChange[]
+  /**
+   * Monotonic count of automatic renewals. NOT derived from `budgetLog`: that
+   * log is a bounded display artifact, so deriving the K quota from it made
+   * K > MAX_BUDGET_LOG permanently allow renewals (the quota could never reach
+   * the cap). A quota counter must be monotonic and unbounded.
+   */
+  autoRenewals: number
 }
 
 /** Default per-goal round budget when the user has not set one. */
@@ -113,6 +120,7 @@ export function beginTask(
             roundsStarted: 0,
             status: 'active' as const,
             budgetLog: [],
+            autoRenewals: 0,
           },
         }
       : {}),
@@ -169,6 +177,7 @@ export function renewGoalBudget(
       maxRounds: goal.maxRounds + added,
       status: goal.status === 'paused' ? 'active' : goal.status,
       budgetLog: [...goal.budgetLog, entry].slice(-MAX_BUDGET_LOG),
+      autoRenewals: actor === 'strategy' ? goal.autoRenewals + 1 : goal.autoRenewals,
     },
     updatedAt: now,
   }
@@ -192,20 +201,30 @@ export function autoRenewDecision(
   if (!goal || goal.status !== 'paused') return { allowed: false, reason: 'not-paused' }
   if (!options.unattended) return { allowed: false, reason: 'attended' }
   if (options.k <= 0) return { allowed: false, reason: 'k-exhausted' }
-  const used = goal.budgetLog.filter((entry) => entry.kind === 'auto-renew').length
+  const used = goal.autoRenewals
   if (used >= options.k) return { allowed: false, reason: 'k-exhausted' }
   if (!options.progressDetected) return { allowed: false, reason: 'no-progress' }
   return { allowed: true, reason: 'allowed' }
 }
 
+/** The six stop classes a goal may end on (spec R3/R10). */
+export type GoalStopReason =
+  'achieved' | 'blocked' | 'no-progress' | 'user-stop' | 'budget' | 'cost'
+
 export interface GoalBudgetReport {
   goal: string
+  /** How many steps succeeded. */
   completed: number
-  steps: TaskProgressStep[]
+  /** The succeeded steps themselves — the evidence a report must show. */
+  completedSteps: TaskProgressStep[]
+  /** What is left: failed steps, or the explicit "continue from here" line. */
+  unfinished: string[]
+  stopReason: GoalStopReason
   remainingRounds: number
   usedRounds: number
   maxRounds: number
   nextActions: ('renew' | 'change-goal' | 'stop')[]
+  cost?: TaskCost
 }
 
 /**
@@ -216,14 +235,23 @@ export interface GoalBudgetReport {
 export function goalBudgetReport(
   progress: TaskProgress,
   cost?: TaskCost,
+  stopReason: GoalStopReason = 'budget',
 ): GoalBudgetReport | undefined {
   const goal = progress.goal
   if (!goal) return undefined
   const completed = progress.steps.filter((step) => step.ok)
+  const failed = progress.steps.filter((step) => !step.ok)
   return {
     goal: goal.summary,
     completed: completed.length,
-    steps: completed.slice(-RESUME_STEP_LINES),
+    completedSteps: completed.slice(-RESUME_STEP_LINES),
+    unfinished:
+      failed.length > 0
+        ? failed
+            .slice(-RESUME_STEP_LINES)
+            .map((step) => `retry ${step.tool}: ${step.summary}${step.url ? ` @ ${step.url}` : ''}`)
+        : ['Continue the goal from the last completed step.'],
+    stopReason,
     remainingRounds: remainingGoalRounds(progress),
     usedRounds: goal.roundsStarted,
     maxRounds: goal.maxRounds,
@@ -393,6 +421,7 @@ export function coerceTaskProgress(value: unknown): TaskProgress | undefined {
           ? (status as GoalStatus)
           : 'active',
         budgetLog,
+        autoRenewals: Math.max(0, Math.floor(asNumber(raw['autoRenewals']))),
       }
     }
   }

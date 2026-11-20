@@ -115,6 +115,7 @@ describe('durable task progress in the agent loop', () => {
         roundsStarted: 0,
         status: 'active',
         budgetLog: [],
+        autoRenewals: 0,
       },
       steps: [{ at: 2000, tool: 'click', summary: 'Click Pay now', ok: true }],
       destructiveOps: [],

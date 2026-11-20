@@ -14,6 +14,7 @@ import {
   recordGoalRound,
   remainingGoalRounds,
   renewGoalBudget,
+  type TaskProgress,
 } from '../src/lib/task-progress'
 
 function started(maxRounds = 3) {
@@ -107,6 +108,38 @@ describe('auto-renewal K (unattended only)', () => {
   })
 })
 
+describe('K quota counter (QA audit)', () => {
+  it('keeps blocking after more renewals than the bounded log can hold', () => {
+    // K > MAX_BUDGET_LOG used to be unreachable: the quota was derived from the
+    // 20-entry log, so `used` never reached the cap. The monotonic counter fixes
+    // it; this asserts the 25th renewal is still refused at K = 25.
+    const paused = () => {
+      const spent = recordGoalRound(started(1), 2_000)
+      return { ...spent, goal: { ...spent.goal!, status: 'paused' as const } }
+    }
+    let progress: TaskProgress = paused()
+    for (let index = 0; index < 25; index += 1) {
+      const decision = autoRenewDecision(progress, {
+        unattended: true,
+        k: 25,
+        progressDetected: true,
+      })
+      expect(decision.allowed).toBe(true)
+      progress = renewGoalBudget(progress, 1, 'strategy', 3_000 + index, 'progress')
+      progress = { ...progress, goal: { ...progress.goal!, status: 'paused' as const } }
+    }
+    expect(progress.goal?.autoRenewals).toBe(25)
+    expect(
+      autoRenewDecision(progress, { unattended: true, k: 25, progressDetected: true }),
+    ).toEqual({
+      allowed: false,
+      reason: 'k-exhausted',
+    })
+    // The display log stays bounded while the quota is not.
+    expect(progress.goal?.budgetLog.length).toBeLessThanOrEqual(20)
+  })
+})
+
 describe('goal report and migration', () => {
   it('reports the six budget facts including the next actions', () => {
     const progress = recordGoalRound(
@@ -125,8 +158,13 @@ describe('goal report and migration', () => {
       usedRounds: 1,
       maxRounds: 2,
       remainingRounds: 1,
+      stopReason: 'budget',
       nextActions: ['renew', 'change-goal', 'stop'],
     })
+    // Six items: goal, done (with evidence), unfinished, stop reason, cost,
+    // next actions. The report is the single source for the pause card.
+    expect(report?.completedSteps).toEqual([])
+    expect(report?.unfinished).toEqual(['Continue the goal from the last completed step.'])
   })
 
   it('migrates a version-1 record with the default budget instead of dropping it', () => {
