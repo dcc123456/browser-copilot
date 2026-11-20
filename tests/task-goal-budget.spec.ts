@@ -167,6 +167,40 @@ describe('goal report and migration', () => {
     expect(report?.unfinished).toEqual(['Continue the goal from the last completed step.'])
   })
 
+  it('restores autoRenewals and stagnation from storage instead of zeroing them', () => {
+    const restored = coerceTaskProgress({
+      version: 2,
+      conversationId: 'conv-1',
+      goal: {
+        summary: 'goal',
+        startedAt: 10,
+        maxRounds: 40,
+        roundsStarted: 12,
+        status: 'paused',
+        budgetLog: [],
+        autoRenewals: 3,
+        stagnation: {
+          signature: 'SIG',
+          url: 'https://x.test/p',
+          unchanged: 5,
+          unreadable: 0,
+          waiting: 1,
+        },
+      },
+      steps: [],
+      destructiveOps: [],
+      updatedAt: 20,
+    })
+    expect(restored?.goal?.autoRenewals).toBe(3)
+    expect(restored?.goal?.stagnation).toEqual({
+      signature: 'SIG',
+      url: 'https://x.test/p',
+      unchanged: 5,
+      unreadable: 0,
+      waiting: 1,
+    })
+  })
+
   it('migrates a version-1 record with the default budget instead of dropping it', () => {
     const migrated = coerceTaskProgress({
       version: 1,

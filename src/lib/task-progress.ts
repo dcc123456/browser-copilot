@@ -15,6 +15,7 @@
  *
  * @module lib/task-progress
  */
+import type { ProgressState } from './progress-signal'
 import { entityKeyFor } from './token-ledger'
 
 /** One executed tool step, in model-facing order. */
@@ -59,6 +60,12 @@ export interface TaskGoal {
   roundsStarted: number
   status: GoalStatus
   budgetLog: GoalBudgetChange[]
+  /**
+   * Result-based stagnation state, persisted WITH the goal: a service worker
+   * restart must not reset the no-progress counters any more than it resets K
+   * (spec R1③ / R10). Absent on older records = a fresh segment.
+   */
+  stagnation?: ProgressState
   /**
    * Monotonic count of automatic renewals. NOT derived from `budgetLog`: that
    * log is a bounded display artifact, so deriving the K quota from it made
@@ -349,6 +356,21 @@ function coerceStep(value: unknown): TaskProgressStep | null {
   }
 }
 
+function coerceStagnation(value: unknown): ProgressState | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  const signature = typeof record['signature'] === 'string' ? record['signature'] : null
+  const url = typeof record['url'] === 'string' ? record['url'] : null
+  const count = (key: string): number => Math.max(0, Math.floor(asNumber(record[key])))
+  return {
+    signature,
+    url,
+    unchanged: count('unchanged'),
+    unreadable: count('unreadable'),
+    waiting: count('waiting'),
+  }
+}
+
 function coerceBudgetChange(value: unknown): GoalBudgetChange | null {
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
@@ -422,6 +444,9 @@ export function coerceTaskProgress(value: unknown): TaskProgress | undefined {
           : 'active',
         budgetLog,
         autoRenewals: Math.max(0, Math.floor(asNumber(raw['autoRenewals']))),
+        ...(coerceStagnation(raw['stagnation'])
+          ? { stagnation: coerceStagnation(raw['stagnation'])! }
+          : {}),
       }
     }
   }

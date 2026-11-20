@@ -5849,7 +5849,9 @@ export async function runAgentTurn(
     ...(enabledSkills ? { enabledSkills } : {}),
     failureStreaks: new Map(),
     taskProgress,
-    progress: emptyProgressState(),
+    // Restored WITH the goal: a worker restart must not reset the stagnation
+    // counters (regenerating them from zero would make K/blocking endless).
+    progress: taskProgress.goal?.stagnation ?? emptyProgressState(),
     ...(delegation ? { delegation } : {}),
     ...(deps.subAgent ? { subAgent: deps.subAgent } : {}),
     ...(toolAllowSet ? { toolAllowSet } : {}),
@@ -6451,6 +6453,12 @@ async function observeProgress(
     url: ctx.lastUrl ?? null,
   })
   ctx.progress = evaluation.state
+  if (ctx.taskProgress?.goal) {
+    ctx.taskProgress = {
+      ...ctx.taskProgress,
+      goal: { ...ctx.taskProgress.goal, stagnation: evaluation.state },
+    }
+  }
   if (evaluation.action === 'blocker') {
     ctx.progressBlocker = true
     deps.send({
@@ -7274,6 +7282,7 @@ async function runOneToolCall(
       describeAction(name, args, ctx.snapshotTargets),
       ok,
     )
+    if (ctx.taskProgress) await saveTaskProgress(ctx.taskProgress)
   } catch (error) {
     // A termination must unwind the whole turn, not be recorded as a failed
     // tool step — otherwise the loop keeps going after the user cancelled.
