@@ -54,9 +54,13 @@ describe('projectHardCap emergency bound', () => {
     expect(removed).toBeGreaterThan(0)
     expect(messages.length).toBe(originalLength) // no message dropped
     expect(estimateInputTokens(messages)).toBeLessThanOrEqual(2_000)
-    expect(String((messages[1] as { content: string }).content).endsWith('[truncated]')).toBe(true)
+    expect(
+      String((messages[1] as { content: string }).content).endsWith('[context-truncated]'),
+    ).toBe(true)
     // The transcript that gets persisted is not the projection.
-    expect(String((history[1] as { content: string }).content).endsWith('[truncated]')).toBe(false)
+    expect(
+      String((history[1] as { content: string }).content).endsWith('[context-truncated]'),
+    ).toBe(false)
   })
   it('never rewrites user content, even when the budget cannot be met', () => {
     // User turns are the transcript's spine: cutting into user text would

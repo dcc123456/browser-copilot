@@ -140,11 +140,13 @@ export function projectHardCap(
     const excessTokens = estimateInputTokens(projected) - tokenBudget
     // Convert the token excess to chars at the dense rate (+ margin), but keep
     // at least 300 chars of the message.
-    const wantedCut = Math.ceil(excessTokens / 0.9) + 16
+    // Include the marker we are about to append: ignoring it left the
+    // projection a few tokens over budget once the marker got longer.
+    const wantedCut = Math.ceil(excessTokens / 0.9) + 16 + '\u2026[context-truncated]'.length
     const cut = Math.min(message.content.length - 300, wantedCut)
     projected[index] = {
       ...message,
-      content: `${message.content.slice(0, message.content.length - cut)}\u2026[truncated]`,
+      content: `${message.content.slice(0, message.content.length - cut)}\u2026[context-truncated]`,
     }
     removed += cut
     return true
@@ -152,7 +154,12 @@ export function projectHardCap(
   // Keep truncating the oldest non-user messages that still hold content,
   // iterating until the budget fits or none of them is cuttable.
   let progressed = true
-  while (progressed && estimateInputTokens(projected) > tokenBudget) {
+  // Bounded: a content shape whose estimate cannot fall below the budget (a
+  // floor per message, a non-string payload) must end the cap, not spin the
+  // turn. The caller treats an over-budget projection as "could not fit".
+  let passes = 0
+  while (progressed && estimateInputTokens(projected) > tokenBudget && passes < 1_000) {
+    passes += 1
     progressed = false
     for (let index = 0; index < projected.length; index += 1) {
       if (estimateInputTokens(projected) <= tokenBudget) return { messages: projected, removed }
@@ -160,6 +167,22 @@ export function projectHardCap(
     }
   }
   return { messages: projected, removed }
+}
+
+/**
+ * ASCII sentinel prefixed to every stored compaction summary.
+ *
+ * The localized marker alone is locale-dependent and lives in prose, so a
+ * consumer (panel, export, history compile) cannot reliably tell "the user
+ * said this" from "the system summarized this". This sentinel is stable and
+ * machine-checkable; the transcript keeps it, so the distinction survives
+ * storage rather than depending on a renderer's filter.
+ */
+export const COMPACTION_SUMMARY_SENTINEL = '[[compaction-summary]]'
+
+/** Whether a message body is a stored compaction summary. */
+export function isCompactionSummaryText(text: string): boolean {
+  return text.startsWith(COMPACTION_SUMMARY_SENTINEL)
 }
 
 export interface CompactOutcome {
@@ -309,7 +332,7 @@ export async function compactHistory(
 
   const summaryMessage: WireMessage = {
     role: 'user',
-    content: `${options.marker}\n${summary}`,
+    content: `${COMPACTION_SUMMARY_SENTINEL}\n${options.marker}\n${summary}`,
   }
   // Insert at the first removal, then drop the removed messages. Splicing
   // from the highest index keeps the lower indices valid.

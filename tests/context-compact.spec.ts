@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  COMPACTION_SUMMARY_SENTINEL,
+  isCompactionSummaryText,
   COMPACT_KEEP_RECENT_TURNS,
   COMPACT_THRESHOLD_TOKENS,
   compactHistory,
@@ -86,9 +88,11 @@ describe('projectCompaction', () => {
     const snapshot = JSON.parse(JSON.stringify(history)) as WireMessage[]
     const projected = await projectCompaction(history, opts({ summarize: async () => 'S' }))
     expect(projected?.removed).toBe(2)
-    expect(projected?.messages.some((m) => m.role === 'user' && m.content === `${MARKER}\nS`)).toBe(
-      true,
-    )
+    expect(
+      projected?.messages.some(
+        (m) => m.role === 'user' && m.content === `${COMPACTION_SUMMARY_SENTINEL}\n${MARKER}\nS`,
+      ),
+    ).toBe(true)
     // The transcript that gets persisted keeps every original message.
     expect(history).toEqual(snapshot)
   })
@@ -103,7 +107,7 @@ describe('compactHistory', () => {
     // message, before the next turn.
     expect(history).toEqual([
       user('T1: buy something'),
-      { role: 'user', content: `${MARKER}\nS` },
+      { role: 'user', content: `${COMPACTION_SUMMARY_SENTINEL}\n${MARKER}\nS` },
       user('T2: refine'),
       assistant('T2 answer'),
       user('T3: final request'),
@@ -133,10 +137,11 @@ describe('compactHistory', () => {
     )
     expect(outcome).not.toBeNull()
     const markerMessage = history.find(
-      (m) => m.role === 'user' && typeof m.content === 'string' && m.content.startsWith(MARKER),
+      (m) =>
+        m.role === 'user' && typeof m.content === 'string' && isCompactionSummaryText(m.content),
     )
     const summary = typeof markerMessage?.content === 'string' ? markerMessage.content : ''
-    expect(summary.startsWith(`${MARKER}\n`)).toBe(true)
+    expect(summary.startsWith(`${COMPACTION_SUMMARY_SENTINEL}\n${MARKER}\n`)).toBe(true)
     // Only REMOVED messages are digested — user messages never enter it.
     expect(summary).toContain('assistant: T1 answer')
     expect(summary).toContain('tool: {"result":"page read"}')
@@ -153,7 +158,11 @@ describe('compactHistory', () => {
     const history: WireMessage[] = [user('a'), assistant('b'), user('current')]
     const outcome = await compactHistory(history, opts({ summarize: async () => 'S' }))
     expect(outcome).toBeNull()
-    expect(history.some((m) => m.role === 'user' && m.content === `${MARKER}\nS`)).toBe(false)
+    expect(
+      history.some(
+        (m) => m.role === 'user' && m.content === `${COMPACTION_SUMMARY_SENTINEL}\n${MARKER}\nS`,
+      ),
+    ).toBe(false)
   })
 
   it('returns null when the compactable span holds only user messages', async () => {

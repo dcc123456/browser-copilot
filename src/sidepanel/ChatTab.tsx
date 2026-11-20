@@ -34,6 +34,7 @@ import {
   type AiPrefillStep,
 } from '../lib/storage'
 import { freeAccessOf } from '../lib/providers'
+import { isCompactionSummaryText } from '../lib/context-compact'
 import { isTriggerNode } from '../lib/workflow/migrate'
 import { generateWorkflowName } from '../lib/workflow/generation-goal'
 import {
@@ -2348,31 +2349,40 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
             // `messages` is defensively defaulted because a stale worker from a
             // previous version may not send it, and mapping undefined would
             // crash the whole panel.
-            const restored: Entry[] = (message.messages ?? []).map((entry) => {
-              if (entry.role === 'tool') {
-                // Replay lines are preformatted `← name: summary`; recover the
-                // structured fields so historical turns render the same card
-                // UI as live tool calls.
-                const { name, summary } = parseRestoredTool(entry.text)
+            const restored: Entry[] = (message.messages ?? [])
+              .filter(
+                // A stored compaction summary is role `user` only because the
+                // wire format has no other slot: the user never said it, so it
+                // must not render as a user bubble.
+                (entry) => !(entry.role === 'user' && isCompactionSummaryText(entry.text)),
+              )
+              .map((entry) => {
+                if (entry.role === 'tool') {
+                  // Replay lines are preformatted `← name: summary`; recover the
+                  // structured fields so historical turns render the same card
+                  // UI as live tool calls.
+                  const { name, summary } = parseRestoredTool(entry.text)
+                  return {
+                    id: nextId(),
+                    role: 'tool' as const,
+                    text: entry.text,
+                    toolName: name,
+                    toolSummary: summary,
+                    toolOk: entry.toolOk !== false,
+                  }
+                }
                 return {
                   id: nextId(),
-                  role: 'tool' as const,
+                  role: entry.role as 'user' | 'assistant',
                   text: entry.text,
-                  toolName: name,
-                  toolSummary: summary,
-                  toolOk: entry.toolOk !== false,
+                  ...(entry.role === 'user' && entry.attachments?.length
+                    ? { attachments: entry.attachments }
+                    : {}),
+                  ...(entry.role === 'user' && entry.skillName
+                    ? { skillName: entry.skillName }
+                    : {}),
                 }
-              }
-              return {
-                id: nextId(),
-                role: entry.role as 'user' | 'assistant',
-                text: entry.text,
-                ...(entry.role === 'user' && entry.attachments?.length
-                  ? { attachments: entry.attachments }
-                  : {}),
-                ...(entry.role === 'user' && entry.skillName ? { skillName: entry.skillName } : {}),
-              }
-            })
+              })
             // The stored turn state still claimed a running turn but no worker
             // owns it: the previous turn died mid-answer. Say so at the seam,
             // or the transcript just stops with no explanation.

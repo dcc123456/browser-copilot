@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { compactConversationOnRequest } from '../src/background/agent'
 import { streamCompletion, type WireMessage } from '../src/lib/llm'
+import { isCompactionSummaryText } from '../src/lib/context-compact'
 import { effectiveLocale, messagesFor } from '../src/lib/i18n'
 
 /**
@@ -83,7 +84,9 @@ describe('compactConversationOnRequest', () => {
     expect(texts(history)).toContain('answer three')
 
     const marker = messagesFor(effectiveLocale('en', 'en')).contextCompactedMarker
-    const summary = history.find((m) => texts([m]).some((text) => text.startsWith(marker)))
+    const summary = history.find((m) =>
+      texts([m]).some((text) => isCompactionSummaryText(text) && text.includes(marker)),
+    )
     expect(summary?.role).toBe('user')
     expect(summary?.content).toContain('COMPACTED SUMMARY')
     // Inserted where the first removal happened, i.e. right after the oldest user turn.
