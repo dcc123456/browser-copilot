@@ -93,9 +93,12 @@ import {
   listPasswords,
   listProfiles,
   listSkills,
+  loadTaskProgress,
   newId,
   recordPasswordUse,
   saveSkill,
+  saveTaskProgress,
+  taskCostSince,
   getSettings,
   getSkill,
 } from '../lib/storage'
@@ -120,6 +123,16 @@ import {
   REPEAT_FAILURE_LIMIT,
   toolOutputSucceeded,
 } from '../lib/tool-error'
+import {
+  appendProgressStep,
+  beginTask,
+  emptyTaskProgress,
+  fingerprintOf,
+  isIrreversibleReason,
+  noteDestructiveOp,
+  renderResumeNote,
+  type TaskProgress,
+} from '../lib/task-progress'
 import {
   type Agent,
   type AgentMode,
@@ -2766,6 +2779,12 @@ export interface ToolContext {
    * design). Absent outside `runAgentTurn`.
    */
   failureStreaks?: Map<string, FailureStreak>
+  /**
+   * Durable task progress for this conversation (spec R4). Mutable: every
+   * executed step is folded in and persisted, so a crashed or resumed turn can
+   * say what is done instead of re-exploring it.
+   */
+  taskProgress?: TaskProgress
 }
 
 /**
@@ -5709,6 +5728,32 @@ export async function runAgentTurn(
       ...(supervisorBlock ? { supervisor: supervisorBlock } : {}),
     })
   }
+  // --- Durable task progress (spec R4) ------------------------------------
+  // Read BEFORE the first request so the resume note is part of the system
+  // prompt from round one. A stored record makes this a resumed task: the note
+  // restates the goal, the finished steps, the irreversible actions that must
+  // not run again, and the spend read from the request ledger.
+  const lastUserText = [...history]
+    .reverse()
+    .find((message) => message.role === 'user' && typeof message.content === 'string')?.content as
+    string | undefined
+  const storedProgress = await loadTaskProgress(deps.conversationId)
+  let taskProgress = storedProgress ?? emptyTaskProgress(deps.conversationId)
+  if (!taskProgress.goal && lastUserText) {
+    taskProgress = beginTask(taskProgress, lastUserText)
+  }
+  const isResumed =
+    storedProgress !== undefined &&
+    (storedProgress.goal !== undefined ||
+      storedProgress.steps.length > 0 ||
+      storedProgress.destructiveOps.length > 0)
+  if (isResumed) {
+    const cost = await taskCostSince(deps.conversationId, taskProgress.goal?.startedAt ?? 0)
+    const note = renderResumeNote(taskProgress, cost)
+    if (note) systemPrompt = `${systemPrompt}\n\n${note}`
+  }
+  await saveTaskProgress(taskProgress)
+
   const roundsCap = maxToolRounds || DEFAULT_MAX_TOOL_ROUNDS
   // A chat turn treats the configured budget as ONE batch: spending it extends
   // the same turn by another batch instead of ending it, so a long task reaches
@@ -5769,6 +5814,7 @@ export async function runAgentTurn(
     tabLedger: deps.tabLedger ?? storeConversationTabs(deps.conversationId),
     ...(enabledSkills ? { enabledSkills } : {}),
     failureStreaks: new Map(),
+    taskProgress,
     ...(delegation ? { delegation } : {}),
     ...(deps.subAgent ? { subAgent: deps.subAgent } : {}),
     ...(toolAllowSet ? { toolAllowSet } : {}),
@@ -6272,6 +6318,45 @@ function auditOf(
   const audit = ctx.operatorAudit
   if (!audit || !isOperatorTool(name)) return { name, args }
   return { name: audit.action, args: audit.args }
+}
+
+/**
+ * Folds one executed step into the conversation's durable progress.
+ *
+ * Best effort by contract: losing a checkpoint costs recovery detail, failing
+ * the turn because a progress write failed would be worse. Irreversible
+ * actions are recorded separately (and kept for the whole conversation), which
+ * is what the replay guard reads on the next turn.
+ */
+async function recordTaskStep(
+  ctx: ToolContext,
+  name: string,
+  args: Record<string, unknown>,
+  summary: string,
+  ok: boolean,
+): Promise<void> {
+  const current = ctx.taskProgress
+  if (!current) return
+  let next = appendProgressStep(current, {
+    tool: name,
+    summary,
+    ok,
+    ...(ctx.lastUrl ? { url: ctx.lastUrl } : {}),
+  })
+  if (ok) {
+    const risk = assessActionRisk(name, args, (stepArgs) =>
+      riskTargetOf(stepArgs, ctx.snapshotTargets),
+    )
+    if (risk.risky && risk.reason !== undefined && isIrreversibleReason(risk.reason)) {
+      next = noteDestructiveOp(next, {
+        tool: name,
+        summary,
+        fingerprint: fingerprintOf(name, args),
+      })
+    }
+  }
+  ctx.taskProgress = next
+  await saveTaskProgress(next)
 }
 
 async function runOneToolCall(
@@ -6976,6 +7061,7 @@ async function runOneToolCall(
       describeDetail(audit.name, audit.args, ctx.snapshotTargets, output),
       audit.args,
     )
+    await recordTaskStep(ctx, name, args, describeAction(name, args, ctx.snapshotTargets), ok)
   } catch (error) {
     // A termination must unwind the whole turn, not be recorded as a failed
     // tool step — otherwise the loop keeps going after the user cancelled.
@@ -7000,6 +7086,7 @@ async function runOneToolCall(
       [...describeDetail(audit.name, audit.args, ctx.snapshotTargets), `Error: ${message}`],
       audit.args,
     )
+    await recordTaskStep(ctx, name, args, describeAction(name, args, ctx.snapshotTargets), false)
   }
 }
 

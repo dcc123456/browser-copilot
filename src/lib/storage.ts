@@ -67,6 +67,12 @@ import {
   type TokenLedger,
   type TokenUsageRecord,
 } from './token-ledger'
+import {
+  coerceTaskProgress,
+  taskTokenCost,
+  type TaskCost,
+  type TaskProgress,
+} from './task-progress'
 
 /**
  * The active storage area: files when a directory is configured and granted,
@@ -596,6 +602,8 @@ export function newId(): string {
  * except as part of a model request.
  */
 const CONVERSATION_PREFIX = 'conv:'
+/** Durable task-progress records are per conversation, like the transcript. */
+const TASK_PROGRESS_PREFIX = 'task-progress:'
 
 /**
  * The default conversation id. A fixed id makes collapse-and-return resume
@@ -853,6 +861,17 @@ function conversationKey(conversationId: string): string {
 }
 
 /**
+ * Durable task progress lives beside the transcript, keyed by conversation.
+ *
+ * Not part of the transcript on purpose: the transcript is trimmed and
+ * rewritten over a long task, while the goal, the executed steps and the
+ * irreversible-action list must survive that trimming (spec R4).
+ */
+function taskProgressKey(conversationId: string): string {
+  return `${TASK_PROGRESS_PREFIX}${conversationId}`
+}
+
+/**
  * Groups a transcript into units that must survive or disappear together: a
  * `tool_calls` assistant turn travels with the results that follow it; every
  * other message is its own unit. Stray leading results (whose turn is already
@@ -1005,7 +1024,39 @@ export async function saveConversation(
 }
 
 export async function clearConversation(conversationId: string): Promise<void> {
-  await area.remove(conversationKey(conversationId))
+  await area.remove([conversationKey(conversationId), taskProgressKey(conversationId)])
+}
+
+/**
+ * Reads the conversation's durable task progress.
+ *
+ * A read failure degrades to "no progress": resuming from scratch is always
+ * safe, while failing the user's turn because a progress record is unreadable
+ * is not. The stored value is validated, never trusted.
+ */
+export async function loadTaskProgress(conversationId: string): Promise<TaskProgress | undefined> {
+  if (!conversationId) return undefined
+  try {
+    const key = taskProgressKey(conversationId)
+    const stored = await area.get(key)
+    return coerceTaskProgress(stored[key])
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Writes the conversation's durable task progress.
+ *
+ * Best effort like the transcript checkpoint: a failed write costs recovery
+ * granularity, and must not fail the turn that is making real progress.
+ */
+export async function saveTaskProgress(progress: TaskProgress): Promise<void> {
+  try {
+    await area.set({ [taskProgressKey(progress.conversationId)]: progress })
+  } catch {
+    /* non-fatal: see the doc comment */
+  }
 }
 
 // --- Conversation metadata --------------------------------------------------
@@ -2595,6 +2646,23 @@ export async function recordTokenUsage(incoming: readonly TokenUsageRecord[]): P
       [KEY_TOKEN_USAGE_DAILY]: daily,
     })
   })
+}
+
+/**
+ * Spend accumulated by one chat conversation since `since`, read from the same
+ * per-request records the dashboard uses. Never a second counter (AC-10):
+ * records already trimmed out of the detail window are simply absent.
+ */
+export async function taskCostSince(conversationId: string, since: number): Promise<TaskCost> {
+  if (!conversationId || since <= 0) {
+    return { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, requests: 0 }
+  }
+  try {
+    const { records } = await readTokenUsage()
+    return taskTokenCost(records, conversationId, since)
+  } catch {
+    return { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, requests: 0 }
+  }
 }
 
 /** Wipes the ledger. Deliberately does not touch conversations or runs. */
