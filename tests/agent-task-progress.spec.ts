@@ -48,14 +48,16 @@ vi.mock('../src/background/driver', async (importActual) => {
   const actual = await importActual<typeof import('../src/background/driver')>()
   return {
     ...actual,
-    execOnActiveTab: (...args: unknown[]) => execMock(...args),
-    snapshotActiveTab: (...args: unknown[]) => snapshotMock(...args),
+    execOnActiveTab: (...args: unknown[]) => execMock(...(args as [])),
+    snapshotActiveTab: (...args: unknown[]) => snapshotMock(...(args as [])),
   }
 })
 
-const loadMock = vi.fn(async (): Promise<TaskProgress | undefined> => undefined)
+const loadMock = vi.fn(
+  async (_conversationId: string): Promise<TaskProgress | undefined> => undefined,
+)
 const saveMock = vi.fn(async (_progress: TaskProgress) => {})
-const costMock = vi.fn(async () => ({
+const costMock = vi.fn(async (_conversationId: string, _since: number) => ({
   inputTokens: 1200,
   cachedInputTokens: 900,
   outputTokens: 40,
@@ -67,9 +69,9 @@ vi.mock('../src/lib/storage', async (importActual) => {
     ...actual,
     getActiveProvider: async () => ({ apiKey: 'k', baseUrl: 'https://x', model: 'm', label: 't' }),
     addHistory: async () => {},
-    loadTaskProgress: (...args: unknown[]) => loadMock(...(args as [string])),
+    loadTaskProgress: (conversationId: string) => loadMock(conversationId),
     saveTaskProgress: (progress: TaskProgress) => saveMock(progress),
-    taskCostSince: (...args: unknown[]) => costMock(...(args as [string, number])),
+    taskCostSince: (conversationId: string, since: number) => costMock(conversationId, since),
   }
 })
 
@@ -130,6 +132,53 @@ describe('durable task progress in the agent loop', () => {
     expect(system).toContain('Click Pay now')
     expect(system).toContain('1200 input')
     expect(costMock).toHaveBeenCalledWith('conv-resume', 1000)
+  })
+
+  it('keeps original page reads in the transcript and only projects stubs into the request', async () => {
+    streamMock
+      .mockResolvedValueOnce({
+        content: '',
+        reasoning: '',
+        toolCalls: [toolCall('c1', 'snapshot_page', {})],
+        finishReason: 'tool_calls',
+        usage: null,
+      } as never)
+      .mockResolvedValueOnce({
+        content: '',
+        reasoning: '',
+        toolCalls: [toolCall('c2', 'snapshot_page', {})],
+        finishReason: 'tool_calls',
+        usage: null,
+      } as never)
+      .mockResolvedValueOnce({
+        content: 'read both',
+        reasoning: '',
+        toolCalls: [],
+        finishReason: 'stop',
+        usage: null,
+      } as never)
+
+    const history: { role: string; content: string }[] = [
+      { role: 'user', content: 'Read the page twice' },
+    ]
+    await runAgentTurn(history as never, deps('conv-original') as never)
+
+    // AC-5⑤: the transcript (what storage persists) keeps the original page
+    // text; only the request projection carries retired stubs.
+    const toolContents = history
+      .filter((message) => message.role === 'tool')
+      .map((message) => String(message.content))
+    expect(toolContents.some((content) => content.includes('Confirm your order.'))).toBe(true)
+    expect(toolContents.some((content) => content.includes('"retired":true'))).toBe(false)
+
+    const lastRequest = streamMock.mock.calls.at(-1)?.[0] as {
+      messages: { role: string; content: string }[]
+    }
+    expect(
+      lastRequest.messages.some(
+        (message) => message.role === 'tool' && message.content.includes('"retired":true'),
+      ),
+    ).toBe(true)
   })
 
   it('records an executed irreversible action so the next turn can block it', async () => {

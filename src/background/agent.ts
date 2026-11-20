@@ -2958,7 +2958,14 @@ const PAGE_READ_TOOLS = new Set(['read_current_page', 'snapshot_page', 'form_fie
  * UI step summaries and action history come from separate paths. Exported for
  * testing.
  */
-export function retireOldPageReads(history: WireMessage[], retireAll = false): void {
+export function retireOldPageReads(
+  history: readonly WireMessage[],
+  retireAll = false,
+): WireMessage[] {
+  // Projection, not mutation: the transcript is what gets persisted, and a
+  // retired stub written to storage would permanently lose the page content a
+  // resumed task needs. Callers send the projection; `history` keeps originals.
+  const projected = [...history]
   let mostRecentReadIndex = -1
   if (!retireAll) {
     for (let i = history.length - 1; i >= 0; i -= 1) {
@@ -2986,16 +2993,19 @@ export function retireOldPageReads(history: WireMessage[], retireAll = false): v
       /* not JSON — leave it */
       continue
     }
-    msg.content = JSON.stringify({
-      ok: true,
-      retired: true,
-      note: `[Page context retired] This older ${
-        name === 'form_fields' ? 'field list' : 'page read'
-      } was dropped to save context. Call ${
-        name === 'form_fields' ? 'form_fields' : 'read_current_page or snapshot_page'
-      } again if you need the current page.`,
-      ...(url ? { url } : {}),
-    })
+    projected[i] = {
+      ...msg,
+      content: JSON.stringify({
+        ok: true,
+        retired: true,
+        note: `[Page context retired] This older ${
+          name === 'form_fields' ? 'field list' : 'page read'
+        } was dropped to save context. Call ${
+          name === 'form_fields' ? 'form_fields' : 'read_current_page or snapshot_page'
+        } again if you need the current page.`,
+        ...(url ? { url } : {}),
+      }),
+    } as WireMessage
   }
 
   // Auto-observations attached to action results: keep only the most recent
@@ -3022,15 +3032,19 @@ export function retireOldPageReads(history: WireMessage[], retireAll = false): v
     try {
       const parsed = JSON.parse(msg.content) as Record<string, unknown>
       if (!parsed || typeof parsed !== 'object' || !('observation' in parsed)) continue
-      msg.content = JSON.stringify({
-        ...parsed,
-        observation:
-          '[discarded] This observation from an older action was dropped to save context. Run snapshot_page if you need the current page.',
-      })
+      projected[i] = {
+        ...msg,
+        content: JSON.stringify({
+          ...parsed,
+          observation:
+            '[discarded] This observation from an older action was dropped to save context. Run snapshot_page if you need the current page.',
+        }),
+      } as WireMessage
     } catch {
       /* not JSON — leave it */
     }
   }
+  return projected
 }
 
 /**
@@ -6013,12 +6027,10 @@ export async function runAgentTurn(
     // is re-sent each round, so old reads/snapshots dominate token cost. If the
     // page navigated, drop ALL prior reads (they describe a page that no longer
     // exists); otherwise still retire older reads past a small keep window.
-    if (ctx.navigated) {
-      retireOldPageReads(history, true)
-      ctx.navigated = false
-    } else {
-      retireOldPageReads(history, false)
-    }
+    // The projection is computed AFTER compaction, right before the request, so
+    // it reflects the transcript this round actually sends — never written back.
+    const retireAll = ctx.navigated
+    ctx.navigated = false
 
     // Context compaction: when the last request's prompt_tokens reached 90% of
     // the model's window, replace older turns with an LLM summary before this
@@ -6098,8 +6110,10 @@ export async function runAgentTurn(
 
     // Built from the history the guards above may have just rewritten: compacting
     // an array that had already been copied into the request would summarize the
-    // transcript and then send it anyway.
-    const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...history]
+    // transcript and then send it anyway. Retirement is a projection of this
+    // request only; `history` (and therefore storage) keeps the original reads.
+    const requestHistory = retireOldPageReads(history, retireAll)
+    const messages: WireMessage[] = [{ role: 'system', content: systemPrompt }, ...requestHistory]
 
     let result: StreamResult
     let replyText: string

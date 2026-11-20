@@ -27,11 +27,14 @@ describe('retireOldPageReads', () => {
       clickTool('c1'),
       readTool('b', 'SECOND PAGE '.repeat(500)),
     ]
-    retireOldPageReads(history, false)
+    const projected = retireOldPageReads(history, false)
 
-    const first = history[0]!
-    const click = history[1]!
-    const last = history[2]!
+    const first = projected[0]!
+    const click = projected[1]!
+    const last = projected[2]!
+    // The transcript keeps the original bytes: this is what gets persisted and
+    // what a resumed task must be able to read (AC-5⑤).
+    expect(history[0]!.content).toContain('FIRST PAGE')
     // Old read is stubbed and much smaller.
     expect(first.content!.length).toBeLessThan(300)
     expect(first.content).toContain('retired')
@@ -47,8 +50,8 @@ describe('retireOldPageReads', () => {
       clickTool('c1'),
       readTool('b', 'STALE PAGE '.repeat(500)),
     ]
-    retireOldPageReads(history, true)
-    for (const msg of history) {
+    const projected = retireOldPageReads(history, true)
+    for (const msg of projected) {
       if (msg.role === 'tool' && (msg as { name?: string }).name === 'read_current_page') {
         expect(msg.content).toContain('retired')
       }
@@ -57,11 +60,13 @@ describe('retireOldPageReads', () => {
 
   it('is idempotent and never grows the transcript', () => {
     const history: WireMessage[] = [readTool('a', 'X'.repeat(10_000))]
-    retireOldPageReads(history, true)
-    const entry = history[0]!
+    const projected = retireOldPageReads(history, true)
+    const entry = projected[0]!
     const once = entry.content!.length
-    retireOldPageReads(history, true)
-    retireOldPageReads(history, false)
-    expect(entry.content!.length).toBe(once)
+    const again = retireOldPageReads(projected, true)
+    const third = retireOldPageReads(again, false)
+    expect(third[0]!.content!.length).toBe(once)
+    // Projection never writes back into the source transcript.
+    expect(history[0]!.content).toContain('X'.repeat(100))
   })
 })

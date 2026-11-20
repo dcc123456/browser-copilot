@@ -30,10 +30,12 @@ describe('retireOldPageReads: auto-observations', () => {
       actionWithObservation('a', 'OLD'.repeat(200)),
       actionWithObservation('b', 'NEW'),
     ]
-    retireOldPageReads(history, false)
+    const projected = retireOldPageReads(history, false)
 
-    const older = JSON.parse(history[0]!.content!) as { observation: string }
-    const newest = JSON.parse(history[1]!.content!) as { observation: { snapshot: unknown } }
+    const older = JSON.parse(projected[0]!.content!) as { observation: string }
+    const newest = JSON.parse(projected[1]!.content!) as { observation: { snapshot: unknown } }
+    // Original observations stay in the transcript for persistence.
+    expect(history[0]!.content).toContain('"observation"')
     expect(typeof older.observation).toBe('string')
     expect(older.observation).toContain('discarded')
     // The newest observation is intact so the model can act on its refs.
@@ -50,11 +52,11 @@ describe('retireOldPageReads: auto-observations', () => {
       },
       actionWithObservation('b', 'ONLY'),
     ]
-    retireOldPageReads(history, false)
-    const plain = JSON.parse(history[0]!.content!) as { ok: boolean; observation?: unknown }
+    const projected = retireOldPageReads(history, false)
+    const plain = JSON.parse(projected[0]!.content!) as { ok: boolean; observation?: unknown }
     expect(plain.ok).toBe(true)
     expect(plain.observation).toBeUndefined()
-    expect(history[0]!.content).not.toContain('discarded')
+    expect(projected[0]!.content).not.toContain('discarded')
   })
 
   it('keeps the latest observation even when retireAll drops page reads', () => {
@@ -70,10 +72,10 @@ describe('retireOldPageReads: auto-observations', () => {
       },
       actionWithObservation('a', 'FRESH'),
     ]
-    retireOldPageReads(history, true)
+    const projected = retireOldPageReads(history, true)
 
-    const pageRead = JSON.parse(history[0]!.content!) as { retired?: boolean }
-    const action = JSON.parse(history[1]!.content!) as { observation: { snapshot: unknown } }
+    const pageRead = JSON.parse(projected[0]!.content!) as { retired?: boolean }
+    const action = JSON.parse(projected[1]!.content!) as { observation: { snapshot: unknown } }
     expect(pageRead.retired).toBe(true)
     expect(action.observation.snapshot).toBeTruthy()
   })
