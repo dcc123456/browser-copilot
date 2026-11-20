@@ -163,13 +163,15 @@ describe('no-progress guard in the loop', () => {
 
   it('escalates unreadable signatures to a blocker and refuses further page actions', async () => {
     signature = null
-    script(['snapshot_page', ...Array(6).fill('click')])
+    script(['snapshot_page', ...Array(9).fill('click')])
     const history = [{ role: 'user', content: 'click through' }]
     await runAgentTurn(history as never, deps('progress-2') as never)
 
     expect(statuses.some((text) => text.includes('can no longer be read'))).toBe(true)
-    // Three clicks executed; the rest are refused by the blocker.
-    expect(clickCount).toBe(3)
+    // Six clicks executed (default unreadable threshold); the rest are refused.
+    // PDF / CSP / chrome:// pages often succeed while the probe cannot read
+    // them, so the threshold is deliberately higher than the stagnation one.
+    expect(clickCount).toBe(6)
     expect(
       history.some(
         (message) => message.role === 'tool' && String(message.content).includes('cannot be read'),
@@ -190,10 +192,10 @@ describe('no-progress guard in the loop', () => {
       }
       return { ok: true, data: {} }
     })
-    script(['snapshot_page', ...Array(6).fill('click')])
+    script(['snapshot_page', ...Array(9).fill('click')])
     const history = [{ role: 'user', content: 'go' }]
     await runAgentTurn(history as never, deps('progress-3') as never)
-    expect(clickCount).toBe(6)
+    expect(clickCount).toBe(9)
     expect(statuses.some((text) => text.includes('No progress detected'))).toBe(false)
   })
 })

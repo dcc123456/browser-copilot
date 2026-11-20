@@ -57,10 +57,29 @@ describe('evaluateProgress', () => {
     expect(actions.at(-1)).toBe('remind')
   })
 
-  it('escalates consecutive unreadable signatures to an explicit blocker', () => {
-    const { actions, verdicts } = run([null, null, null])
-    expect(verdicts).toEqual(['unreadable', 'unreadable', 'unreadable'])
-    expect(actions).toEqual(['none', 'none', 'blocker'])
+  it('escalates unchanged-URL unreadable signatures: remind at 3, block at 6', () => {
+    const { actions, verdicts } = run(Array(6).fill(null))
+    expect(verdicts.every((verdict) => verdict === 'unreadable')).toBe(true)
+    expect(actions).toEqual(['none', 'none', 'remind', 'none', 'none', 'blocker'])
+  })
+
+  it('treats a URL change as progress even when the page state is unreadable', () => {
+    let state = emptyProgressState()
+    let action = 'none'
+    for (let round = 0; round < 8; round += 1) {
+      const result = evaluateProgress(state, {
+        tool: 'click',
+        callKey: 'click:e1',
+        ok: true,
+        signature: null,
+        url: `https://example.test/page-${round}`,
+      })
+      state = result.state
+      action = result.action
+    }
+    // Eight unreadable page states, but every one navigated: never a blocker.
+    expect(action).toBe('none')
+    expect(state.unreadable).toBe(0)
   })
 
   it('resets the unreadable streak once a signature is readable again', () => {

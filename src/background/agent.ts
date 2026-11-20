@@ -6448,6 +6448,7 @@ async function observeProgress(
     callKey: fingerprintOf(name, args),
     ok,
     signature,
+    url: ctx.lastUrl ?? null,
   })
   ctx.progress = evaluation.state
   if (evaluation.action === 'blocker') {
@@ -6455,8 +6456,9 @@ async function observeProgress(
     deps.send({
       type: 'status',
       text:
-        'The page state can no longer be read, so progress cannot be judged. ' +
-        'Stopping the page actions — the model must report what is blocking it.',
+        `The page state can no longer be read at ${ctx.lastUrl ?? 'the current page'}, ` +
+        'so progress cannot be judged. Stopping the page actions — the model must report ' +
+        'what is blocking it.',
     })
     history.push({
       role: 'user',
@@ -6564,8 +6566,9 @@ async function runOneToolCall(
     pushResult(
       JSON.stringify({
         error:
-          'The page state cannot be read, so progress cannot be judged. Do not call page tools; ' +
-          'report the blocker (URL, what you tried, what the user should do) and stop.',
+          `The page state cannot be read at ${ctx.lastUrl ?? 'the current page'}, so progress ` +
+          'cannot be judged. Do not call page tools; report the blocker (URL, what you tried, ' +
+          'what the user should do) and stop.',
         errorType: 'PERMISSION',
       }),
     )

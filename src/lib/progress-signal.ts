@@ -28,10 +28,13 @@ const WAIT_CLASS_TOOLS = new Set([
 export const DEFAULT_STAGNATION_THRESHOLD = 3
 /**
  * Consecutive `ok:true` calls whose signature is unreadable (chrome://, CSP,
- * cross-origin frame) become an explicit blocker after this many rounds.
- * Without it, `null` is the one way an unbounded loop can never converge.
+ * cross-origin frame) AND whose URL did not change become an explicit blocker
+ * after this many rounds. Without it, `null` is the one way an unbounded loop
+ * can never converge. Kept high on purpose: CDP-driven actions on PDF/CSP/
+ * chrome:// pages often succeed while the injected probe cannot read the page,
+ * and a short threshold would kill legitimate tasks.
  */
-export const DEFAULT_UNREADABLE_THRESHOLD = 3
+export const DEFAULT_UNREADABLE_THRESHOLD = 6
 /** A wait-class result that repeats identically this many times escalates. */
 export const WAIT_STAGNATION_MULTIPLIER = 2
 
@@ -43,6 +46,8 @@ export type ProgressAction = 'none' | 'remind' | 'block' | 'blocker'
 export interface ProgressState {
   /** Last readable signature, or null when the page did not report one. */
   signature: string | null
+  /** Last observed URL; a URL change is progress even when the digest is unreadable. */
+  url: string | null
   /** Consecutive executions that left the readable signature unchanged. */
   unchanged: number
   /** Consecutive ok-but-unreadable executions. */
@@ -52,7 +57,7 @@ export interface ProgressState {
 }
 
 export function emptyProgressState(): ProgressState {
-  return { signature: null, unchanged: 0, unreadable: 0, waiting: 0 }
+  return { signature: null, url: null, unchanged: 0, unreadable: 0, waiting: 0 }
 }
 
 export interface ProgressObservation {
@@ -62,6 +67,8 @@ export interface ProgressObservation {
   ok: boolean
   /** The page's result signature, or null when the page could not report one. */
   signature: string | null
+  /** Current page URL, when known; a changed URL counts as progress. */
+  url?: string | null
 }
 
 export interface ProgressThresholds {
@@ -117,18 +124,33 @@ export function evaluateProgress(
   }
 
   if (observation.signature === null) {
-    const unreadable = state.unreadable + 1
-    if (unreadable >= thresholds.unreadable) {
+    // The probe cannot read this page (PDF, CSP without injection, chrome://,
+    // restricted frame). A navigation still proves the task moved, so only an
+    // UNCHANGED url counts towards the blocker.
+    const url = observation.url ?? state.url
+    const urlChanged = state.url !== null && url !== null && url !== state.url
+    if (urlChanged) {
       return {
-        state: { ...state, unreadable, waiting: 0 },
-        verdict: 'unreadable',
-        action: 'blocker',
-        reason: 'unreadable',
+        state: { signature: null, url, unchanged: 0, unreadable: 0, waiting: 0 },
+        verdict: 'progress',
+        action: 'none',
       }
     }
-    return { state: { ...state, unreadable, waiting: 0 }, verdict: 'unreadable', action: 'none' }
+    const unreadable = state.unreadable + 1
+    // Warn once at half the threshold, block at the threshold: three silent
+    // successes on an unreadable page are common and legitimate.
+    const remindAt = Math.max(1, Math.floor(thresholds.unreadable / 2))
+    const action: ProgressAction =
+      unreadable >= thresholds.unreadable ? 'blocker' : unreadable === remindAt ? 'remind' : 'none'
+    return {
+      state: { ...state, url, unreadable, waiting: 0 },
+      verdict: 'unreadable',
+      action,
+      ...(action === 'none' ? {} : { reason: 'unreadable' }),
+    }
   }
 
+  const url = observation.url ?? state.url
   if (sameSignature) {
     const unchanged = state.unchanged + 1
     // First threshold warns (legitimate waits/polls may still succeed); the
@@ -143,7 +165,14 @@ export function evaluateProgress(
           ? 'remind'
           : 'none'
     return {
-      state: { ...state, signature: observation.signature, unchanged, unreadable: 0, waiting: 0 },
+      state: {
+        ...state,
+        signature: observation.signature,
+        url,
+        unchanged,
+        unreadable: 0,
+        waiting: 0,
+      },
       verdict: 'no-progress',
       action,
       reason: 'stagnant',
@@ -151,7 +180,7 @@ export function evaluateProgress(
   }
 
   return {
-    state: { signature: observation.signature, unchanged: 0, unreadable: 0, waiting: 0 },
+    state: { signature: observation.signature, url, unchanged: 0, unreadable: 0, waiting: 0 },
     verdict: 'progress',
     action: 'none',
   }
