@@ -1063,10 +1063,12 @@ webhooks, Docker deployment, and a web console.
 - Page text capped at ~12,000 characters; truncation is reported to the model.
 - A panel chat turn runs ten batches of the configured cap (200 steps at the
   default), then stops; scheduled tasks and AI-agent blocks stop after one.
-  **Explicit budgets are not shipped yet**: there is no target bar, no budget
-  dialog and no renew entry, and a task's goal stays active across your messages
-  instead of closing on an explicit completion statement. Nothing in this version
-  means "unlimited long tasks".
+  **Explicit budgets are not wired into the loop yet**: a durable goal model
+  exists (rounds, renewal, unattended auto-renewal cap, a six-item report), but
+  the agent does not pause at the budget and the panel has no goal bar, budget
+  dialog or renew entry. A goal stays active across your messages instead of
+  closing on an explicit completion statement — nothing in this version means
+  "unlimited long tasks".
 - The irreversible-action fence remembers the last **50** actions of a
   conversation: after more than 50, the oldest one would no longer be blocked on
   replay.
@@ -1079,15 +1081,6 @@ webhooks, Docker deployment, and a web console.
 - The endpoint must accept requests from a browser extension (public APIs do;
   strict internal gateways may not).
 - Saved passwords are not encrypted at rest.
-- **Explicit task budgets are not wired into the loop yet.** Goals have a durable
-  budget model (rounds, renewal, unattended auto-renewal cap K, a six-item
-  report) and a lifecycle, but the agent does not pause at the budget and the
-  panel has no goal bar or renew entry. Long tasks therefore still end the old
-  way, and a goal does not complete on its own — this release is **not**
-  "unlimited tasks".
-- The irreversible-action replay memory keeps the **50 most recent** fingerprints
-  of one conversation; an action repeated after 50 more irreversible actions is
-  no longer blocked, and a new conversation starts with an empty memory.
 
 ---
 
