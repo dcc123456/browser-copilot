@@ -1067,6 +1067,11 @@ webhooks, Docker deployment, and a web console.
   dialog and no renew entry, and a task's goal stays active across your messages
   instead of closing on an explicit completion statement. Nothing in this version
   means "unlimited long tasks".
+- The irreversible-action fence remembers the last **50** actions of a
+  conversation: after more than 50, the oldest one would no longer be blocked on
+  replay.
+- That fence is per conversation, not global: the same submit in a newly opened
+  conversation is not blocked.
 - The marketplace and update checks share GitHub's anonymous API quota; a
   blocked refresh shows the cached list and names the reason. Publishing and
   team sharing need a classic GitHub token.
@@ -1080,6 +1085,9 @@ webhooks, Docker deployment, and a web console.
   panel has no goal bar or renew entry. Long tasks therefore still end the old
   way, and a goal does not complete on its own — this release is **not**
   "unlimited tasks".
+- The irreversible-action replay memory keeps the **50 most recent** fingerprints
+  of one conversation; an action repeated after 50 more irreversible actions is
+  no longer blocked, and a new conversation starts with an empty memory.
 
 ---
 
