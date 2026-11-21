@@ -14,6 +14,78 @@ card leaves the open list immediately, and no maintainer approval is needed. A
 token without write access — every third-party delist — still leaves the PR for
 review. `MARKETPLACE_AUTO_MERGE_PULLS = false` restores review for both paths.
 
+## [0.6.20] - 2026-11-21
+
+### Added — The agent notices when it is going in circles
+
+Every page action now samples a result signature (URL, interactive controls,
+visible text) through a new kernel op (`progress_signature`, shipped on both
+hosts) and folds it into a no-progress judge. Concurrent state that stays
+unchanged for three successful actions in a row warns the model once; at six it
+refuses **only the identical call** — a different tool or different arguments
+still runs, because changing approach is the response we want. A page whose
+state cannot be read (PDF, a CSP page that blocks injection, `chrome://`, a
+restricted frame) is counted only while its URL also stays put: CDP actions can
+succeed there, and treating silence as stagnation would stop legitimate tasks.
+The signature deliberately excludes scroll position — scrolling without new
+content is the classic endless loop — and password values never enter it.
+
+### Added — A repeated irreversible action is refused before it runs
+
+A submit / pay / publish / delete call that already executed with the same
+arguments is blocked at dispatch, across turns: the fingerprint lives in the
+conversation's durable task record. This is separate from the semi-auto
+confirmation vocabulary, so everyday confirmations behave exactly as before.
+
+### Added — A resumed task says what it already did
+
+The conversation keeps a durable task record (goal, executed steps,
+irreversible-action fingerprints) beside the transcript. A resumed task gets a
+bounded note in its first request: goal, completed steps, the actions that must
+never repeat — and its spend, read from the token ledger rather than a second
+counter.
+
+### Changed — Storage always keeps the original transcript
+
+Page-read retirement, the emergency hard cap and compaction now build a
+**request projection**; the persisted transcript is never rewritten. A retired
+read stays legible after a reload, and a resumed task does not have to re-read
+pages it already read. The emergency marker is its own `[context-truncated]`
+text so it can be asserted separately from a page's own truncation.
+
+### Changed — Compaction is an escape hatch, not an optimisation
+
+Measured on both a short and a long window, compacting cost more than it saved
+(cached-prefix re-billing: +8.1% equivalent cost over 16 rounds, +20.7% over 100),
+so it now runs only when a request approaches the model window or the provider
+rejects an over-length request. The "compress
+context" button stays: that is a user decision.
+
+### Fixed — Long tasks no longer inflate their own requests
+
+Hard-capped page reads were skipped by retirement (their JSON was no longer
+parseable) and came back wholesale after a compaction, growing a 100-round
+request to ~91 KB. They are now retired by tool name. A compaction summary is
+sticky for the rest of the turn instead of being discarded on the next round,
+and the "context was summarized" notice is only shown when it actually was.
+
+### Fixed — A compaction summary never impersonates the user
+
+Stored summaries carry a `[[compaction-summary]]` marker in the data itself,
+are filtered from both replay mappings and bounded to one (older ones are
+reclaimed by the next compaction). Progress reminders use the same treatment
+with `[[agent-note]]`.
+
+### Known limitations
+
+- **Explicit task budgets are not wired yet.** Goals have a durable budget
+  model (`maxRounds`, renewal, unattended K, six-item report) and a lifecycle,
+  but the loop does not yet pause at the budget and the panel has no goal bar /
+  renew entry. Until that lands, long tasks still end the old way, and a goal
+  never completes on its own — do not read this release as "unlimited tasks".
+- Cache hit-rate numbers were measured with a scripted provider and a forced
+  32K window; real-provider figures are still to be taken.
+
 ## [0.6.19] - 2026-11-12
 
 ### Added — The editor's AI assistant keeps a conversation per workflow

@@ -105,7 +105,7 @@ describe('evaluateProgress', () => {
   it('respects custom thresholds', () => {
     const { actions } = run(['A', 'A', 'A'])
     expect(actions).toEqual(['none', 'none', 'none'])
-    let state = emptyProgressState()
+    const state = emptyProgressState()
     const custom = { ...DEFAULT_PROGRESS_THRESHOLDS, stagnation: 1 }
     const result = evaluateProgress(
       { ...state, signature: 'A', unchanged: 0 },

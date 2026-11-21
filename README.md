@@ -33,6 +33,13 @@ watch or stay hands-off.
   instead of riding on every request, and read-only mode withholds every write
   tool outright — which cut round-one tool schemas by about a third. Settings →
   Tools lists every switch by loading group, so it is clear what loads when.
+- 🛑 **It stops repeating itself.** Page state is sampled after every action: three identical
+  no-change results in a row get the model a "change approach" note, six get that exact call
+  refused while different arguments or a different tool still run, and a page whose state
+  cannot be read (PDFs, strict-CSP pages, `chrome://`) only counts while the URL stays put.
+  Destructive actions — submit, pay, publish, send — are never replayed: the second identical
+  call is refused before it is dispatched. Resuming a conversation folds the goal, what was
+  already done and which irreversible actions ran into the prompt instead of replaying it.
 - 🧩 **Skills** turn repeatable know-how (review checklists, style guides,
   extraction formats) into one-tap instructions the model must follow.
 - 🎬 **Workflows run whole procedures on their own.** Record yourself doing a
@@ -355,6 +362,16 @@ while a task runs.
 | ⚡ **Full auto**          | Actions run without confirmation.                                                                                                                                                      | Repetitive, trusted flows.                                                                      |
 | 🧩 **Workflow generate**  | Drives the page exactly like full auto, but only a step that truly succeeded becomes a node in a workflow draft; no per-step approval. Saving the draft is offered when the turn ends. | Turning a task you can describe into a reusable workflow.                                       |
 
+**Going in circles is now bounded by results, not by a hidden step count.** After
+each page action the assistant compares the page's result signature (URL,
+controls, visible text — never scroll position). Three unchanged results in a
+row warn it once; six refuse only the identical call, while a different tool or
+argument still runs. On pages whose state cannot be read (PDF, CSP-blocked
+injection, `chrome://`), the stall is counted only while the URL stays put, so a
+CDP action that works there is not mistaken for stagnation. An irreversible
+action (submit, pay, publish, delete) that already ran with the same arguments
+is refused before dispatch for the rest of the task.
+
 In semi-auto the confirmation card names the exact button/field/URL, and an
 element the assistant cannot identify is treated as risky and asks rather than
 guessing. In full auto every action is still logged on the **Data** tab for
@@ -452,9 +469,12 @@ unacceptable.
   `read_selected_element`, can then read the element's selector, tag, text and
   capped HTML; a pick made on a different URL comes back flagged as stale. The
   workflow editor's picker is a separate tool and keeps its card.
-- **Long conversations.** When the next request approaches the model's context
-  window, older turns (assistant answers and tool exchanges) are replaced by a
-  summary; your own messages and the latest turns stay verbatim. Type
+- **Long conversations.** Old page reads and oversized tool results are reclaimed
+  through a request projection, so the transcript you keep is never rewritten —
+  the model is told when a read was retired and can read the page again. When the
+  next request approaches the context window (or the provider answers with a
+  length error), older turns are replaced by a summary: that is an escape hatch
+  rather than a savings lever, since it re-bills the prefix once. Type
   **`/compact`** to do it on demand.
 - **Token usage.** **More → Tokens** is the spend board: today / 7 days /
   30 days / since first use, a trend line or tables, and a breakdown by feature
@@ -1043,6 +1063,10 @@ webhooks, Docker deployment, and a web console.
 - Page text capped at ~12,000 characters; truncation is reported to the model.
 - A panel chat turn runs ten batches of the configured cap (200 steps at the
   default), then stops; scheduled tasks and AI-agent blocks stop after one.
+  **Explicit budgets are not shipped yet**: there is no target bar, no budget
+  dialog and no renew entry, and a task's goal stays active across your messages
+  instead of closing on an explicit completion statement. Nothing in this version
+  means "unlimited long tasks".
 - The marketplace and update checks share GitHub's anonymous API quota; a
   blocked refresh shows the cached list and names the reason. Publishing and
   team sharing need a classic GitHub token.
@@ -1050,6 +1074,12 @@ webhooks, Docker deployment, and a web console.
 - The endpoint must accept requests from a browser extension (public APIs do;
   strict internal gateways may not).
 - Saved passwords are not encrypted at rest.
+- **Explicit task budgets are not wired into the loop yet.** Goals have a durable
+  budget model (rounds, renewal, unattended auto-renewal cap K, a six-item
+  report) and a lifecycle, but the agent does not pause at the budget and the
+  panel has no goal bar or renew entry. Long tasks therefore still end the old
+  way, and a goal does not complete on its own — this release is **not**
+  "unlimited tasks".
 
 ---
 

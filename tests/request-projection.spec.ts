@@ -116,9 +116,9 @@ describe('request projection stability (AC-15)', () => {
     // 1. Deterministic: two identical runs send identical bytes.
     expect(JSON.stringify(second.messages)).toBe(JSON.stringify(first.messages))
     // 2. The projection carries the compaction summary and retired reads...
-    expect(first.messages.some((message) => String(message.content).includes('earlier turns summary'))).toBe(
-      true,
-    )
+    expect(
+      first.messages.some((message) => String(message.content).includes('earlier turns summary')),
+    ).toBe(true)
     // The projection is not the stored transcript: it differs wherever a turn
     // was summarized or a read retired.
     expect(first).not.toEqual(source)
