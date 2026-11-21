@@ -790,6 +790,17 @@ export const startPicker: PickerStart = async (args) => {
     const t = e.target as Node | null
     return !!t && host.contains(t)
   }
+  /**
+   * The launcher that ARMED this picker is ours too. Without this, the click
+   * that follows the arming press is treated as the first selection, and the
+   * crosshair copies its own shadow markup. Arming and picking must be two
+   * separate events: a press that comes from the launcher can never select.
+   */
+  const isLauncherPress = (e: Event): boolean => {
+    const path = e.composedPath?.()
+    if (!path) return false
+    return path.some((node) => node instanceof Element && node.id === 'bc-element-picker-launcher')
+  }
   const onMove = (e: MouseEvent) => {
     if (locked) return
     const aimed = eventTarget(e)
@@ -833,6 +844,10 @@ export const startPicker: PickerStart = async (args) => {
   let sawMousePress = false
   let sawAdditiveContextMenu = false
   const onPointerDown = (e: MouseEvent) => {
+    if (isLauncherPress(e)) {
+      swallowPress(e)
+      return
+    }
     sawPointerPress = true
     sawAdditiveContextMenu = false
     // Card presses are let through before anything else — the old guard order
@@ -842,12 +857,21 @@ export const startPicker: PickerStart = async (args) => {
     lockTo(e)
   }
   const onMouseDown = (e: MouseEvent) => {
+    if (isLauncherPress(e)) {
+      swallowPress(e)
+      return
+    }
     sawMousePress = true
     if (isOurUi(e)) return
     swallowPress(e)
     if (!sawPointerPress) lockTo(e)
   }
   const onClick = (e: MouseEvent) => {
+    if (isLauncherPress(e)) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      return
+    }
     const pressed = sawPointerPress || sawMousePress
     const contextMenuHandled = sawAdditiveContextMenu
     sawPointerPress = false

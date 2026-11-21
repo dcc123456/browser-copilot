@@ -610,6 +610,27 @@ describe('element picker: copy mode copies on the click', () => {
     expect(sent).toHaveLength(4)
   })
 
+  it('never selects the crosshair that armed it', async () => {
+    await mountCopy()
+    const launcher = document.createElement('div')
+    launcher.id = 'bc-element-picker-launcher'
+    launcher.innerHTML = '<button id="crosshair">x</button>'
+    document.documentElement.appendChild(launcher)
+    const button = launcher.querySelector('button') as HTMLButtonElement
+
+    // The click that follows the arming press must not be consumed as the
+    // first pick — otherwise the crosshair copies its own markup and the
+    // overlay disappears before the user can choose anything.
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    await flushCopy()
+
+    expect(copied).toBe('')
+    expect(sent).toHaveLength(0)
+    expect(document.getElementById('bc-element-picker')).not.toBeNull()
+    expect(document.getElementById('bc-element-picker-toast')).toBeNull()
+    launcher.remove()
+  })
+
   it('copies only a CSS selector that resolves to the element', async () => {
     await mountCopy({ copyFormat: 'selector' })
 
