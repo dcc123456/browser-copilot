@@ -1,9 +1,9 @@
 /**
  * Turn resilience (see specs/2026-10-27-chat-turn-resilience-design.md):
  * a turn must not spend its whole round budget repeating a call that cannot
- * succeed, and a panel turn that does exhaust the budget must end with a
- * summary instead of a bare stop — while unattended runs keep the status line
- * their callers classify on.
+ * succeed. The round limit is now the goal's EXPLICIT budget (spec R10): a
+ * panel turn pauses at it and continues after renewal; an unattended turn
+ * settles paused and reports the budget instead of hanging.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -142,7 +142,7 @@ describe('repeated unchangeable failures', () => {
   })
 })
 
-describe('round budget', () => {
+describe('explicit goal budget', () => {
   function successfulClick() {
     execOnActiveTabMock.mockResolvedValue({
       ok: true,
@@ -153,95 +153,53 @@ describe('round budget', () => {
     })
   }
 
-  it('extends a panel turn past its budget instead of ending it', async () => {
+  it('pauses at the budget and continues after the user renews', async () => {
     successfulClick()
-    streamMock
-      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c1')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c2')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c3')] } as never)
-      .mockResolvedValueOnce({ content: 'RESULT: task finished', toolCalls: [] } as never)
+    let round = 0
+    streamMock.mockImplementation((async () => {
+      round += 1
+      return round <= 3
+        ? ({ content: '', toolCalls: [clickCall(`c${round}`)] } as never)
+        : ({ content: 'RESULT: task finished', toolCalls: [] } as never)
+    }) as never)
 
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
     await runAgentTurn(
       history as never,
-      deps({ takeInterjections: () => [], getMaxToolRounds: async () => 2 }) as never,
+      deps({
+        takeInterjections: () => [],
+        getMaxToolRounds: async () => 2,
+        awaitGoalDecision: async () => ({ rounds: 2 }),
+      }) as never,
     )
 
-    // Round 3 runs on the extended budget (2 was the configured batch), and the
-    // request still offers tools — this is a continuation, not a wrap-up. The
-    // checkpoint is silent: chat must not show step counts.
+    // 2 rounds spend the budget, the pause resolves with +2, then the model
+    // finishes on the extended budget — the SAME turn throughout.
     expect(streamMock).toHaveBeenCalledTimes(4)
-    expect(streamMock.mock.calls[2]![0].tools?.length).toBeGreaterThan(0)
     expect(history.at(-1)).toMatchObject({ role: 'assistant', content: 'RESULT: task finished' })
+    expect(sent.some((message) => message.type === 'goal.budgetExhausted')).toBe(true)
     expect(
       sent.some(
         (message) =>
-          message.type === 'status' && /batch|budget|step|\d+ (tool )?rounds/i.test(message.text),
+          message.type === 'status' && /batch|step|\d+ (tool )?rounds/i.test(message.text),
       ),
     ).toBe(false)
-    expect(
-      sent.some((message) => message.type === 'status' && /Stopped after/.test(message.text)),
-    ).toBe(false)
   })
 
-  it('still ends with a tools-off summary at the safety ceiling', async () => {
+  it('ends a paused unattended turn instead of hanging', async () => {
     successfulClick()
-    // A model that never answers while tools are on; only the tools-off
-    // wrap-up request gets prose.
-    streamMock.mockImplementation(async (request: { tools?: unknown[] }) =>
-      request.tools === undefined
-        ? ({ content: 'SUMMARY: 10 rounds done, still blocked', toolCalls: [] } as never)
-        : ({ content: '', toolCalls: [clickCall(`c${Math.random()}`)] } as never),
-    )
-
-    const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
-    await runAgentTurn(
-      history as never,
-      deps({ takeInterjections: () => [], getMaxToolRounds: async () => 1 }) as never,
-    )
-
-    // One-round batches → the ceiling is reached after 10 rounds, then the
-    // single tools-off wrap-up request.
-    expect(streamMock).toHaveBeenCalledTimes(11)
-    const wrapUp = streamMock.mock.calls[10]![0]
-    expect(wrapUp.tools).toBeUndefined()
-    const lastMessage = wrapUp.messages.at(-1)
-    expect(lastMessage?.role).toBe('user')
-    expect(String(lastMessage?.content)).toMatch(/All 10 tool rounds/)
-    expect(history.at(-1)).toMatchObject({ role: 'assistant' })
-  })
-
-  it('ends a silent panel ceiling with a count-free reason', async () => {
-    successfulClick()
-    // Even the tools-off wrap-up returns nothing: the status line is all the
-    // user gets, and it must not leak the step numbers.
     streamMock.mockResolvedValue({ content: '', toolCalls: [clickCall('c1')] } as never)
 
     const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
-    await runAgentTurn(
-      history as never,
-      deps({ takeInterjections: () => [], getMaxToolRounds: async () => 1 }) as never,
-    )
+    await runAgentTurn(history as never, deps({ getMaxToolRounds: async () => 1 }) as never)
 
-    const stopTexts = sent.flatMap((message) => (message.type === 'status' ? [message.text] : []))
-    const stopStatus = stopTexts.find((text) => /Stopped/.test(text))
-    expect(stopStatus).toBe('Stopped this reply to avoid an endless loop.')
-    expect(stopStatus).not.toMatch(/\d/)
-  })
-
-  it('keeps the hard cap and status line for unattended turns', async () => {
-    successfulClick()
-    streamMock
-      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c1')] } as never)
-      .mockResolvedValueOnce({ content: '', toolCalls: [clickCall('c2')] } as never)
-
-    const history: { role: string; content?: unknown }[] = [{ role: 'user', content: 'do it' }]
-    await runAgentTurn(history as never, deps({ getMaxToolRounds: async () => 2 }) as never)
-
-    expect(streamMock).toHaveBeenCalledTimes(2)
+    // No decision channel: exactly one round, then the pause is reported and
+    // the turn SETTLES — no hidden ceiling, no infinite loop.
+    expect(streamMock).toHaveBeenCalledTimes(1)
+    expect(sent.some((message) => message.type === 'goal.budgetExhausted')).toBe(true)
     expect(
       sent.some(
-        (message) => message.type === 'status' && /Stopped after 2 tool rounds/.test(message.text),
+        (message) => message.type === 'status' && message.text.includes('Goal budget exhausted'),
       ),
     ).toBe(true)
   })

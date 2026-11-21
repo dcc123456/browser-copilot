@@ -278,6 +278,35 @@ export function renewGoalBudget(
   }
 }
 
+/** Edits the explicit budget (user action); the change is logged, never hidden. */
+export function setGoalBudget(
+  progress: TaskProgress,
+  maxRounds: number,
+  now = Date.now(),
+): TaskProgress {
+  const goal = progress.goal
+  if (!goal || !Number.isFinite(maxRounds) || maxRounds <= 0) return progress
+  const next = Math.floor(maxRounds)
+  return {
+    ...progress,
+    goal: {
+      ...goal,
+      maxRounds: next,
+      status: next > goal.roundsStarted && goal.status === 'paused' ? 'active' : goal.status,
+      budgetLog: [
+        ...goal.budgetLog,
+        {
+          at: now,
+          kind: 'edit' as const,
+          actor: 'user' as const,
+          roundsAdded: next - goal.maxRounds,
+        },
+      ].slice(-MAX_BUDGET_LOG),
+    },
+    updatedAt: now,
+  }
+}
+
 export interface AutoRenewDecision {
   allowed: boolean
   reason: 'not-paused' | 'attended' | 'k-exhausted' | 'no-progress' | 'allowed'

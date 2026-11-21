@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added — Explicit task budgets with pause, renew and completion
+
+A task now carries its budget explicitly (rounds, spent, status, change log).
+At the limit the turn PAUSES and shows a card with the six-item report — goal,
+completed steps with their evidence, what is still to do, the stop reason, the
+cost and the next actions — then waits for you: renew a batch, change the
+budget, or end the task. Renewal extends the SAME task (spent rounds and the
+no-progress counters are never reset). A task only becomes done when the model
+declares it with locatable evidence; finishing quietly keeps it open, so the
+next message continues the same task instead of quietly opening a new budget.
+
 ### Changed — The element-picker crosshair is its own floating control
 
 The crosshair no longer docks inside the minimized plugin window, so it can be

@@ -135,6 +135,13 @@ import {
 import {
   appendProgressStep,
   archiveGoal,
+  completeGoal,
+  DEFAULT_GOAL_MAX_ROUNDS,
+  goalBudgetExhausted,
+  goalBudgetReport,
+  recordGoalRound,
+  renewGoalBudget,
+  type GoalBudgetReport,
   beginTask,
   emptyTaskProgress,
   fingerprintOf,
@@ -368,28 +375,6 @@ export interface PlanGate {
 export function planGateBlocks(gate: PlanGate | undefined, name: string): boolean {
   if (!gate || !gate.armed || gate.approved) return false
   return isPageAction(name) && !PLAN_PHASE_READS.has(name)
-}
-
-/** Fallback cap used when settings cannot supply one. */
-const DEFAULT_MAX_TOOL_ROUNDS = 20
-
-/**
- * How many configured budgets a chat turn may spend: the setting is a batch,
- * not a stop, so a long task gets ten batches before the safety ceiling. At the
- * ceiling the turn still ends with a summary rather than silence.
- */
-const PANEL_ROUND_STRETCHES = 10
-
-/**
- * Appended as a user turn for the one tools-off reply a panel turn gets when it
- * exhausts its round budget. Model-facing English, like the other prompts.
- */
-function roundLimitWrapUpPrompt(roundsCap: number): string {
-  return (
-    `[All ${roundsCap} tool rounds for this turn are used and tools are disabled for this reply. ` +
-    'Answer the user now, in plain text: what you completed, what is still unfinished, the blocker if any, ' +
-    'and the single next step you would take. Do not apologise for the limit and do not write tool-call syntax.]'
-  )
 }
 
 /** Re-exported for tests/consumers; the canonical text lives in lib/system-prompt. */
@@ -1395,6 +1380,32 @@ export const TOOLS: WireTool[] = [
           },
         },
         required: ['question', 'options'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'goal_complete',
+      description:
+        'Declare the task complete. Needs >=1 checkable evidence entry (url, element or text); without evidence the call is refused. Never use it just to end a turn.',
+      parameters: {
+        type: 'object',
+        properties: {
+          evidence: {
+            type: 'array',
+            minItems: 1,
+            items: {
+              type: 'object',
+              properties: {
+                kind: { type: 'string', enum: ['url', 'element', 'text'] },
+                value: { type: 'string' },
+              },
+              required: ['kind', 'value'],
+            },
+          },
+        },
+        required: ['evidence'],
       },
     },
   },
@@ -2609,6 +2620,12 @@ export interface AgentDeps {
    * Feishu prompts cannot fan out into sub-agents.
    */
   enableDelegation?: boolean
+  /**
+   * Budget decision for a paused goal (spec R10). Present only when a human can
+   * answer (panel turns): the turn stays alive here until the user renews,
+   * edits the budget or stops. Unattended runs omit it and end paused.
+   */
+  awaitGoalDecision?: (report: GoalBudgetReport) => Promise<{ rounds: number } | null>
   /**
    * Set when this turn IS a delegated specialist run. The turn then uses the
    * agent's identity prompt and tool whitelist and can never delegate again.
@@ -5771,12 +5788,21 @@ export async function runAgentTurn(
     string | undefined
   const storedProgress = await loadTaskProgress(deps.conversationId)
   let taskProgress = storedProgress ?? emptyTaskProgress(deps.conversationId)
-  // A goal lives as long as its task (spec R10 R-1/R-2): a new message after a
+  // Chat mode is pure conversation: no task, no budget, no goal bar (spec R10
+  // 边界). Every other mode gets a goal whose budget is the only round limit.
+  // A goal lives as long as its task (R-1/R-2): a new message after a
   // paused/finished goal archives it and starts a fresh one, while a message
   // during an ACTIVE goal belongs to the same task and keeps its budget.
-  if (!taskProgress.goal || startsNewGoal(taskProgress)) {
+  if (initialMode !== 'chat' && (!taskProgress.goal || startsNewGoal(taskProgress))) {
     if (taskProgress.goal) taskProgress = archiveGoal(taskProgress, 'abandoned')
-    taskProgress = beginTask(taskProgress, lastUserText?.trim() || 'Current task')
+    // The configured maxToolRounds is the INITIAL explicit budget, not a hidden
+    // ceiling: the goal carries it and the only gate reads it (spec R10).
+    taskProgress = beginTask(
+      taskProgress,
+      lastUserText?.trim() || 'Current task',
+      Date.now(),
+      maxToolRounds || DEFAULT_GOAL_MAX_ROUNDS,
+    )
   }
   const isResumed =
     storedProgress !== undefined &&
@@ -5789,15 +5815,20 @@ export async function runAgentTurn(
     if (note) systemPrompt = `${systemPrompt}\n\n${note}`
   }
   await saveTaskProgress(taskProgress)
+  const broadcastGoal = (): void => {
+    const goal = (ctx.taskProgress ?? taskProgress).goal
+    if (!goal) return
+    deps.send({
+      type: 'goal.state',
+      goal: {
+        summary: goal.summary,
+        maxRounds: goal.maxRounds,
+        roundsStarted: goal.roundsStarted,
+        status: goal.status,
+      },
+    })
+  }
 
-  const roundsCap = maxToolRounds || DEFAULT_MAX_TOOL_ROUNDS
-  // A chat turn treats the configured budget as ONE batch: spending it extends
-  // the same turn by another batch instead of ending it, so a long task reaches
-  // a result rather than stopping half-way (dcc, 2026-10-27: 预算用完也不要结束).
-  // The ceiling only stops a turn that never converges; unattended runs keep the
-  // single hard cap, because their callers classify on the stop status.
-  const extendRoundBudget = deps.takeInterjections !== undefined
-  const roundsCeiling = extendRoundBudget ? roundsCap * PANEL_ROUND_STRETCHES : roundsCap
   // Compaction is limited to one pass per turn (per batch in a panel turn,
   // re-armed at each checkpoint): a single pass already removes every
   // compactable turn, so repeated triggers in one stretch would only burn
@@ -5833,7 +5864,6 @@ export async function runAgentTurn(
     continuing: messages.chatContinuingTruncated,
     stillTruncated: messages.chatReplyStillTruncated,
   }
-  const stoppedToAvoidLoopText = messages.chatStoppedToAvoidLoop
 
   // Filter the advertised tools per round (see advertiseTools): the core set
   // plus any on-demand group the model has loaded so far this conversation.
@@ -5871,6 +5901,9 @@ export async function runAgentTurn(
       ? { planGate: { armed: true, approved: false, split: false } satisfies PlanGate }
       : {}),
   }
+  // Paint the goal bar before the first request so the user sees the budget the
+  // turn is actually spending.
+  if (ctx.taskProgress?.goal) broadcastGoal()
 
   // Applies the supplements the user typed while this turn was running: each one
   // becomes a `role:'user'` turn (user turns are the transcript's spine — tool
@@ -6025,23 +6058,64 @@ export async function runAgentTurn(
     return { result, replyText }
   }
 
-  for (let round = 0; round < roundsCeiling; round += 1) {
-    // One batch spent: keep going silently — the user asked not to see step
-    // counts in chat, and the running indicator already shows progress. A
-    // checkpoint, not a stop; the panel's Stop button ends a run early.
-    if (extendRoundBudget && round > 0 && round % roundsCap === 0) {
-      // A batch is also a context window: without re-arming, a turn that
-      // compacted in batch 1 would run the remaining batches with no
-      // compaction available at all.
-      compactedThisTurn = false
-      lengthErrorRetried = false
-    }
+  // The explicit goal budget is the ONLY round limit (spec R10). Rounds are
+  // spent one per loop and the gate below pauses at the budget — no hidden
+  // batch multiplication, no silent ceiling.
+  for (let round = 0; ; round += 1) {
     // Bail promptly when the run is cancelled, rather than waiting for the next
     // in-flight fetch to notice its signal. The streamCompletion catch below
     // also handles an abort mid-request.
     if (deps.signal?.aborted) {
       deps.send({ type: 'status', text: 'Cancelled.' })
       return null
+    }
+
+    // Explicit budget gate (spec R10): reaching maxRounds PAUSES the task and
+    // asks for a decision — never a silent stop. The turn stays alive while the
+    // panel waits, so renewal continues from this exact breakpoint.
+    const currentProgress = ctx.taskProgress ?? taskProgress
+    const currentGoal = currentProgress.goal
+    if (currentGoal && goalBudgetExhausted(currentProgress)) {
+      taskProgress = { ...currentProgress, goal: { ...currentGoal, status: 'paused' } }
+      ctx.taskProgress = taskProgress
+      await saveTaskProgress(taskProgress)
+      broadcastGoal()
+      const cost = await taskCostSince(deps.conversationId, currentGoal.startedAt)
+      const report = goalBudgetReport(taskProgress, cost, 'budget')
+      if (report) {
+        deps.send({
+          type: 'goal.budgetExhausted',
+          report: {
+            goal: report.goal,
+            completed: report.completed,
+            steps: report.completedSteps.map(
+              (step) => `${step.tool}: ${step.summary}${step.url ? ` @ ${step.url}` : ''}`,
+            ),
+            unfinished: report.unfinished,
+            stopReason: report.stopReason,
+            usedRounds: report.usedRounds,
+            maxRounds: report.maxRounds,
+            remainingRounds: report.remainingRounds,
+            nextActions: report.nextActions,
+            ...(report.cost ? { cost: report.cost } : {}),
+          },
+        })
+      }
+      const decision =
+        deps.awaitGoalDecision && report ? await deps.awaitGoalDecision(report) : null
+      if (!decision) {
+        deps.send({
+          type: 'status',
+          text:
+            'Goal budget exhausted. The task is paused; renew the budget to continue, ' +
+            'change the goal, or stop. No further requests are sent until you decide.',
+        })
+        return totalUsage.totalTokens > 0 ? totalUsage : null
+      }
+      taskProgress = renewGoalBudget(taskProgress, decision.rounds, 'user')
+      ctx.taskProgress = taskProgress
+      await saveTaskProgress(taskProgress)
+      broadcastGoal()
     }
 
     // Mid-turn supplement, drained at the round boundary — the one point where
@@ -6250,47 +6324,12 @@ export async function runAgentTurn(
         throw toolError
       }
     }
-  }
 
-  // The safety ceiling is reached — the turn kept working through every batch
-  // and still has no final answer. Unattended runs and delegated sub-agents get
-  // the status line their callers classify on; a panel turn does not end on a
-  // tool result, because the user watched a long task and needs to know what
-  // got done and what is left. One tools-off completion produces that answer.
-  if (deps.takeInterjections && !deps.signal?.aborted) {
-    try {
-      const { replyText } = await streamModelRound(
-        [
-          { role: 'system', content: systemPrompt },
-          ...history,
-          { role: 'user', content: roundLimitWrapUpPrompt(roundsCeiling) },
-        ],
-        undefined,
-        // Shorter budget: this is a courtesy summary, and a dead provider must
-        // not hold the turn open for the full reconnect window.
-        { retries: 2, delayMs: 3_000 },
-      )
-      if (replyText.trim()) {
-        history.push({ role: 'assistant', content: replyText })
-        return totalUsage.totalTokens > 0 ? totalUsage : null
-      }
-    } catch (error) {
-      if ((error as Error)?.name === 'AbortError') {
-        return totalUsage.totalTokens > 0 ? totalUsage : null
-      }
-      // Fall through: the status line below still names the reason it stopped.
-    }
+    // Spend one round of the explicit budget; the gate above pauses at the limit.
+    taskProgress = recordGoalRound(ctx.taskProgress ?? taskProgress)
+    ctx.taskProgress = taskProgress
+    await saveTaskProgress(taskProgress)
   }
-  deps.send({
-    type: 'status',
-    // Unattended callers classify on this exact English line; a panel turn only
-    // needs a localized, count-free reason (the user asked for no step numbers
-    // in chat).
-    text: extendRoundBudget
-      ? stoppedToAvoidLoopText
-      : `Stopped after ${roundsCeiling} tool rounds to avoid a loop.`,
-  })
-  return totalUsage.totalTokens > 0 ? totalUsage : null
 }
 
 /**
@@ -6625,6 +6664,63 @@ async function runOneToolCall(
     const message = `The "${name}" tool is disabled in settings.`
     pushResult(JSON.stringify({ error: message }))
     sendToolResult({ type: 'tool.result', name, summary: `Blocked (${name} disabled)` })
+    return
+  }
+
+  // Explicit completion (spec R10 / AC-17): the ONLY way a goal becomes done.
+  // It is a local state change, not a page action: no driver, no approval.
+  if (name === 'goal_complete') {
+    const current = ctx.taskProgress
+    const rawEvidence = Array.isArray(args['evidence']) ? args['evidence'] : []
+    const evidence = rawEvidence
+      .map((entry) => {
+        const record = (entry ?? {}) as Record<string, unknown>
+        return {
+          kind: String(record['kind'] ?? '') as 'url' | 'element' | 'text',
+          value: String(record['value'] ?? ''),
+        }
+      })
+      .filter((entry) => ['url', 'element', 'text'].includes(entry.kind))
+    const next = current
+      ? completeGoal(current, {
+          ...(typeof args['summary'] === 'string' ? { summary: args['summary'] } : {}),
+          evidence,
+        })
+      : undefined
+    if (!next) {
+      pushResult(
+        JSON.stringify({
+          error:
+            'Completion needs at least one locatable evidence entry (url, element or text), and an active goal. ' +
+            'The task remains active; keep working or fix the evidence and call again.',
+        }),
+      )
+      sendToolResult({ type: 'tool.result', name, summary: 'Completion refused (no evidence)' })
+      return
+    }
+    ctx.taskProgress = next
+    await saveTaskProgress(next)
+    const goal = next.goal
+    if (goal) {
+      deps.send({
+        type: 'goal.state',
+        goal: {
+          summary: goal.summary,
+          maxRounds: goal.maxRounds,
+          roundsStarted: goal.roundsStarted,
+          status: goal.status,
+        },
+      })
+    }
+    pushResult(
+      JSON.stringify({
+        ok: true,
+        status: 'done',
+        evidence,
+        note: 'Task marked complete. The next user message starts a new goal.',
+      }),
+    )
+    sendToolResult({ type: 'tool.result', name, summary: 'Task marked complete with evidence' })
     return
   }
 

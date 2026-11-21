@@ -14,6 +14,32 @@ import type { WireMessage } from '../lib/llm'
 import { LlmError, listModels, testConnection } from '../lib/llm'
 import { rejectionMessage, sanitizeAttachments } from '../lib/attachments'
 import { toHistoryMessages, toRestoreMessages } from './restore'
+import { archiveGoal, completeGoal, renewGoalBudget, setGoalBudget } from '../lib/task-progress'
+
+/**
+ * Resolvers for a paused goal, keyed by conversation (spec R10). The turn that
+ * runs out of budget stays alive here; the panel's renew / budget-edit / stop
+ * decision resolves this promise so the SAME turn continues from the breakpoint.
+ */
+const goalDecisionWaiters = new Map<string, (answer: { rounds: number } | null) => void>()
+
+/** Push the goal bar state to whichever panel is watching this conversation. */
+function broadcastGoalState(conversationId: string): void {
+  void (async () => {
+    const progress = await loadTaskProgress(conversationId)
+    const goal = progress?.goal
+    if (!goal) return
+    channelFor(conversationId)?.sink({
+      type: 'goal.state',
+      goal: {
+        summary: goal.summary,
+        maxRounds: goal.maxRounds,
+        roundsStarted: goal.roundsStarted,
+        status: goal.status,
+      },
+    })
+  })()
+}
 import { workerMessages } from './worker-messages'
 import { streamModel } from './model-transport'
 import {
@@ -138,6 +164,8 @@ import {
   listProfiles,
   listSkills,
   loadConversation,
+  loadTaskProgress,
+  saveTaskProgress,
   renameConversation,
   saveAgent,
   saveConversation,
@@ -3480,6 +3508,63 @@ async function handleCommand(
       }
     }
 
+    case 'goal.renew':
+    case 'goal.setBudget':
+    case 'goal.complete':
+    case 'goal.abandon': {
+      const progress = await loadTaskProgress(command.conversationId)
+      if (!progress?.goal) return { type: 'goal.update', goal: null }
+      let next = progress
+      let added = 0
+      if (command.type === 'goal.renew') {
+        added = command.rounds
+        next = renewGoalBudget(progress, command.rounds, 'user')
+      } else if (command.type === 'goal.setBudget') {
+        added = Math.max(0, command.maxRounds - progress.goal.maxRounds)
+        next = setGoalBudget(progress, command.maxRounds)
+      } else if (command.type === 'goal.abandon') {
+        next = archiveGoal(progress, 'abandoned')
+      } else {
+        const completed = completeGoal(progress, {
+          ...(command.summary ? { summary: command.summary } : {}),
+          evidence: command.evidence,
+        })
+        if (!completed) {
+          return {
+            type: 'goal.update',
+            goal: {
+              summary: progress.goal.summary,
+              maxRounds: progress.goal.maxRounds,
+              roundsStarted: progress.goal.roundsStarted,
+              status: progress.goal.status,
+            },
+          }
+        }
+        next = completed
+      }
+      await saveTaskProgress(next)
+      broadcastGoalState(command.conversationId)
+      const waiter = goalDecisionWaiters.get(command.conversationId)
+      if (waiter) {
+        // Renew/increase continues the paused turn; completing or ending it
+        // resolves the waiter too, or that turn would hang forever.
+        waiter(added > 0 ? { rounds: added } : null)
+        goalDecisionWaiters.delete(command.conversationId)
+      }
+      const goal = next.goal
+      return {
+        type: 'goal.update',
+        goal: goal
+          ? {
+              summary: goal.summary,
+              maxRounds: goal.maxRounds,
+              roundsStarted: goal.roundsStarted,
+              status: goal.status,
+            }
+          : null,
+      }
+    }
+
     default: {
       const exhaustive: never = command
       throw new Error(`Unknown command: ${JSON.stringify(exhaustive)}`)
@@ -3692,6 +3777,8 @@ chrome.runtime.onConnect.addListener((port) => {
         channel.controller.abort()
         declineInteractions(channel)
       }
+      goalDecisionWaiters.get(message.conversationId)?.(null)
+      goalDecisionWaiters.delete(message.conversationId)
       return
     }
 
@@ -3919,6 +4006,11 @@ chrome.runtime.onConnect.addListener((port) => {
           // Panel conversations get the supervisor/delegation machinery;
           // unattended entry points leave this off.
           enableDelegation: true,
+          awaitGoalDecision: (report) =>
+            new Promise((resolve) => {
+              void report
+              goalDecisionWaiters.set(conversationId, resolve)
+            }),
           ...(message.skillId ? { skillId: message.skillId } : {}),
           ...(scope ? { scopeWindowId: scope.windowId } : {}),
           conversationId,

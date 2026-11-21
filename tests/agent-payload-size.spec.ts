@@ -54,7 +54,11 @@ import type { BlockCategory } from '../src/lib/workflow/blocks/types'
  * without it a model mirrors a radio's own text into a checkbox and the page
  * reads that as "leave it unchecked".
  */
-const MAX_ADVERTISED_PAYLOAD_CHARS = 14_400
+// Raised 14_400 → 15_000 for `goal_complete` (spec R10): the explicit
+// completion tool adds its schema to every agent turn (~450 chars) and it is
+// not optional — without it a task can never be declared done. The schema was
+// compacted first (summary dropped, one-line descriptions).
+const MAX_ADVERTISED_PAYLOAD_CHARS = 15_000
 /**
  * The full catalog (core + every on-demand group) must also stay bounded.
  * Raised 19_500 → 21_500 when the on-demand "delegate" group
@@ -125,7 +129,8 @@ const MAX_ADVERTISED_PAYLOAD_CHARS = 14_400
  * Raised 34_650 → 35_700 for the bridge-only explicitly-confirmed run_workflow
  * schema; like save_workflow it is not advertised inside agent turns.
  */
-const MAX_CATALOG_CHARS = 35_700
+// Raised 35_700 → 36_000 with the round-1 budget for `goal_complete`.
+const MAX_CATALOG_CHARS = 36_000
 /**
  * Round 1 of a workflow conversation: the core tool set, EVERY operator
  * category (the round-1 default — see the file header), `use_operators`, the
@@ -178,7 +183,9 @@ const MAX_CATALOG_CHARS = 35_700
  * the batched-form tools named in rule 13 of the shared prompt (+12 chars —
  * the tools themselves are withheld in this mode, measured 63_709).
  */
-const MAX_WORKFLOW_ROUND1_CHARS = 63_750
+// Raised 63_750 → 64_400 with the round-1 budget for `goal_complete` (the
+// completion tool rides the core surface in workflow generation too).
+const MAX_WORKFLOW_ROUND1_CHARS = 64_400
 /**
  * The real per-round ceiling: one declared category on top of round 1. The
  * largest (`interaction`, 13 schemas) measures ~37.6k; the smallest (`general`)
@@ -200,7 +207,8 @@ const MAX_WORKFLOW_ROUND1_CHARS = 63_750
  * `interaction`, after the guide paragraphs and the two schema descriptions
  * were merged).
  */
-const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_850
+// Raised 38_850 → 39_800 with the round-1 budget for `goal_complete`.
+const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 39_800
 /**
  * The ceiling for the worst case the model can actually reach: every category
  * declared at once, which is the same set as `operators_author` (~42.9k of tool
@@ -223,7 +231,8 @@ const MAX_WORKFLOW_CATEGORY_PAYLOAD_CHARS = 38_850
  * to 63_750 with the round-1 budget (rule 13 names the batched-form tools —
  * measured 63_709).
  */
-const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 63_750
+// Raised 63_750 → 64_400 with the round-1 budget for `goal_complete`.
+const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 64_400
 /**
  * Absolute worst case: every category plus both escape hatches loaded. Stays
  * loaded for the rest of the conversation, so this is a per-round cost, not a
@@ -255,7 +264,9 @@ const MAX_WORKFLOW_ALL_CATEGORIES_PAYLOAD_CHARS = 63_750
  * outputVariables rule while writing the body, so the merged `code` tail and
  * the new `outputVariables` entry have no cheaper home.
  */
-const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 65_800
+// Raised 65_800 → 66_600 with the round-1 budget for `goal_complete`
+// (measured 66_267 with both escape hatches loaded).
+const MAX_WORKFLOW_FULL_PAYLOAD_CHARS = 66_600
 /**
  * The guardrails that matter, expressed as ratios against full auto. Round 1
  * now deliberately carries EVERY operator schema, so workflow runs several

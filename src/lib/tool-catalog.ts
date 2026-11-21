@@ -251,6 +251,12 @@ export const TOOL_META: ToolMeta[] = [
     warningKey: 'toolPresentPlanWarn',
   },
   {
+    name: 'goal_complete',
+    category: 'ask',
+    labelKey: 'toolGoalComplete',
+    warningKey: 'toolGoalCompleteWarn',
+  },
+  {
     name: 'compose_workflow',
     category: 'data',
     labelKey: 'toolOperator',

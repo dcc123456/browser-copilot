@@ -714,6 +714,21 @@ export interface Messages {
    * Deliberately count-free: chat shows no step numbers.
    */
   chatStoppedToAvoidLoop: string
+  /** Goal budget bar (spec R10). */
+  goalBudgetLabel: string
+  goalStatusActive: string
+  goalStatusPaused: string
+  goalStatusDone: string
+  goalRenew: string
+  goalSetBudget: string
+  goalNewTask: string
+  goalExhaustedTitle: string
+  goalCompletedLabel: string
+  goalUnfinishedLabel: string
+  goalStopReasonLabel: string
+  goalCostLabel: string
+  goalNextLabel: string
+  goalRounds: (params: { used: number; max: number }) => string
   /** Composer `/compact` command description (it replaced a toolbar button). */
   chatCompactContext: string
   /** Transient phase line while the manual compaction request runs. */
@@ -1340,6 +1355,8 @@ export interface Messages {
   toolPresentPlan: string
   /** What breaks when present_plan is disabled. */
   toolPresentPlanWarn: string
+  toolGoalComplete: string
+  toolGoalCompleteWarn: string
   /** Title of the ask_user card in the chat log. */
   chatAskTitle: string
   /** Placeholder of the free-text answer input on the ask_user card. */
@@ -2542,6 +2559,20 @@ const en: Messages = {
   chatReplyStillTruncated:
     "The reply reached the model's output limit and may be incomplete — send “continue” to get the rest.",
   chatStoppedToAvoidLoop: 'Stopped this reply to avoid an endless loop.',
+  goalBudgetLabel: 'Budget',
+  goalStatusActive: 'Task in progress',
+  goalStatusPaused: 'Paused',
+  goalStatusDone: 'Done',
+  goalRenew: 'Renew',
+  goalSetBudget: 'Set budget',
+  goalNewTask: 'End and start a new task',
+  goalExhaustedTitle: 'Goal budget used up',
+  goalCompletedLabel: 'Completed',
+  goalUnfinishedLabel: 'Still to do',
+  goalStopReasonLabel: 'Stopped because',
+  goalCostLabel: 'Cost',
+  goalNextLabel: 'Next',
+  goalRounds: ({ used, max }) => `${used}/${max} rounds`,
   chatCompactContext: 'Compress context',
   chatCompactRunning: 'Compressing the context…',
   chatCompactDone: ({ removed }) =>
@@ -3082,6 +3113,9 @@ const en: Messages = {
   toolPresentPlan: 'Submit an execution plan for approval',
   toolPresentPlanWarn:
     'When off: the plan-first flow cannot show its plan card, so tasks run without your plan approval.',
+  toolGoalComplete: 'Mark the task complete with evidence',
+  toolGoalCompleteWarn:
+    'When off: the assistant cannot close a task explicitly, so its goal stays open until a new task starts.',
   toolOperator: 'Workflow operator (draft writer)',
   toolOperatorWarn:
     'When off: this operator tool is hidden from the chat in workflow mode and cannot be added to the generated workflow.',
@@ -4311,6 +4345,20 @@ const zhCN: Messages = {
   chatReplyStillTruncated:
     '回复已达到模型单次输出上限，内容可能仍不完整；发送「继续」即可获取剩余部分。',
   chatStoppedToAvoidLoop: '为避免死循环，本次回复已停止。',
+  goalBudgetLabel: '预算',
+  goalStatusActive: '任务进行中',
+  goalStatusPaused: '已暂停',
+  goalStatusDone: '已完成',
+  goalRenew: '续期',
+  goalSetBudget: '设定预算',
+  goalNewTask: '结束并新建任务',
+  goalExhaustedTitle: '目标预算已用尽',
+  goalCompletedLabel: '已完成',
+  goalUnfinishedLabel: '未完成',
+  goalStopReasonLabel: '停止原因',
+  goalCostLabel: '成本',
+  goalNextLabel: '下一步',
+  goalRounds: ({ used, max }) => `${used}/${max} 轮`,
   chatCompactContext: '压缩上下文',
   chatCompactRunning: '正在压缩上下文…',
   chatCompactDone: ({ removed }) => `上下文已压缩：较早的 ${removed} 条消息已合并为一段摘要。`,
@@ -4785,6 +4833,8 @@ const zhCN: Messages = {
   toolAskUserWarn: '关闭后：助手无法就模糊需求向你确认，只能自行猜测。',
   toolPresentPlan: '提交执行计划等待用户批准',
   toolPresentPlanWarn: '关闭后：计划先行流程无法弹出计划卡片，任务将不再经过你的计划批准直接执行。',
+  toolGoalComplete: '提交证据并结束当前任务',
+  toolGoalCompleteWarn: '关闭后：助手无法显式结束任务，目标会一直保持进行中，直到你开始新任务。',
   toolOperator: '工作流算子（草稿写入）',
   toolOperatorWarn: '关闭后：该算子在工作流生成模式下不可用，也不会出现在生成的工作流中。',
   toolReloadExtension: '重载扩展（开发者，仅本地桥）',
