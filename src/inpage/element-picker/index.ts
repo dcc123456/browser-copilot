@@ -940,9 +940,14 @@ export const startPicker: PickerStart = async (args) => {
    * gesture and needs no clipboardWrite permission.
    */
   function copyPlainText(value: string): boolean {
+    const previous = document.activeElement
     const field = document.createElement('textarea')
     field.value = value
     field.setAttribute('readonly', '')
+    // The textarea only exists to run execCommand inside the gesture; it must
+    // not keep the focus afterwards (the page's dropdown would close on this
+    // focusout). `select()` inevitably focuses it, so restore below.
+    field.setAttribute('tabindex', '-1')
     field.style.position = 'fixed'
     field.style.top = '0'
     field.style.opacity = '0'
@@ -954,6 +959,9 @@ export const startPicker: PickerStart = async (args) => {
       return false
     } finally {
       field.remove()
+      if (previous instanceof HTMLElement && previous.isConnected) {
+        previous.focus({ preventScroll: true })
+      }
     }
   }
 

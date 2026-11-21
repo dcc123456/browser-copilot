@@ -58,6 +58,14 @@ ownerScope.__bcPickerLauncherInstance = INSTANCE
 const isActiveInstance = (): boolean => ownerScope.__bcPickerLauncherInstance === INSTANCE
 
 let ownedHost: HTMLElement | null = null
+let ownedButton: HTMLButtonElement | null = null
+/** Focus to restore once the picker overlay has mounted (it mounts asynchronously). */
+let focusBeforePress: Element | null = null
+let pressPointerId: number | null = null
+let dragPointerId: number | null = null
+let dragStart = { x: 0, y: 0 }
+let dragOrigin: Box | null = null
+let dragged = false
 /** The crosshair's own position: center in viewport percentages. */
 let currentPos: { x: number; y: number } | null = null
 
@@ -185,30 +193,6 @@ function createHost(): HTMLElement {
   // dropdowns). `preventDefault` keeps the click, it only suppresses the focus.
   button.tabIndex = -1
 
-  let dragPointerId: number | null = null
-  let dragStart = { x: 0, y: 0 }
-  let dragOrigin: Box | null = null
-  let dragged = false
-  let focusBeforePress: Element | null = null
-
-  button.addEventListener('pointerdown', (event) => {
-    if (!event.isPrimary || event.button !== 0) return
-    // Keep the page's focus where it is. Without this the browser focuses the
-    // button first, the page's input blurs, and a blur-closed dropdown is gone
-    // before the picker has even opened.
-    event.preventDefault()
-    if (document.activeElement instanceof Element) focusBeforePress = document.activeElement
-    dragPointerId = event.pointerId
-    dragStart = { x: event.clientX, y: event.clientY }
-    dragOrigin = iconAt(currentPos ?? defaultPosition())
-    dragged = false
-    try {
-      button.setPointerCapture(event.pointerId)
-    } catch {
-      /* capture is best-effort */
-    }
-  })
-
   button.addEventListener('pointermove', (event) => {
     if (dragPointerId !== event.pointerId || !dragOrigin) return
     const dx = event.clientX - dragStart.x
@@ -232,19 +216,16 @@ function createHost(): HTMLElement {
       /* already released */
     }
     if (!dragged) {
-      // A plain click: restore the page's focus in case this browser moved it
-      // anyway, then open the picker.
+      // A plain click: the page must not learn about this press either, so the
+      // window-level guard swallowed it. Open the picker, then put the page's
+      // focus back AFTER the overlay exists — the overlay mount is what used to
+      // clear it, so restoring before `startPicker` was too early.
       const previous = focusBeforePress
-      focusBeforePress = null
-      if (
-        previous &&
-        previous.isConnected &&
-        typeof (previous as HTMLElement).focus === 'function'
-      ) {
-        ;(previous as HTMLElement).focus({ preventScroll: true })
+      if (previous) {
+        if (document.getElementById(PICKER_ID)) return
+        void startPicker({ pickerId: PICKER_ID, mode: 'copy', copyFormat, locale, selectOnly })
+        restoreFocusSoon(previous)
       }
-      if (document.getElementById(PICKER_ID)) return
-      void startPicker({ pickerId: PICKER_ID, mode: 'copy', copyFormat, locale, selectOnly })
       return
     }
     dragged = false
@@ -257,15 +238,13 @@ function createHost(): HTMLElement {
   }
   button.addEventListener('pointerup', endDrag)
   button.addEventListener('pointercancel', endDrag)
-  // A drag must not also start the picker.
+  // A drag must not also start the picker (the press itself was swallowed at
+  // window capture, so the page never sees a click on this control either).
   button.addEventListener('click', (event) => {
-    if (dragged) {
-      event.preventDefault()
-      event.stopPropagation()
-      return
-    }
-    event.stopPropagation()
+    event.preventDefault()
+    event.stopImmediatePropagation()
   })
+  ownedButton = button
   return host
 }
 
@@ -273,6 +252,63 @@ function createHost(): HTMLElement {
  * Removes every crosshair host this live instance does not own: a dead
  * predecessor may have left one (or a nested duplicate) behind.
  */
+/**
+ * Swallows the press that lands on our control at the FIRST capture station, so
+ * a popover that closes on `pointerdown` (or on any page-level listener) never
+ * sees it. The same mechanism the open picker uses for its overlay, applied at
+ * the launcher. Our own drag state is updated here, before the event dies.
+ */
+function installPressGuard(): void {
+  const guard = (event: PointerEvent | MouseEvent): void => {
+    const host = ownedHost
+    const button = ownedButton
+    if (!host || !button || !event.composedPath().includes(host)) return
+    if ('isPrimary' in event && !event.isPrimary) return
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    if (event.type !== 'pointerdown') return
+    if (document.activeElement instanceof Element) focusBeforePress = document.activeElement
+    pressPointerId = (event as PointerEvent).pointerId
+    dragPointerId = pressPointerId
+    dragStart = { x: event.clientX, y: event.clientY }
+    dragOrigin = iconAt(currentPos ?? defaultPosition())
+    dragged = false
+    try {
+      button.setPointerCapture(pressPointerId)
+    } catch {
+      /* capture is best-effort */
+    }
+  }
+  window.addEventListener('pointerdown', guard, true)
+  // Compatibility mouse events must not leak to the page either.
+  window.addEventListener('mousedown', guard, true)
+  window.addEventListener(
+    'mouseup',
+    (event) => {
+      if (ownedHost && event.composedPath().includes(ownedHost)) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+      }
+    },
+    true,
+  )
+}
+
+/** Focus the page's control again once the overlay really exists. */
+function restoreFocusSoon(previous: Element): void {
+  const restore = (): void => {
+    if (!previous.isConnected) return
+    const focusable = previous as HTMLElement
+    if (typeof focusable.focus === 'function') focusable.focus({ preventScroll: true })
+  }
+  requestAnimationFrame(() => {
+    restore()
+    setTimeout(restore, 0)
+    setTimeout(restore, 60)
+  })
+}
+
 function dropStaleHosts(): void {
   for (const host of document.querySelectorAll(`#${HOST_ID}`)) {
     if (host !== ownedHost) host.remove()
@@ -312,6 +348,8 @@ new MutationObserver(() => {
 window.addEventListener('resize', () => {
   if (enabled) applyPosition()
 })
+
+installPressGuard()
 
 /** Boot: the worker knows the toggle, the payload and the saved position. */
 void chrome.runtime

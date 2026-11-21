@@ -37,7 +37,7 @@ function pointer(
   type: string,
   init: { clientX: number; clientY: number; pointerId?: number },
 ): Event {
-  const event = new dom.window.Event(type, { bubbles: true, cancelable: true })
+  const event = new dom.window.Event(type, { bubbles: true, cancelable: true, composed: true })
   Object.assign(event, {
     pointerId: init.pointerId ?? 1,
     isPrimary: true,
@@ -98,6 +98,11 @@ describe('element-picker launcher', () => {
     const button = crosshairButton()
     expect(button.tabIndex).toBe(-1)
 
+    // AC-2: a popover that closes on the press itself must not see it either.
+    let pagePresses = 0
+    window.addEventListener('pointerdown', () => {
+      pagePresses += 1
+    })
     button.dispatchEvent(pointer('pointerdown', { clientX: 100, clientY: 100 }))
     // A picker already open would short-circuit the click; keep this press a
     // click by dispatching up, and block the picker with a probe marker.
@@ -107,6 +112,7 @@ describe('element-picker launcher', () => {
     button.dispatchEvent(pointer('pointerup', { clientX: 100, clientY: 100 }))
 
     expect(blurs).toBe(0)
+    expect(pagePresses).toBe(0)
     expect(document.activeElement).toBe(input)
   })
 
