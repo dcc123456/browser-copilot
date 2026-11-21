@@ -99,6 +99,9 @@ function dispatchKey(key: string, target: EventTarget = document): KeyboardEvent
   return event
 }
 /** The full gesture one real click produces, in DOM order. */
+/** The copy path is async (Clipboard API first, textarea fallback). */
+const flushCopy = (): Promise<void> => new Promise((done) => setTimeout(done, 0))
+
 function clickGesture(el: Element, modifiers: ClickModifiers = {}): MouseEvent {
   dispatchPointer(el, modifiers)
   dispatchMouse(el, 'mousedown', modifiers)
@@ -557,6 +560,7 @@ describe('element picker: copy mode copies on the click', () => {
     onPage(shop, 'click', () => pageSaw.push('shop'), false)
 
     clickGesture(shop)
+    await flushCopy()
 
     expect(copied).toBe(shop.outerHTML)
     expect(copied).toContain('<button id="buy"')
@@ -600,6 +604,7 @@ describe('element picker: copy mode copies on the click', () => {
     expect(sent[3]).toMatchObject({ selections: [{ selector: '#buy' }, { selector: '#shop' }] })
 
     clickGesture(shop)
+    await flushCopy()
     expect(document.getElementById('bc-element-picker')).toBeNull()
     expect(execCommand).not.toHaveBeenCalled()
     expect(sent).toHaveLength(4)
@@ -609,6 +614,7 @@ describe('element picker: copy mode copies on the click', () => {
     await mountCopy({ copyFormat: 'selector' })
 
     clickGesture(document.getElementById('shop')!)
+    await flushCopy()
 
     expect(copied).toBe('#shop')
     expect(document.querySelectorAll(copied)).toHaveLength(1)
@@ -620,6 +626,7 @@ describe('element picker: copy mode copies on the click', () => {
     await mountCopy({ copyFormat: 'text' })
 
     clickGesture(document.getElementById('buy')!)
+    await flushCopy()
 
     expect(copied).toBe('Buy')
     const toast = document.getElementById('bc-element-picker-toast')
@@ -632,6 +639,7 @@ describe('element picker: copy mode copies on the click', () => {
     await mountCopy()
 
     clickGesture(document.getElementById('huge')!)
+    await flushCopy()
 
     expect(copied.length).toBeGreaterThan(120_000)
     expect(document.getElementById('bc-element-picker')).toBeNull()
@@ -642,6 +650,7 @@ describe('element picker: copy mode copies on the click', () => {
     await mountCopy()
 
     clickGesture(document.getElementById('shop')!)
+    await flushCopy()
 
     expect(document.getElementById('bc-element-picker')).toBeNull()
     const toast = document.getElementById('bc-element-picker-toast')
@@ -681,6 +690,7 @@ describe('element picker: copy mode copies on the click', () => {
     await mountCopy({ locale: 'zh' })
 
     clickGesture(document.getElementById('shop')!)
+    await flushCopy()
 
     const toast = document.getElementById('bc-element-picker-toast')
     expect(toast?.shadowRoot?.textContent).toContain('已复制')

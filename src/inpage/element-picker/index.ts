@@ -916,30 +916,44 @@ export const startPicker: PickerStart = async (args) => {
       return
     }
     const value = copyValueFor(el)
-    const copied = copyPlainText(value)
-    // Recorded before the copy result is judged: a refused clipboard must not
-    // rob the local agent of the element the user picked.
+    // Capture the element BEFORE touching the clipboard: a clipboard refusal
+    // (or a focus change) must never cost us the element the user picked.
     reportSelection(el)
     const tag = el.tagName.toLowerCase()
     const size = value.length.toLocaleString()
-    cleanup()
-    showCopiedToast(
-      copied
-        ? copyFormat === 'selector'
-          ? STRINGS.copiedSelector(size)
-          : copyFormat === 'text'
-            ? STRINGS.copiedText(size, tag)
-            : STRINGS.copiedHtml(size, tag)
-        : STRINGS.copyFailed,
-      !copied,
-    )
+    void (async () => {
+      const copied = await copyPlainText(value)
+      cleanup()
+      showCopiedToast(
+        copied
+          ? copyFormat === 'selector'
+            ? STRINGS.copiedSelector(size)
+            : copyFormat === 'text'
+              ? STRINGS.copiedText(size, tag)
+              : STRINGS.copiedHtml(size, tag)
+          : STRINGS.copyFailed,
+        !copied,
+      )
+    })()
   }
   /**
    * Mirrors src/lib/clipboard.ts. This function is serialized into the page, so
    * it cannot import the shared helper; execCommand runs inside the click
    * gesture and needs no clipboardWrite permission.
    */
-  function copyPlainText(value: string): boolean {
+  async function copyPlainText(value: string): Promise<boolean> {
+    // Preferred route: the async Clipboard API runs inside the user gesture and
+    // does NOT focus anything, so a dropdown stays open and the user can pick
+    // the next element. Falls back to the execCommand textarea when the page's
+    // permissions policy or context refuses it.
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value)
+        return true
+      }
+    } catch {
+      /* fall through to the textarea */
+    }
     const previous = document.activeElement
     const field = document.createElement('textarea')
     field.value = value
