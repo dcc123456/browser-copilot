@@ -88,6 +88,8 @@ import {
   isMinimized,
   minimizeWindow,
   setFloatingButtonPos,
+  setPickerButtonPos,
+  getPickerButtonPos,
   whenRestoreSettled,
 } from './panel-minimize'
 import { releaseWindowAutomationState, warmupOcr } from './driver'
@@ -1147,6 +1149,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: false })
     return
   }
+  if (message?.type === 'elementPicker.move') {
+    const windowId = sender?.tab?.windowId
+    const x = (message as { x?: unknown }).x
+    const y = (message as { y?: unknown }).y
+    if (typeof windowId === 'number' && typeof x === 'number' && typeof y === 'number') {
+      void setPickerButtonPos(windowId, { x, y })
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }))
+      return true
+    }
+    sendResponse({ ok: false })
+    return
+  }
   if (message?.type === 'floating.expand') {
     const windowId = sender?.tab?.windowId
     if (typeof windowId === 'number') {
@@ -1179,13 +1194,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Content scripts cannot read settings when the user keeps them in a
     // folder, so the worker answers the toggle state (the floating.status
     // contract). No click gesture depends on this reply.
-    void getSettings()
-      .then((settings) => {
+    const windowId = sender?.tab?.windowId
+    void Promise.all([
+      getSettings(),
+      typeof windowId === 'number' ? getPickerButtonPos(windowId) : Promise.resolve(undefined),
+    ])
+      .then(([settings, position]) => {
         sendResponse({
           enabled: settings.elementPickerEnabled,
           locale: pickerLocale(settings.locale),
           format: settings.elementPickerFormat,
           selectOnly: settings.elementPickerSelectOnly,
+          ...(position ? { position } : {}),
         })
       })
       .catch(() =>

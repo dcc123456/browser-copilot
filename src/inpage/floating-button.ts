@@ -36,6 +36,8 @@
  * @module inpage/floating-button
  */
 
+import { avoidOverlap, type Box } from '../lib/floating-layout'
+
 const HOST_ID = 'browser-copilot-floating-host'
 /** Kept in sync with element-picker-launcher. */
 const CROSSHAIR_HOST_ID = 'bc-element-picker-launcher'
@@ -345,6 +347,28 @@ function mount(pos?: ButtonPos): void {
     dragHandle = null
     if (!dragged) return
     button.classList.remove('dragging')
+    // The control that was dragged keeps its drop point only if it clears the
+    // crosshair; otherwise IT yields (spec 2026-11-21: whichever is dragged
+    // steps aside, the other never moves on its own).
+    if (currentPos) {
+      const icon = posToIcon(currentPos)
+      const crosshair = document.getElementById('bc-element-picker-launcher')
+      const rect = crosshair?.getBoundingClientRect()
+      if (rect && rect.width > 0 && rect.height > 0) {
+        const other: Box = {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        }
+        const placed = avoidOverlap({ ...icon, width: BUTTON_SIZE, height: BUTTON_SIZE }, other, {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        })
+        currentPos = iconToPos({ left: placed.left, top: placed.top })
+        placeIcon(host, { left: placed.left, top: placed.top })
+      }
+    }
     if (currentPos) {
       void chrome.runtime
         .sendMessage({ type: 'floating.move', x: currentPos.x, y: currentPos.y })

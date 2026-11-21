@@ -1271,7 +1271,10 @@ export interface FloatingStatusResponse {
 // --- On-page element picker launcher -----------------------------------------
 
 /** Messages from the launcher content script to the service worker. */
-export type ElementPickerLauncherMessage = { type: 'elementPicker.status' }
+export type ElementPickerLauncherMessage =
+  | { type: 'elementPicker.status' }
+  /** The crosshair's dropped position, per window, in viewport percentages. */
+  | { type: 'elementPicker.move'; x: number; y: number }
 
 /** Worker → launcher content script: toggle state, copy locale and payload. */
 export type ElementPickerControl = {
@@ -1290,6 +1293,8 @@ export interface ElementPickerStatusResponse {
   locale: 'en' | 'zh'
   format: ElementPickerFormat
   selectOnly: boolean
+  /** Saved crosshair position (center, viewport percentages), when dragged before. */
+  position?: { x: number; y: number }
 }
 
 /**

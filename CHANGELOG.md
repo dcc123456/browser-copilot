@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed — The element-picker crosshair is its own floating control
+
+The crosshair no longer docks inside the minimized plugin window, so it can be
+dragged whether or not that icon is on the page, and the two controls never
+overlap: whichever one is dragged keeps its drop point and the other steps
+aside. Pressing the crosshair no longer takes focus from the page — a dropdown
+that closes on `blur` (or on the page's own click-outside handler) stays open,
+so elements inside it can actually be picked. Both control positions are kept
+in the existing per-window position record.
+
 ### Changed — Unpublishing merges its own pull request
 
 A removal PR now merges right after it opens when the GitHub token can write to

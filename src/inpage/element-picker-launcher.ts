@@ -4,24 +4,21 @@
  * A static content script parked on every http(s) page. It stays inert until
  * the `elementPickerEnabled` setting is on — the worker's boot reply
  * (`elementPicker.status`) and its `elementPicker.set` broadcasts decide.
- * Clicking the crosshair button starts the shared picker in `copy` mode: the
- * user picks an element and the payload picked in Settings (CSS selector,
- * visible text, or outerHTML) is copied to the clipboard for pasting into the
- * chat.
+ * Clicking the crosshair button starts the shared picker in `copy` mode.
  *
- * The setting is answered by the worker rather than read here: settings may
- * live in a user-chosen folder that content scripts cannot access.
+ * The button is an INDEPENDENT floating control (spec 2026-11-21): it keeps
+ * its own saved position, is draggable with or without the minimized plugin
+ * icon on the page, and the two never overlap — whichever one is dragged keeps
+ * its drop point and the other yields. It never docks into the plugin window.
  *
- * One floating window: while the minimized plugin's icon is on the page, this
- * button docks into that window (a light-DOM child of its host, rendered
- * through the host's `<slot>`) so the pair is a single box that drags and
- * flips together. With the panel open there is no such window and the button
- * parks in the bottom-right corner on its own.
+ * Pressing it must not cost the page its focus: a dropdown that closes on
+ * `blur` (or on the page's own click-outside handler) would disappear before
+ * the picker even opens. `pointerdown` is therefore cancelled and the previous
+ * `activeElement` is restored after the press; the picker's own overlay already
+ * swallows the presses that follow.
  *
  * The button lives in a Shadow DOM so page CSS cannot restyle it, and the host
- * never intercepts page events outside the button itself. Like the floating
- * button this is a bundled static content script, so importing the picker is
- * fine; everything else stays dependency-free.
+ * never intercepts page events outside the button itself.
  *
  * @module inpage/element-picker-launcher
  */
@@ -31,14 +28,16 @@ import type {
   ElementPickerLauncherMessage,
   ElementPickerStatusResponse,
 } from '../lib/messages'
+import { avoidOverlap, clampBox, type Box } from '../lib/floating-layout'
 import { startPicker } from './element-picker'
 
 const HOST_ID = 'bc-element-picker-launcher'
 const FLOATING_HOST_ID = 'browser-copilot-floating-host'
-/** Sent by floating-button when its window mounts; kept in sync there. */
-const DOCK_REQUEST_EVENT = 'bc:floating-window-ready'
 const PICKER_ID = 'element-picker'
 const EDGE = 16
+const BUTTON_SIZE = 40
+/** Pointer travel below which a press is a click, not a drag. */
+const DRAG_THRESHOLD_PX = 6
 const BUTTON_ICON =
   '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/></svg>'
 
@@ -53,14 +52,14 @@ let enabled = false
 // --- instance ownership -------------------------------------------------------
 // A reinjected copy takes over the DOM its dead predecessor left behind: that
 // host still renders a crosshair, but its `chrome.runtime` is invalidated.
-// The isolated world outlives the reinjection, so a token stored there tells a
-// live instance from a dead one.
 const INSTANCE: object = {}
 const ownerScope = globalThis as { __bcPickerLauncherInstance?: object }
 ownerScope.__bcPickerLauncherInstance = INSTANCE
 const isActiveInstance = (): boolean => ownerScope.__bcPickerLauncherInstance === INSTANCE
 
 let ownedHost: HTMLElement | null = null
+/** The crosshair's own position: center in viewport percentages. */
+let currentPos: { x: number; y: number } | null = null
 
 function copyFormatOf(value: unknown): CopyFormat {
   return value === 'selector' || value === 'text' ? value : 'html'
@@ -78,13 +77,73 @@ function applyLabel(): void {
   button.setAttribute('aria-label', label())
 }
 
+// --- position ----------------------------------------------------------------
+
+function iconAt(pos: { x: number; y: number }): Box {
+  return clampBox(
+    {
+      left: (pos.x / 100) * window.innerWidth - BUTTON_SIZE / 2,
+      top: (pos.y / 100) * window.innerHeight - BUTTON_SIZE / 2,
+      width: BUTTON_SIZE,
+      height: BUTTON_SIZE,
+    },
+    { width: window.innerWidth, height: window.innerHeight },
+  )
+}
+
+function positionOf(box: Box): { x: number; y: number } {
+  return {
+    x: ((box.left + BUTTON_SIZE / 2) / Math.max(1, window.innerWidth)) * 100,
+    y: ((box.top + BUTTON_SIZE / 2) / Math.max(1, window.innerHeight)) * 100,
+  }
+}
+
+/** Default parking spot: bottom-right, above where the minimized icon sits. */
+function defaultPosition(): { x: number; y: number } {
+  return {
+    x: ((window.innerWidth - EDGE - BUTTON_SIZE / 2) / Math.max(1, window.innerWidth)) * 100,
+    y: ((window.innerHeight - EDGE - BUTTON_SIZE / 2) / Math.max(1, window.innerHeight)) * 100,
+  }
+}
+
+function placeHost(host: HTMLElement, box: Box): void {
+  host.style.left = `${box.left}px`
+  host.style.top = `${box.top}px`
+  host.style.right = 'auto'
+  host.style.bottom = 'auto'
+}
+
+/** The plugin icon's box, when the minimized window is on this page. */
+function floatingBox(): Box | undefined {
+  const host = document.getElementById(FLOATING_HOST_ID)
+  if (!host) return undefined
+  const rect = host.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return undefined
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+}
+
+/**
+ * Applies the saved position and clears the floating icon. Only the crosshair
+ * moves here: the icon keeps its own saved spot (whichever was dragged yields).
+ */
+function applyPosition(): void {
+  const host = ownedHost
+  if (!host?.isConnected) return
+  let box = iconAt(currentPos ?? defaultPosition())
+  const other = floatingBox()
+  if (other)
+    box = avoidOverlap(box, other, { width: window.innerWidth, height: window.innerHeight })
+  placeHost(host, box)
+  currentPos = positionOf(box)
+}
+
+// --- DOM ---------------------------------------------------------------------
+
 function createHost(): HTMLElement {
   const host = document.createElement('div')
   host.id = HOST_ID
   host.style.all = 'initial'
   host.style.position = 'fixed'
-  host.style.right = `${EDGE}px`
-  host.style.bottom = `${EDGE}px`
   host.style.zIndex = '2147483647'
   host.style.pointerEvents = 'none'
 
@@ -94,8 +153,8 @@ function createHost(): HTMLElement {
       :host { all: initial; }
       button {
         pointer-events: auto;
-        width: 40px;
-        height: 40px;
+        width: ${BUTTON_SIZE}px;
+        height: ${BUTTON_SIZE}px;
         border-radius: 50%;
         border: 1px solid rgba(15, 23, 42, 0.15);
         padding: 0;
@@ -116,24 +175,103 @@ function createHost(): HTMLElement {
       }
       button:active { transform: scale(0.96); }
     </style>
-    <button type="button">${BUTTON_ICON}</button>
+    <button type="button" tabindex="-1">${BUTTON_ICON}</button>
   `
 
   const button = shadow.querySelector('button')
-  button?.addEventListener('click', (event) => {
+  if (!button) return host
+  // Never take focus from the page: Tab must not land here, and a press must
+  // not move `activeElement` (the page's blur/focusout listeners are what close
+  // dropdowns). `preventDefault` keeps the click, it only suppresses the focus.
+  button.tabIndex = -1
+
+  let dragPointerId: number | null = null
+  let dragStart = { x: 0, y: 0 }
+  let dragOrigin: Box | null = null
+  let dragged = false
+  let focusBeforePress: Element | null = null
+
+  button.addEventListener('pointerdown', (event) => {
+    if (!event.isPrimary || event.button !== 0) return
+    // Keep the page's focus where it is. Without this the browser focuses the
+    // button first, the page's input blurs, and a blur-closed dropdown is gone
+    // before the picker has even opened.
+    event.preventDefault()
+    if (document.activeElement instanceof Element) focusBeforePress = document.activeElement
+    dragPointerId = event.pointerId
+    dragStart = { x: event.clientX, y: event.clientY }
+    dragOrigin = iconAt(currentPos ?? defaultPosition())
+    dragged = false
+    try {
+      button.setPointerCapture(event.pointerId)
+    } catch {
+      /* capture is best-effort */
+    }
+  })
+
+  button.addEventListener('pointermove', (event) => {
+    if (dragPointerId !== event.pointerId || !dragOrigin) return
+    const dx = event.clientX - dragStart.x
+    const dy = event.clientY - dragStart.y
+    if (!dragged && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+    dragged = true
+    const box = clampBox(
+      { ...dragOrigin, left: dragOrigin.left + dx, top: dragOrigin.top + dy },
+      { width: window.innerWidth, height: window.innerHeight },
+    )
+    placeHost(host, box)
+    currentPos = positionOf(box)
+  })
+
+  const endDrag = (event: PointerEvent): void => {
+    if (dragPointerId !== event.pointerId) return
+    dragPointerId = null
+    try {
+      button.releasePointerCapture(event.pointerId)
+    } catch {
+      /* already released */
+    }
+    if (!dragged) {
+      // A plain click: restore the page's focus in case this browser moved it
+      // anyway, then open the picker.
+      const previous = focusBeforePress
+      focusBeforePress = null
+      if (
+        previous &&
+        previous.isConnected &&
+        typeof (previous as HTMLElement).focus === 'function'
+      ) {
+        ;(previous as HTMLElement).focus({ preventScroll: true })
+      }
+      if (document.getElementById(PICKER_ID)) return
+      void startPicker({ pickerId: PICKER_ID, mode: 'copy', copyFormat, locale, selectOnly })
+      return
+    }
+    dragged = false
+    applyPosition()
+    if (currentPos) {
+      void chrome.runtime
+        .sendMessage({ type: 'elementPicker.move', x: currentPos.x, y: currentPos.y })
+        .catch(() => {})
+    }
+  }
+  button.addEventListener('pointerup', endDrag)
+  button.addEventListener('pointercancel', endDrag)
+  // A drag must not also start the picker.
+  button.addEventListener('click', (event) => {
+    if (dragged) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
     event.stopPropagation()
-    // A second click while the picker is open would stack listeners on the
-    // same document; the open card is the signal to wait.
-    if (document.getElementById('bc-element-picker')) return
-    void startPicker({ pickerId: PICKER_ID, mode: 'copy', copyFormat, locale, selectOnly })
   })
   return host
 }
 
 /**
  * Removes every crosshair host this live instance does not own: a dead
- * predecessor may have left one (or a nested duplicate) behind, and adopting
- * it would keep an inert button on the page.
+ * predecessor may have left one (or a nested duplicate) behind.
  */
 function dropStaleHosts(): void {
   for (const host of document.querySelectorAll(`#${HOST_ID}`)) {
@@ -141,32 +279,20 @@ function dropStaleHosts(): void {
   }
 }
 
-/** Docks into the plugin window when it exists, otherwise parks alone. */
+/**
+ * Independent mount: always a fixed control on the document, never a child of
+ * the floating plugin window (that docking is what made "draggable only while
+ * the icon exists" true).
+ */
 function mount(): void {
   if (!isActiveInstance()) return
   dropStaleHosts()
-
-  // A docked host dies with the window it was slotted into; rebuild it.
   if (!ownedHost || !ownedHost.isConnected) ownedHost = createHost()
-
-  const floating = document.getElementById(FLOATING_HOST_ID)
-  if (floating && floating !== ownedHost) {
-    if (ownedHost.parentElement !== floating) floating.appendChild(ownedHost)
-    ownedHost.style.display = 'block'
-    ownedHost.style.position = 'static'
-    ownedHost.style.right = ''
-    ownedHost.style.bottom = ''
-    ownedHost.style.left = ''
-    ownedHost.style.top = ''
-  } else {
-    if (ownedHost.parentElement !== document.documentElement) {
-      document.documentElement.appendChild(ownedHost)
-    }
-    ownedHost.style.display = 'block'
-    ownedHost.style.position = 'fixed'
-    ownedHost.style.right = `${EDGE}px`
-    ownedHost.style.bottom = `${EDGE}px`
+  if (ownedHost.parentElement !== document.documentElement) {
+    document.documentElement.appendChild(ownedHost)
   }
+  ownedHost.style.display = 'block'
+  applyPosition()
   applyLabel()
 }
 
@@ -177,20 +303,17 @@ function unmount(): void {
   ownedHost = null
 }
 
-// The plugin window mounts, unmounts and gets replaced as the panel minimizes
-// and expands; re-dock whenever a direct child of <html> changes.
+// The plugin window mounts and unmounts as the panel minimizes and expands.
+// Re-apply the position so the crosshair steps aside when the icon appears.
 new MutationObserver(() => {
   if (enabled) mount()
 }).observe(document.documentElement, { childList: true })
 
-// Answer the window's dock request synchronously. The window uses the answer to
-// tell a live crosshair (docks now) from one a dead script left behind (does
-// not answer, so it is dropped instead of staying stuck in the corner).
-document.addEventListener(DOCK_REQUEST_EVENT, () => {
-  if (enabled) mount()
+window.addEventListener('resize', () => {
+  if (enabled) applyPosition()
 })
 
-/** Boot: the worker knows both the toggle and the storage area it lives in. */
+/** Boot: the worker knows the toggle, the payload and the saved position. */
 void chrome.runtime
   .sendMessage({ type: 'elementPicker.status' } satisfies ElementPickerLauncherMessage)
   .then((response: unknown) => {
@@ -198,6 +321,10 @@ void chrome.runtime
     locale = status?.locale === 'zh' ? 'zh' : 'en'
     copyFormat = copyFormatOf(status?.format)
     selectOnly = status?.selectOnly === true
+    const position = status?.position
+    if (position && typeof position.x === 'number' && typeof position.y === 'number') {
+      currentPos = position
+    }
     enabled = status?.enabled === true
     if (enabled) mount()
   })
@@ -214,9 +341,6 @@ chrome.runtime.onMessage.addListener(
     enabled = msg.enabled === true
     if (enabled) mount()
     else unmount()
-    // Receipt for the worker's injection fallback: the floating button's
-    // listener would otherwise make `sendMessage` look delivered in a tab
-    // where this script was never injected.
     sendResponse({ ok: true })
   },
 )

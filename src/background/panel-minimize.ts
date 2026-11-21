@@ -131,15 +131,40 @@ export interface FloatingPos {
   y: number
 }
 
+/**
+ * One key holds both floating controls' positions (spec 2026-11-21): the
+ * minimized icon and the element-picker crosshair, independent but persisted
+ * side by side. Older records store a bare `{x,y}` for the icon only and are
+ * read as `{icon: {x,y}}`.
+ */
+interface WindowControls {
+  icon?: FloatingPos
+  picker?: FloatingPos
+}
+
 const clampPercent = (value: number): number => Math.min(100, Math.max(0, value))
 
-function readPosMap(): Promise<Record<string, FloatingPos>> {
+function readPosMap(): Promise<Record<string, WindowControls>> {
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return Promise.resolve({})
   return chrome.storage.local
     .get(POS_KEY)
     .then((stored) => {
-      const map = stored?.[POS_KEY] as Record<string, FloatingPos> | undefined
-      return map && typeof map === 'object' ? map : {}
+      const raw = stored?.[POS_KEY] as Record<string, unknown> | undefined
+      if (!raw || typeof raw !== 'object') return {}
+      const map: Record<string, WindowControls> = {}
+      for (const [windowId, value] of Object.entries(raw)) {
+        if (!value || typeof value !== 'object') continue
+        const record = value as Record<string, unknown>
+        const asPos = (candidate: unknown): FloatingPos | undefined => {
+          const pos = candidate as FloatingPos | undefined
+          return pos && typeof pos.x === 'number' && typeof pos.y === 'number' ? pos : undefined
+        }
+        const icon = asPos(record['icon'] ?? record)
+        const picker = asPos(record['picker'])
+        if (icon || picker)
+          map[windowId] = { ...(icon ? { icon } : {}), ...(picker ? { picker } : {}) }
+      }
+      return map
     })
     .catch(() => ({}))
 }
@@ -148,8 +173,14 @@ function readPosMap(): Promise<Record<string, FloatingPos>> {
 export async function getFloatingButtonPos(windowId: number): Promise<FloatingPos | undefined> {
   if (typeof windowId !== 'number') return undefined
   const map = await readPosMap()
-  const pos = map[String(windowId)]
-  return pos && typeof pos.x === 'number' && typeof pos.y === 'number' ? pos : undefined
+  return map[String(windowId)]?.icon
+}
+
+/** The element-picker crosshair's saved position for this window. */
+export async function getPickerButtonPos(windowId: number): Promise<FloatingPos | undefined> {
+  if (typeof windowId !== 'number') return undefined
+  const map = await readPosMap()
+  return map[String(windowId)]?.picker
 }
 
 /** Persists a dropped position (values clamped to 0–100 on both axes). */
@@ -157,7 +188,25 @@ export async function setFloatingButtonPos(windowId: number, pos: FloatingPos): 
   if (typeof windowId !== 'number') return
   if (typeof pos?.x !== 'number' || typeof pos?.y !== 'number') return
   const map = await readPosMap()
-  map[String(windowId)] = { x: clampPercent(pos.x), y: clampPercent(pos.y) }
+  const entry = map[String(windowId)] ?? {}
+  map[String(windowId)] = {
+    ...entry,
+    icon: { x: clampPercent(pos.x), y: clampPercent(pos.y) },
+  }
+  if (typeof chrome === 'undefined' || !chrome.storage?.local) return
+  await chrome.storage.local.set({ [POS_KEY]: map }).catch(() => {})
+}
+
+/** Persists the crosshair's dropped position in the SAME per-window record. */
+export async function setPickerButtonPos(windowId: number, pos: FloatingPos): Promise<void> {
+  if (typeof windowId !== 'number') return
+  if (typeof pos?.x !== 'number' || typeof pos?.y !== 'number') return
+  const map = await readPosMap()
+  const entry = map[String(windowId)] ?? {}
+  map[String(windowId)] = {
+    ...entry,
+    picker: { x: clampPercent(pos.x), y: clampPercent(pos.y) },
+  }
   if (typeof chrome === 'undefined' || !chrome.storage?.local) return
   await chrome.storage.local.set({ [POS_KEY]: map }).catch(() => {})
 }

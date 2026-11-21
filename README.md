@@ -60,7 +60,10 @@ watch or stay hands-off.
 - 🎯 **Point at an element instead of describing it.** The page element picker
   in Settings puts a crosshair on every page: one click copies the CSS
   selector, the visible text, or the HTML — or, in select-only mode, records
-  the element so the assistant or a connected coding agent can read it.
+  the element so the assistant or a connected coding agent can read it. The
+  crosshair is its own draggable control (independent of the minimized-plugin
+  icon, never overlapping it) and pressing it does not take focus, so
+  dropdowns that close on blur stay open while you pick inside them.
 - ✍️ **Report problems from the panel.** Settings ends with feedback: write a
   report, optionally attach version/build/browser diagnostics, and create a
   public GitHub issue without leaving the extension.
@@ -461,8 +464,9 @@ unacceptable.
 - **Markdown.** Replies render headings, lists, tables, and code blocks (with a
   copy button); your own text stays as typed.
 - **Element picker.** Under **More → Settings → Element picker**, switch on a
-  crosshair button that then sits in the bottom-right corner of every page.
-  Click it, hover to highlight, click an element: the CSS selector, the visible
+  crosshair button that sits on every page in its own saved position — drag it
+  anywhere, with or without the minimized icon on screen. Click it, hover to
+  highlight, click an element: the CSS selector, the visible
   text, or the HTML (children included) is copied to your clipboard and the
   element is recorded for the assistant. Turn on **Select without copying** to
   only record it — the assistant, or a local agent via

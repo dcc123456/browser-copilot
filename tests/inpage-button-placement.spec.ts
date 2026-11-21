@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 /**
- * The two page buttons form ONE floating window: with the plugin minimized,
- * the picker crosshair docks into the icon's host (above the icon by default),
- * and the whole window follows a dragged position. The crosshair only lives on
- * its own, in the bottom-right corner, while the panel is open.
+ * Two INDEPENDENT floating controls (spec 2026-11-21): the minimized plugin
+ * icon and the element-picker crosshair.
  *
- * jsdom has no layout engine, so the window's height is handed to the code
- * explicitly where the icon-anchored math depends on it.
+ * The crosshair used to dock into the icon's window, which is exactly why it
+ * could only be dragged while the icon was on the page. Now each control keeps
+ * its own position, each drags on its own, and they never overlap. jsdom has no
+ * layout engine, so a few boxes are handed to the code explicitly.
  *
  * @module tests/inpage-button-placement
  */
@@ -61,43 +61,34 @@ function pointer(target: Element, type: string, x: number, y: number): void {
   target.dispatchEvent(event)
 }
 
-/** jsdom reports 0 for every box; the docked window is crosshair + 8 + icon. */
+/** jsdom reports 0 for every box; with no crosshair docked the stack is one icon. */
 function stubWindowHeight(host: HTMLElement): void {
-  Object.defineProperty(host, 'offsetHeight', { value: 88, configurable: true })
+  Object.defineProperty(host, 'offsetHeight', { value: 40, configurable: true })
 }
 
-describe('one floating window', () => {
-  it('parks the crosshair in the bottom-right corner while the panel is open', () => {
+describe('independent floating controls', () => {
+  it('parks the crosshair on the document while the panel is open', () => {
     deliver({ type: 'elementPicker.set', enabled: true, locale: 'en', format: 'html' })
 
     const host = launcherHost()
     expect(host?.parentElement).toBe(document.documentElement)
-    expect(host?.style.right).toBe('16px')
-    expect(host?.style.bottom).toBe('16px')
+    expect(host?.style.position).toBe('fixed')
+    expect(host?.style.left).not.toBe('')
+    expect(host?.style.top).not.toBe('')
   })
 
-  it('docks the crosshair into the plugin window when the panel is minimized', async () => {
+  it('stays independent when the plugin window mounts (no docking)', async () => {
     deliver({ type: 'floating.show' })
     await settle()
 
     const windowHost = floatingHost()
     const launcher = launcherHost()
-    expect(launcher?.parentElement).toBe(windowHost)
-    expect(launcher?.style.position).toBe('static')
-    expect(windowHost?.style.right).toBe('16px')
-    expect(windowHost?.style.bottom).toBe('16px')
+    expect(windowHost).not.toBeNull()
+    expect(launcher?.parentElement).toBe(document.documentElement)
+    expect(windowHost?.contains(launcher ?? null)).toBe(false)
   })
 
-  it('keeps the crosshair above the icon in the window stack', () => {
-    const windowHost = floatingHost()
-    const stack = windowHost?.shadowRoot?.querySelector('.stack')
-
-    expect(stack?.firstElementChild?.tagName).toBe('SLOT')
-    expect(stack?.lastElementChild?.tagName).toBe('BUTTON')
-    expect(windowHost?.classList.contains('flipped')).toBe(false)
-  })
-
-  it('anchors a dragged window by the icon center, crosshair above it', () => {
+  it('keeps the icon window anchored by the icon center', () => {
     const windowHost = floatingHost()
     if (!windowHost) throw new Error('floating window did not mount')
     stubWindowHeight(windowHost)
@@ -107,21 +98,9 @@ describe('one floating window', () => {
     const iconLeft = window.innerWidth / 2 - 20
     const iconTop = window.innerHeight / 2 - 20
     expect(windowHost.style.left).toBe(`${iconLeft}px`)
-    expect(windowHost.style.top).toBe(`${iconTop - 48}px`)
+    expect(windowHost.style.top).toBe(`${iconTop}px`)
     expect(windowHost.style.right).toBe('auto')
     expect(windowHost.style.bottom).toBe('auto')
-    expect(windowHost.classList.contains('flipped')).toBe(false)
-  })
-
-  it('flips the stack only when the icon touches the top edge', () => {
-    const windowHost = floatingHost()
-    if (!windowHost) throw new Error('floating window did not mount')
-    stubWindowHeight(windowHost)
-
-    deliver({ type: 'floating.show', pos: { x: 50, y: 0 } })
-
-    expect(windowHost.classList.contains('flipped')).toBe(true)
-    expect(windowHost.style.top).toBe('8px')
   })
 
   it('replaces a window left behind by a dead script and reopens on click', () => {
@@ -158,49 +137,40 @@ describe('one floating window', () => {
     expect(launcher?.shadowRoot?.querySelector('button')).not.toBeNull()
   })
 
-  it('returns the crosshair to the corner when the window disappears', async () => {
+  it('leaves the crosshair where it was when the window disappears', async () => {
+    const before = launcherHost()
+    const left = before?.style.left
     deliver({ type: 'floating.hide' })
     await settle()
 
     expect(floatingHost()).toBeNull()
     const launcher = launcherHost()
     expect(launcher?.parentElement).toBe(document.documentElement)
-    expect(launcher?.style.position).toBe('fixed')
-    expect(launcher?.style.right).toBe('16px')
-    expect(launcher?.style.bottom).toBe('16px')
+    expect(launcher?.style.left).toBe(left)
   })
 
-  it('drags the whole window from the crosshair, not just from the icon', () => {
+  it('drags the crosshair on its own, without moving the icon window', async () => {
+    deliver({ type: 'elementPicker.set', enabled: true, locale: 'en', format: 'html' })
     deliver({ type: 'floating.show', pos: { x: 50, y: 50 } })
+    await settle()
     const windowHost = floatingHost()
     const launcher = launcherHost()
     if (!windowHost || !launcher) throw new Error('window did not mount')
-    expect(launcher.parentElement).toBe(windowHost)
-    stubWindowHeight(windowHost)
-
     const leftBefore = windowHost.style.left
+
     const crosshair = launcher.shadowRoot?.querySelector('button')
     if (!crosshair) throw new Error('crosshair missing')
-    let crosshairClicks = 0
-    crosshair.addEventListener('click', () => {
-      crosshairClicks += 1
-    })
-
     pointer(crosshair, 'pointerdown', 500, 500)
-    pointer(windowHost, 'pointermove', 560, 520)
-    pointer(windowHost, 'pointerup', 560, 520)
+    pointer(crosshair, 'pointermove', 560, 520)
+    pointer(crosshair, 'pointerup', 560, 520)
+    await settle()
 
-    expect(parseFloat(windowHost.style.left) - parseFloat(leftBefore)).toBe(60)
+    expect(windowHost.style.left).toBe(leftBefore)
     expect(sent).toContainEqual({
-      type: 'floating.move',
+      type: 'elementPicker.move',
       x: expect.any(Number),
       y: expect.any(Number),
     })
-
-    // The click that follows the drag must not reach the crosshair, or dropping
-    // the window would start the picker instead.
-    crosshair.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
-    expect(crosshairClicks).toBe(0)
   })
 
   it('drops a crosshair left behind by a dead picker script', () => {
