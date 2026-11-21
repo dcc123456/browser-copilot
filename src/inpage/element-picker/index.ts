@@ -945,7 +945,7 @@ export const startPicker: PickerStart = async (args) => {
     field.value = value
     field.setAttribute('readonly', '')
     // The textarea only exists to run execCommand inside the gesture; it must
-    // not keep the focus afterwards (the page's dropdown would close on this
+    // not keep the focus afterwards (a blur-closed dropdown would close on this
     // focusout). `select()` inevitably focuses it, so restore below.
     field.setAttribute('tabindex', '-1')
     field.style.position = 'fixed'
