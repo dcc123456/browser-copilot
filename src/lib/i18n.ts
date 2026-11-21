@@ -2976,9 +2976,9 @@ const en: Messages = {
   settingsLanguage: 'Language',
   settingsLanguageAuto: 'Automatic (follow browser)',
   settingsKeyPlaceholderLocal: 'any value works locally',
-  settingsMaxToolRounds: 'Max action steps per reply',
+  settingsMaxToolRounds: 'Round budget for a new task',
   settingsMaxToolRoundsHint:
-    'How many actions (clicks, reads, scrolls, …) the agent takes in one batch. In chat it then gets another batch automatically, so long tasks reach a result; scheduled tasks and AI-agent blocks stop at the limit. Range 1–100.',
+    'How many action rounds (clicks, reads, scrolls, …) a new task starts with. When the budget runs out the turn stops and pauses for your decision — add rounds to continue, change the budget, or end the task. Scheduled tasks and AI-agent blocks have nobody to decide, so they settle and pause when the budget is spent. Range 1–100.',
   settingsModelsEmpty: 'The endpoint returned an empty model list.',
   settingsModelsFailed: ({ message }) =>
     `${message} — not all gateways expose /models; you can still type the model name.`,
@@ -4717,9 +4717,9 @@ const zhCN: Messages = {
   settingsLanguage: '语言',
   settingsLanguageAuto: '自动（跟随浏览器）',
   settingsKeyPlaceholderLocal: '本地服务填任意值即可',
-  settingsMaxToolRounds: '每条回复最多操作步数',
+  settingsMaxToolRounds: '新任务的初始轮次预算',
   settingsMaxToolRoundsHint:
-    '代理每一批最多执行的操作次数（点击、读取、滚动等）。聊天中用完会自动续期，保证长任务跑到出结果；定时任务和 AI 智能体块到上限即停止。范围 1–100。',
+    '每个新任务开始时拥有的动作轮次（点击、读取、滚动等）。预算用尽后本轮会停下并暂停，等你决定：加预算继续、改预算，或结束任务。定时任务与 AI 智能体块没有人可以决策，到达预算会结算并暂停。范围 1–100。',
   settingsModelsEmpty: '该接口返回的模型列表为空。',
   settingsModelsFailed: ({ message }) =>
     `${message}——并非所有网关都提供 /models，你仍可手动输入模型名称。`,

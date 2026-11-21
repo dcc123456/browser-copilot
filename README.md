@@ -434,11 +434,11 @@ machine. Page text is capped at ~12,000 characters, so prefer a large context
 window for long pages.
 
 Add multiple providers and switch with **Use this**, or pick the active model
-from the composer. Keys are stored per profile. **Max action steps per reply**
-(default 20, range 1–100) is one batch, not a stop: a panel chat turn spends up
-to ten batches (200 steps at the default) before the safety ceiling, re-arming
-context compaction at each checkpoint. Scheduled tasks and AI-agent blocks stop
-at their single limit. Keys live on this machine only (as files once you pick a
+from the composer. Keys are stored per profile. **Round budget for a new task**
+(default 20, range 1–100) is what a new task starts with. When it is spent the
+turn stops and pauses for your decision: add rounds, change the budget, or end
+the task. Nothing runs on silently — scheduled tasks and AI-agent blocks have
+nobody to decide, so they settle and pause at the budget. Keys live on this machine only (as files once you pick a
 storage folder — not synced, not encrypted) — use a local model if that's
 unacceptable.
 
@@ -1042,17 +1042,17 @@ webhooks, Docker deployment, and a web console.
 
 ## Troubleshooting
 
-| Symptom                          | Fix                                                                                                                                             |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| "No model provider configured"   | More → Model settings → Add a provider.                                                                                                         |
-| 401 / 403                        | Wrong/expired key, or key/vendor mismatch.                                                                                                      |
-| 404 when sending                 | Base URL missing its version segment, or unknown model; press **Test connection**.                                                              |
-| "Cannot read this page"          | `chrome://`, `file://`, Web Store, or extension page — not injectable.                                                                          |
-| Action still asks in full auto   | Reload the extension; confirm the dropdown shows ⚡ Full auto.                                                                                  |
-| "Stopped after N tool rounds"    | The safety ceiling was reached (ten batches in chat; one in a task or AI-agent block). Send "continue" or raise **Max action steps per reply**. |
-| Chats but never reads/acts       | Model lacks function calling; attach the page or switch model.                                                                                  |
-| Page text empty/partial          | Content is in an iframe, lazy-loaded, or behind "Load more"; select the relevant section.                                                       |
-| Nothing happens on toolbar click | Reload the extension; the worker may have failed to start.                                                                                      |
+| Symptom                          | Fix                                                                                                                                                                      |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| "No model provider configured"   | More → Model settings → Add a provider.                                                                                                                                  |
+| 401 / 403                        | Wrong/expired key, or key/vendor mismatch.                                                                                                                               |
+| 404 when sending                 | Base URL missing its version segment, or unknown model; press **Test connection**.                                                                                       |
+| "Cannot read this page"          | `chrome://`, `file://`, Web Store, or extension page — not injectable.                                                                                                   |
+| Action still asks in full auto   | Reload the extension; confirm the dropdown shows ⚡ Full auto.                                                                                                           |
+| Budget used up / the task pauses | The task spent its round budget. The panel card offers renew, change budget, or end and start a new task; raising **Round budget for a new task** affects the next task. |
+| Chats but never reads/acts       | Model lacks function calling; attach the page or switch model.                                                                                                           |
+| Page text empty/partial          | Content is in an iframe, lazy-loaded, or behind "Load more"; select the relevant section.                                                                                |
+| Nothing happens on toolbar click | Reload the extension; the worker may have failed to start.                                                                                                               |
 
 ---
 
@@ -1065,14 +1065,14 @@ webhooks, Docker deployment, and a web console.
   "no actionable tab in the panel's window" instead of reaching into another
   window.
 - Page text capped at ~12,000 characters; truncation is reported to the model.
-- A panel chat turn runs ten batches of the configured cap (200 steps at the
-  default), then stops; scheduled tasks and AI-agent blocks stop after one.
-  **Explicit budgets are not wired into the loop yet**: a durable goal model
-  exists (rounds, renewal, unattended auto-renewal cap, a six-item report), but
-  the agent does not pause at the budget and the panel has no goal bar, budget
-  dialog or renew entry. A goal stays active across your messages instead of
-  closing on an explicit completion statement — nothing in this version means
-  "unlimited long tasks".
+- **Budgets are explicit, and they pause rather than stop silently.** A task
+  starts with the configured round budget; when it is spent the turn pauses and
+  the panel offers renew / change budget / end and start a new task. A goal only
+  completes on an explicit `goal_complete` declaration with locatable evidence,
+  so an unfinished task stays active across your messages instead of being
+  closed for you. **Unattended auto-renewal is not shipped yet**: a scheduled
+  task or AI-agent block stops at its budget and waits — that is the safe
+  default, not a defect.
 - The irreversible-action fence remembers the last **50** actions of a
   conversation: after more than 50, the oldest one would no longer be blocked on
   replay.
