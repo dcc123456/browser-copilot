@@ -2601,6 +2601,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
             break
           case 'goal.state':
             setGoalState(message.goal)
+            setGoalBudgetDraft((prev) => prev || String(message.goal.maxRounds))
             if (message.goal.status !== 'paused') setGoalReport(null)
             break
           case 'goal.budgetExhausted':
@@ -4570,6 +4571,33 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                   ? t.goalStatusDone
                   : t.goalStatusActive}
             </span>
+            {goalState.status === 'active' && (
+              <>
+                <input
+                  aria-label={t.goalSetBudget}
+                  className="w-14 rounded border border-border bg-panel px-1 py-0.5"
+                  min={1}
+                  onChange={(event) => setGoalBudgetDraft(event.target.value)}
+                  type="number"
+                  value={goalBudgetDraft}
+                />
+                <button
+                  className="rounded border border-border px-2 py-0.5"
+                  onClick={() => {
+                    const value = Number(goalBudgetDraft)
+                    if (!Number.isFinite(value) || value <= 0) return
+                    void sendCommand({
+                      type: 'goal.setBudget',
+                      conversationId,
+                      maxRounds: value,
+                    })
+                  }}
+                  type="button"
+                >
+                  {t.goalSetBudget}
+                </button>
+              </>
+            )}
           </div>
         )}
 

@@ -75,6 +75,8 @@ export interface TaskGoal {
   autoRenewals: number
   /** Locatable evidence submitted with the completion declaration. */
   evidence?: GoalEvidence[]
+  /** When this goal was moved into the bounded archive; prevents double entries. */
+  archivedAt?: number
 }
 
 /** Default per-goal round budget when the user has not set one. */
@@ -172,6 +174,9 @@ export function archiveGoal(
 ): TaskProgress {
   const goal = progress.goal
   if (!goal) return progress
+  // Archive exactly once: abandoning a goal and then sending the next message
+  // must not append the same finished task twice.
+  if (goal.archivedAt !== undefined) return progress
   const recorded: ArchivedGoal = {
     summary: goal.summary,
     startedAt: goal.startedAt,
@@ -182,7 +187,7 @@ export function archiveGoal(
   }
   return {
     ...progress,
-    goal: { ...goal, status },
+    goal: { ...goal, status, archivedAt: now },
     archivedGoals: [...(progress.archivedGoals ?? []), recorded].slice(-MAX_ARCHIVED_GOALS),
     updatedAt: now,
   }
@@ -213,16 +218,23 @@ export function completeGoal(
     .filter((entry) => entry.value.length > 0)
   if (usable.length === 0) return undefined
   const summary = input.summary?.trim() || goal.summary
-  return {
-    ...progress,
-    goal: {
-      ...goal,
-      summary: summary.slice(0, 400),
-      status: 'done',
-      evidence: usable.slice(0, 8),
+  // Completion archives immediately: the finished task must be readable even
+  // before the next message arrives, and archiving here makes the later
+  // start-new-goal path skip it instead of duplicating the record.
+  return archiveGoal(
+    {
+      ...progress,
+      goal: {
+        ...goal,
+        summary: summary.slice(0, 400),
+        status: 'done',
+        evidence: usable.slice(0, 8),
+      },
+      updatedAt: now,
     },
-    updatedAt: now,
-  }
+    'done',
+    now,
+  )
 }
 
 export function recordGoalRound(progress: TaskProgress, now = Date.now()): TaskProgress {

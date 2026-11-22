@@ -6112,7 +6112,10 @@ export async function runAgentTurn(
         })
         return totalUsage.totalTokens > 0 ? totalUsage : null
       }
-      taskProgress = renewGoalBudget(taskProgress, decision.rounds, 'user')
+      // The panel already applied the budget change before resolving; reload it
+      // so the loop works on the stored goal instead of a stale in-memory copy.
+      const fresh = (await loadTaskProgress(deps.conversationId)) ?? taskProgress
+      taskProgress = decision.rounds > 0 ? renewGoalBudget(fresh, decision.rounds, 'user') : fresh
       ctx.taskProgress = taskProgress
       await saveTaskProgress(taskProgress)
       broadcastGoal()

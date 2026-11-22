@@ -3515,12 +3515,9 @@ async function handleCommand(
       const progress = await loadTaskProgress(command.conversationId)
       if (!progress?.goal) return { type: 'goal.update', goal: null }
       let next = progress
-      let added = 0
       if (command.type === 'goal.renew') {
-        added = command.rounds
         next = renewGoalBudget(progress, command.rounds, 'user')
       } else if (command.type === 'goal.setBudget') {
-        added = Math.max(0, command.maxRounds - progress.goal.maxRounds)
         next = setGoalBudget(progress, command.maxRounds)
       } else if (command.type === 'goal.abandon') {
         next = archiveGoal(progress, 'abandoned')
@@ -3546,9 +3543,14 @@ async function handleCommand(
       broadcastGoalState(command.conversationId)
       const waiter = goalDecisionWaiters.get(command.conversationId)
       if (waiter) {
-        // Renew/increase continues the paused turn; completing or ending it
-        // resolves the waiter too, or that turn would hang forever.
-        waiter(added > 0 ? { rounds: added } : null)
+        // The budget was already applied above, so the loop must NOT add it a
+        // second time: `rounds: 0` means "reload the stored goal and continue".
+        // Completing/ending, or a budget that is still below what was spent,
+        // ends the paused turn instead of leaving it waiting.
+        const continues =
+          command.type === 'goal.renew' ||
+          (command.type === 'goal.setBudget' && next.goal?.status === 'active')
+        waiter(continues ? { rounds: 0 } : null)
         goalDecisionWaiters.delete(command.conversationId)
       }
       const goal = next.goal
