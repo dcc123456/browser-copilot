@@ -9,7 +9,7 @@
  * `{{noteTitle}}` against the page fails a step that demonstrably worked, and
  * every test of the resolver alone stays green while that happens.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { runWorkflow } from '../src/background/workflow-engine/engine'
 import type { ReadinessProbe } from '../src/background/workflow-engine/readiness-engine'
 import type { ReadinessRequirement } from '../src/lib/workflow/readiness'
@@ -102,6 +102,74 @@ describe('readiness gates see the run variables', () => {
     expect(result.outcome).toBe('failed')
     expect(result.error).toContain('UNRESOLVED_INPUT')
     expect(seen).toEqual([])
+  })
+
+  it('stops a javascript-code step whose code still holds an unresolved token', async () => {
+    // A JS step's text is a PROGRAM: an unresolved token is not a locator hole,
+    // it is a string the script will send. The reproduced failure sent the
+    // literal "{loopItem}" as a comment id.
+    const ran = vi.fn(async () => null)
+    const node: WorkflowNode = {
+      id: 'js',
+      label: 'javascript-code',
+      position: { x: 0, y: 0 },
+      data: { blockId: 'javascript-code', code: "const note = '{{loopItem}}'\nsend(note)" },
+    }
+    const workflow: Workflow = {
+      id: 'wf',
+      name: 'wf',
+      createdAt: 0,
+      updatedAt: 0,
+      drawflow: { nodes: [node], edges: [] },
+      settings: {
+        saveLog: false,
+        debugMode: false,
+        notification: false,
+        reuseLastState: false,
+        reliabilityMode: 'compat',
+      },
+    }
+    const result = await runWorkflow(workflow, {
+      executors: { 'javascript-code': ran },
+      variables: {},
+    })
+    expect(result.outcome).toBe('failed')
+    expect(result.error).toContain('UNRESOLVED_INPUT')
+    expect(result.error).toContain('loopItem')
+    // The script never ran: the braces never reached a page.
+    expect(ran).not.toHaveBeenCalled()
+  })
+
+  it('still runs the step when the variable exists but is empty', async () => {
+    // "legal empty" ('' / []) is not "unresolved" — refusing it would kill steps
+    // that legitimately clear a field.
+    const ran = vi.fn(async () => null)
+    const node: WorkflowNode = {
+      id: 'js',
+      label: 'javascript-code',
+      position: { x: 0, y: 0 },
+      data: { blockId: 'javascript-code', code: "automaSetVariable('x', '{{maybe}}')" },
+    }
+    const workflow: Workflow = {
+      id: 'wf',
+      name: 'wf',
+      createdAt: 0,
+      updatedAt: 0,
+      drawflow: { nodes: [node], edges: [] },
+      settings: {
+        saveLog: false,
+        debugMode: false,
+        notification: false,
+        reuseLastState: false,
+        reliabilityMode: 'compat',
+      },
+    }
+    const result = await runWorkflow(workflow, {
+      executors: { 'javascript-code': ran },
+      variables: { maybe: '' },
+    })
+    expect(result.outcome).toBe('ok')
+    expect(ran).toHaveBeenCalledTimes(1)
   })
 
   it('re-anchors a stale generation-time expectation on the edited value', async () => {

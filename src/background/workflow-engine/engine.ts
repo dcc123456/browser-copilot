@@ -1199,10 +1199,22 @@ async function runCore(
         // node failure: retry, fallback, continue and AI takeover all apply.
         // The saved workflow is untouched, and a declared input seeded with its
         // recorded default never gets here.
-        if (pageActing) {
+        // `javascript-code` belongs on this list too, for a worse reason than a
+        // locator hole: its text is a PROGRAM, so an unresolved token survives as
+        // a string literal and the script SENDS it. The reproduced failure: a
+        // dedup step placed outside the loop read `{{loopItem}}`, and the site
+        // received a comment whose id was literally "{{loopItem}}". A variable
+        // that EXISTS but is empty stays legal (`EMPTY_INTERP`, not this flag) —
+        // an intentionally empty value must not be reported as a broken one.
+        const rejectsUnresolved = pageActing || blockId === 'javascript-code'
+        if (rejectsUnresolved) {
           const unresolved = params[UNRESOLVED_INTERP_KEY]
           if (Array.isArray(unresolved) && unresolved.length > 0) {
-            throw new Error(`UNRESOLVED_INPUT: {{${unresolved.join('}}, {{')}}}`)
+            throw new Error(
+              `UNRESOLVED_INPUT: {{${unresolved.join('}}, {{')}}} — ` +
+                'this step reads a variable that has no value at this point, so it would ' +
+                'use the literal braces. Move the step where the variable exists or give it a value.',
+            )
           }
         }
         if (attempt > 0 && beforeNode) restoreVariables(variables, beforeNode)
