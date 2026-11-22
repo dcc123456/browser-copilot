@@ -2007,6 +2007,10 @@ export type OperatorEditProblemKind =
   | OperatorTargetProblem
   /** Move/delete left a downstream step reading a variable nothing produces now. */
   | 'dangling-reference'
+  /** The change would leave a loop with no exit: nothing after it could run. */
+  | 'loop-exit-missing'
+  /** The change would take a loop-breakpoint out of the body it ends. */
+  | 'breakpoint-outside-loop'
   /** Moving the entry point is never legal: nothing runs before the trigger. */
   | 'move-entry-point'
   /** The move would put a step inside its own downstream (a cycle). */
@@ -2159,6 +2163,13 @@ function moveNodeInGraph(
   if (side === 'before' && incomingToNode.length > 1) return { problem: 'join-anchor' }
   const incomingToAnchor = incoming.get(anchor.id) ?? []
   const outgoingFromAnchor = outgoing.get(anchor.id) ?? []
+  // Moving a step to the place it already occupies is a no-op, not a self-edge.
+  if (side === 'after' && outgoingFromAnchor[0]?.target === nodeId) {
+    return {
+      nodes: graph.nodes.map((candidate) => ({ ...candidate })),
+      edges: graph.edges.map((edge) => ({ ...edge })),
+    }
+  }
   if (side === 'after' && outgoingFromAnchor.length > 1) return { problem: 'branch-anchor' }
   if (side === 'before' && incomingToAnchor.length > 1) return { problem: 'join-anchor' }
 
@@ -2243,6 +2254,57 @@ function deleteNodeFromGraph(
 }
 
 /**
+ * The structural invariants a landed answer must leave true, checked in ONE
+ * place so no caller can add a sixth one somewhere else.
+ *
+ * Three rounds of "structurally legal, semantically wrong" produced this list —
+ * a variable read where it does not exist, a producer deleted under its reader,
+ * and now a loop whose exit was moved away. The pattern was the same every time:
+ * the operation was validated, the graph it left behind was not.
+ */
+function graphInvariantProblems(
+  before: SuggestionGraph,
+  after: SuggestionGraph,
+): OperatorEditProblem[] {
+  // 1. The entry point must still be there.
+  const hadTrigger = before.nodes.some((node) => blockIdOf(node) === TRIGGER_BLOCK_ID)
+  const hasTrigger = after.nodes.some((node) => blockIdOf(node) === TRIGGER_BLOCK_ID)
+  if (hadTrigger && !hasTrigger) return [{ index: -1, problem: 'delete-entry-point' }]
+
+  const normalOut = normalOutgoing(after)
+  const insideBefore = loopBodyMembership(before)
+  const insideAfter = loopBodyMembership(after)
+
+  for (const node of after.nodes) {
+    if (blockIdOf(node) !== 'loop-breakpoint') continue
+    // 2. A breakpoint still ends a body — moved out of it, its loop can never end.
+    if (insideBefore.has(node.id) && !insideAfter.has(node.id)) {
+      return [{ index: -1, problem: 'breakpoint-outside-loop', nodeId: node.id }]
+    }
+    // 3. A breakpoint still has a way out — otherwise the loop exits into nothing.
+    if ((normalOut.get(node.id) ?? []).length === 0) {
+      return [{ index: -1, problem: 'loop-exit-missing', nodeId: node.id }]
+    }
+  }
+
+  // 4. No downstream step may read a variable this answer stopped producing.
+  const producedBefore = producerNamesOf(before.nodes)
+  const producedAfter = producerNamesOf(after.nodes)
+  const lost = [...producedBefore].filter((name) => !producedAfter.has(name))
+  if (lost.length > 0) {
+    for (const node of after.nodes) {
+      const dangling = referencedVariablesOf(node).filter((name) => lost.includes(name))
+      if (dangling.length > 0) {
+        return [{ index: -1, problem: 'dangling-reference', nodeId: node.id, variables: dangling }]
+      }
+    }
+  }
+  // 5. No cycle: a move refuses to place a step inside its own downstream, which
+  // is the only way this answer could create one.
+  return []
+}
+
+/**
  * Applies an answer's operations to a DRAFT of the graph, in order.
  *
  * Atomic on purpose (spec §R4): every operation runs against the draft, and one
@@ -2315,27 +2377,12 @@ export function applyGraphEdits(
     pruned.push(...patch.pruned)
   }
 
-  // A `move`/`delete` can take a PRODUCER away while a downstream step still
-  // reads its variable. Catching that at run time (the unresolved-token guard)
-  // means the user waited for a run that could never work, and the canvas looked
-  // fine — the same "structurally legal, semantically wrong" trap as an
-  // out-of-scope variable. Only producers that EXISTED and are now GONE count:
-  // references to declared inputs or names this build never produced are left
-  // alone, so a pre-existing hole is not blamed on this answer.
+  // Moving or deleting a step can break the graph in ways that stay legal-looking:
+  // the producer goes away under its reader, a breakpoint leaves its body, a loop
+  // loses its exit. All of them are checked here, before anything lands.
   if (ops.some((op) => op.kind === 'move' || op.kind === 'delete')) {
-    const before = producerNamesOf(graph.nodes)
-    const after = producerNamesOf(draft.nodes)
-    const lost = [...before].filter((name) => !after.has(name))
-
-    if (lost.length > 0) {
-      for (const node of draft.nodes) {
-        const dangling = referencedVariablesOf(node).filter((name) => lost.includes(name))
-        if (dangling.length === 0) continue
-        return untouchedGraphEdit(graph, [
-          { index: -1, problem: 'dangling-reference', nodeId: node.id, variables: dangling },
-        ])
-      }
-    }
+    const problems = graphInvariantProblems(graph, draft)
+    if (problems.length > 0) return untouchedGraphEdit(graph, [problems[0]!])
   }
 
   return {

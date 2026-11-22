@@ -40,6 +40,7 @@ function fixture() {
     node('submit', 'javascript-code', { code: 'submit(loopItem)' }),
     node('break', 'loop-breakpoint', { loopId: '' }),
     node('save', 'javascript-code', { code: "automaSetVariable('csv','x')" }),
+    node('notify', 'javascript-code', { code: 'notify()' }),
   ]
   const edges = [
     edge('trigger', 'open'),
@@ -48,6 +49,7 @@ function fixture() {
     edge('loop', 'submit'),
     edge('submit', 'break'),
     edge('break', 'save'),
+    edge('save', 'notify'),
   ]
   return { nodes, edges }
 }
@@ -228,19 +230,19 @@ describe('atomic graph edits', () => {
 
   it('moves a step next to an anchor, carrying its wiring', () => {
     const before = fixture()
-    // `save` is the tail; move it in front of `seed`'s successor.
+    // `notify` is the tail and nobody reads it; move it after `seed`.
     const result = applyGraphEdits(
       before,
-      [{ kind: 'move', nodeId: 'save', anchorNodeId: 'seed', side: 'after' }],
+      [{ kind: 'move', nodeId: 'notify', anchorNodeId: 'seed', side: 'after' }],
       newId,
     )
     expect(result.problems).toEqual([])
     // Its old incoming edge is gone, the anchor now feeds it, and what the
     // anchor used to lead to hangs off the moved step.
-    expect(result.edges.some((e) => e.source === 'break' && e.target === 'save')).toBe(false)
-    expect(result.edges.some((e) => e.source === 'seed' && e.target === 'save')).toBe(true)
-    expect(result.edges.some((e) => e.source === 'save' && e.target === 'loop')).toBe(true)
-    expect(result.nodes.map((n) => n.id)).toContain('save')
+    expect(result.edges.some((e) => e.source === 'save' && e.target === 'notify')).toBe(false)
+    expect(result.edges.some((e) => e.source === 'seed' && e.target === 'notify')).toBe(true)
+    expect(result.edges.some((e) => e.source === 'notify' && e.target === 'loop')).toBe(true)
+    expect(result.nodes.map((n) => n.id)).toContain('notify')
   })
 
   it('refuses a move that would put a step inside its own downstream', () => {
@@ -305,25 +307,69 @@ describe('atomic graph edits', () => {
 
   it('allows a delete that removes no producer anything reads', () => {
     const before = fixture()
-    // `save` produces csv and nobody references it → removing it is fine.
+    // `notify` produces nothing anyone reads, and removing it leaves the loop's
+    // breakpoint its exit (`save`) intact.
     const result = applyGraphEdits(
       before,
-      [{ kind: 'delete', nodeId: 'save', reconnect: true }],
+      [{ kind: 'delete', nodeId: 'notify', reconnect: true }],
       newId,
     )
     expect(result.problems).toEqual([])
-    expect(result.nodes.map((n) => n.id)).not.toContain('save')
+    expect(result.nodes.map((n) => n.id)).not.toContain('notify')
   })
 
   it('allows a move that keeps the producer, even though the step changes place', () => {
     const before = fixture()
     const result = applyGraphEdits(
       before,
-      [{ kind: 'move', nodeId: 'seed', anchorNodeId: 'open', side: 'after' }],
+      [{ kind: 'move', nodeId: 'notify', anchorNodeId: 'open', side: 'after' }],
       newId,
     )
     expect(result.problems).toEqual([])
     expect(result.nodes.map((n) => n.id)).toContain('seed')
+  })
+
+  it('refuses a move that would leave a loop without an exit', () => {
+    const before = fixture()
+    // Moving `save` away empties the breakpoint's only outgoing edge: the loop
+    // would finish and then stop dead.
+    const result = applyGraphEdits(
+      before,
+      [{ kind: 'move', nodeId: 'save', anchorNodeId: 'submit', side: 'after' }],
+      newId,
+    )
+    expect(result.problems[0]).toMatchObject({
+      problem: 'loop-exit-missing',
+      nodeId: 'break',
+    })
+    expect(result.nodes).toEqual(before.nodes)
+  })
+
+  it('refuses a move that would take the breakpoint out of its body', () => {
+    const before = fixture()
+    const result = applyGraphEdits(
+      before,
+      // In front of `seed` is upstream of the loop, so no cycle — but the
+      // breakpoint no longer ends the body it belongs to.
+      [{ kind: 'move', nodeId: 'break', anchorNodeId: 'seed', side: 'before' }],
+      newId,
+    )
+    expect(result.problems[0]).toMatchObject({
+      problem: 'breakpoint-outside-loop',
+      nodeId: 'break',
+    })
+    expect(result.nodes).toEqual(before.nodes)
+  })
+
+  it('refuses deleting the entry point', () => {
+    const before = fixture()
+    const result = applyGraphEdits(
+      before,
+      [{ kind: 'delete', nodeId: 'trigger', reconnect: true }],
+      newId,
+    )
+    expect(result.problems).toEqual([{ index: 0, problem: 'delete-entry-point' }])
+    expect(result.nodes).toEqual(before.nodes)
   })
 
   it('refuses an empty answer instead of touching the canvas', () => {

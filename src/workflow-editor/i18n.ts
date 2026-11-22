@@ -385,6 +385,10 @@ export const EDITOR_STRINGS = {
     operatorAiDeleteEntry: 'The entry point cannot be deleted — a workflow needs a start step.',
     operatorAiDanglingReference:
       'That change would leave a step reading a variable nothing produces any more, so nothing was applied.',
+    operatorAiLoopExitMissing:
+      'That change would leave a loop with no exit, so nothing after the loop would ever run. Nothing was applied.',
+    operatorAiBreakpointOutsideLoop:
+      "That change would take a loop's breakpoint out of its body, so the loop could never finish. Nothing was applied.",
     operatorAiNotApplied: 'Not applied —',
     operatorAiEdited: 'The assistant updated the selected step.',
     operatorAiGraphEdited: 'The assistant updated the workflow.',
@@ -833,6 +837,10 @@ export const EDITOR_STRINGS = {
     operatorAiMoveCycle: '这次移动会把某个步骤放进它自己的下游（形成环），所以没有执行。',
     operatorAiDeleteEntry: '入口（触发器）不能删除——工作流必须有起点。',
     operatorAiDanglingReference: '这次改动会让某个步骤读取一个已经没有生产者的变量，所以没有执行。',
+    operatorAiLoopExitMissing:
+      '这次改动会让某个循环没有出口——循环之后的步骤永远不会执行，所以没有落地。',
+    operatorAiBreakpointOutsideLoop:
+      '这次改动会把循环的 breakpoint 移出循环体，循环将无法结束，所以没有落地。',
     operatorAiNotApplied: '未改动 ——',
     operatorAiEdited: '助手已更新所选步骤。',
     operatorAiGraphEdited: '助手已更新工作流。',

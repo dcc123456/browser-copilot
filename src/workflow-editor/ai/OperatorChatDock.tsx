@@ -84,6 +84,8 @@ export type OperatorLandingProblem =
   | 'move-cycle'
   | 'delete-entry-point'
   | 'dangling-reference'
+  | 'loop-exit-missing'
+  | 'breakpoint-outside-loop'
   | 'no-selection'
 
 /** What the canvas did with one reply. */
@@ -312,6 +314,8 @@ const PROBLEM_KEY: Record<OperatorLandingProblem, EditorStringKey> = {
   'move-cycle': 'operatorAiMoveCycle',
   'delete-entry-point': 'operatorAiDeleteEntry',
   'dangling-reference': 'operatorAiDanglingReference',
+  'loop-exit-missing': 'operatorAiLoopExitMissing',
+  'breakpoint-outside-loop': 'operatorAiBreakpointOutsideLoop',
 }
 
 /** One parameter value as the row shows it: JSON-quoted so an empty string stays
