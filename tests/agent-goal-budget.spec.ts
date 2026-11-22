@@ -150,6 +150,40 @@ describe('explicit goal budget in the loop', () => {
     expect(stored?.goal?.status).toBe('active')
   })
 
+  it('applies a budget edited from the panel while the task is still running', async () => {
+    let sent = 0
+    streamMock.mockImplementation((async () => {
+      sent += 1
+      // The panel writes the new budget straight to storage mid-round; the loop
+      // must pick it up instead of rolling it back with its own round save.
+      if (sent === 2 && stored?.goal) {
+        stored = { ...stored, goal: { ...stored.goal, maxRounds: 3 } }
+      }
+      // Safety net: without the fix this would run the whole default budget.
+      if (sent > 6) {
+        return { content: 'done', reasoning: '', toolCalls: [], finishReason: 'stop', usage: null }
+      }
+      return {
+        content: '',
+        reasoning: '',
+        toolCalls: [toolCall(`c${sent}`, 'snapshot_page', {})],
+        finishReason: 'tool_calls',
+        usage: null,
+      } as StreamResult
+    }) as never)
+
+    await runAgentTurn([{ role: 'user', content: 'watch the price' }] as never, deps() as never)
+
+    // The edited budget survived the run and the loop paused at it, not at 20.
+    expect(stored?.goal?.maxRounds).toBe(3)
+    expect(stored?.goal?.roundsStarted).toBe(3)
+    expect(stored?.goal?.status).toBe('paused')
+    const report = events.find((event) => event.type === 'goal.budgetExhausted')
+    if (report?.type !== 'goal.budgetExhausted') throw new Error('no budget report')
+    expect(report.report.usedRounds).toBe(3)
+    expect(report.report.maxRounds).toBe(3)
+  })
+
   it('settles (does not hang) when no human can decide', async () => {
     scriptTool('snapshot_page', 5)
     await runAgentTurn(

@@ -5814,7 +5814,7 @@ export async function runAgentTurn(
     const note = renderResumeNote(taskProgress, cost)
     if (note) systemPrompt = `${systemPrompt}\n\n${note}`
   }
-  await saveTaskProgress(taskProgress)
+  taskProgress = await saveProgressKeepingBudget(taskProgress)
   const broadcastGoal = (): void => {
     const goal = (ctx.taskProgress ?? taskProgress).goal
     if (!goal) return
@@ -6070,15 +6070,27 @@ export async function runAgentTurn(
       return null
     }
 
+    // The panel can edit the budget while the task is still running; pick the
+    // stored one up here so the gate below judges the budget the user sees.
+    const boundaryProgress = ctx.taskProgress ?? taskProgress
+    const adoptedProgress = await adoptStoredBudget(boundaryProgress)
+    if (adoptedProgress !== boundaryProgress) {
+      taskProgress = adoptedProgress
+      ctx.taskProgress = adoptedProgress
+      broadcastGoal()
+    }
+
     // Explicit budget gate (spec R10): reaching maxRounds PAUSES the task and
     // asks for a decision — never a silent stop. The turn stays alive while the
     // panel waits, so renewal continues from this exact breakpoint.
     const currentProgress = ctx.taskProgress ?? taskProgress
     const currentGoal = currentProgress.goal
     if (currentGoal && goalBudgetExhausted(currentProgress)) {
-      taskProgress = { ...currentProgress, goal: { ...currentGoal, status: 'paused' } }
+      taskProgress = await saveProgressKeepingBudget({
+        ...currentProgress,
+        goal: { ...currentGoal, status: 'paused' },
+      })
       ctx.taskProgress = taskProgress
-      await saveTaskProgress(taskProgress)
       broadcastGoal()
       const cost = await taskCostSince(deps.conversationId, currentGoal.startedAt)
       const report = goalBudgetReport(taskProgress, cost, 'budget')
@@ -6298,7 +6310,8 @@ export async function runAgentTurn(
       if (applySupplements() === 0) {
         // Completion is a declaration, never inferred here: the goal stays
         // active until an explicit completion with locatable evidence arrives.
-        await saveTaskProgress(ctx.taskProgress ?? taskProgress)
+        taskProgress = await saveProgressKeepingBudget(ctx.taskProgress ?? taskProgress)
+        ctx.taskProgress = taskProgress
         return totalUsage.totalTokens > 0 ? totalUsage : null
       }
       continue
@@ -6329,9 +6342,10 @@ export async function runAgentTurn(
     }
 
     // Spend one round of the explicit budget; the gate above pauses at the limit.
-    taskProgress = recordGoalRound(ctx.taskProgress ?? taskProgress)
+    taskProgress = await saveProgressKeepingBudget(
+      recordGoalRound(ctx.taskProgress ?? taskProgress),
+    )
     ctx.taskProgress = taskProgress
-    await saveTaskProgress(taskProgress)
   }
 }
 
@@ -6426,6 +6440,52 @@ function auditOf(
 }
 
 /**
+ * Reads the goal's budget fields back from storage and folds them into the
+ * live copy.
+ *
+ * The panel's goal commands write `maxRounds` (and its change log, and the K
+ * counter) straight to storage while a turn is running, but the loop only holds
+ * its in-memory copy — and it writes progress back after every round and every
+ * tool step, so without this merge a mid-run budget edit is rolled back by the
+ * agent's own write. Only budget fields move; `roundsStarted`, `status` and the
+ * steps stay with the writer that owns them. A different `startedAt` is a
+ * different task, so nothing is inherited across tasks.
+ */
+async function adoptStoredBudget(progress: TaskProgress): Promise<TaskProgress> {
+  const goal = progress.goal
+  if (!goal) return progress
+  const storedGoal = (await loadTaskProgress(progress.conversationId))?.goal
+  if (!storedGoal || storedGoal.startedAt !== goal.startedAt) return progress
+  if (
+    storedGoal.maxRounds === goal.maxRounds &&
+    storedGoal.autoRenewals === goal.autoRenewals &&
+    storedGoal.budgetLog.length === goal.budgetLog.length
+  ) {
+    return progress
+  }
+  return {
+    ...progress,
+    goal: {
+      ...goal,
+      maxRounds: storedGoal.maxRounds,
+      autoRenewals: storedGoal.autoRenewals,
+      budgetLog: storedGoal.budgetLog,
+    },
+  }
+}
+
+/**
+ * Persists progress with the panel's current budget merged in. Callers that
+ * have JUST changed the budget themselves (a renewal) must call
+ * `saveTaskProgress` directly — their copy is the newer one.
+ */
+async function saveProgressKeepingBudget(progress: TaskProgress): Promise<TaskProgress> {
+  const merged = await adoptStoredBudget(progress)
+  await saveTaskProgress(merged)
+  return merged
+}
+
+/**
  * Folds one executed step into the conversation's durable progress.
  *
  * Best effort by contract: losing a checkpoint costs recovery detail, failing
@@ -6460,8 +6520,7 @@ async function recordTaskStep(
       fingerprint: fingerprintOf(name, args),
     })
   }
-  ctx.taskProgress = next
-  await saveTaskProgress(next)
+  ctx.taskProgress = await saveProgressKeepingBudget(next)
   await observeProgress(ctx, deps, history, name, args, ok)
 }
 
@@ -6701,9 +6760,8 @@ async function runOneToolCall(
       sendToolResult({ type: 'tool.result', name, summary: 'Completion refused (no evidence)' })
       return
     }
-    ctx.taskProgress = next
-    await saveTaskProgress(next)
-    const goal = next.goal
+    ctx.taskProgress = await saveProgressKeepingBudget(next)
+    const goal = ctx.taskProgress.goal
     if (goal) {
       deps.send({
         type: 'goal.state',
@@ -7392,7 +7450,7 @@ async function runOneToolCall(
       describeAction(name, args, ctx.snapshotTargets),
       ok,
     )
-    if (ctx.taskProgress) await saveTaskProgress(ctx.taskProgress)
+    if (ctx.taskProgress) ctx.taskProgress = await saveProgressKeepingBudget(ctx.taskProgress)
   } catch (error) {
     // A termination must unwind the whole turn, not be recorded as a failed
     // tool step — otherwise the loop keeps going after the user cancelled.
