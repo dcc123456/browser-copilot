@@ -40,6 +40,14 @@ watch or stay hands-off.
   Destructive actions — submit, pay, publish, send — are never replayed: the second identical
   call is refused before it is dispatched. Resuming a conversation folds the goal, what was
   already done and which irreversible actions ran into the prompt instead of replaying it.
+- 🧭 **Long tasks pause instead of dying at a limit.** A task starts with a round
+  budget (default 20) and shows a goal bar; when it runs out the turn pauses with a
+  card that lists the goal, the finished steps with their evidence, what is left, the
+  stop reason and the cost — then you renew, change the budget, or end the task and
+  start a new one. Renewal continues the same task, and a task only counts as done
+  when the model declares it with locatable evidence, so it never closes itself just
+  because it went quiet. Unattended tasks extend themselves only when the finished
+  segment made progress, at most K times (default 1).
 - 🧩 **Skills** turn repeatable know-how (review checklists, style guides,
   extraction formats) into one-tap instructions the model must follow.
 - 🎬 **Workflows run whole procedures on their own.** Record yourself doing a
@@ -1073,8 +1081,9 @@ webhooks, Docker deployment, and a web console.
   closed for you. Unattended tasks may extend themselves: a scheduled task or
   AI-agent block renews **only when the segment that just ran made progress**,
   at most **K** times (default 1, `0` turns it off, range 0–10), and each
-  renewal adds one budget step. With you in the chat it never happens — the
-  task pauses for your decision.
+  renewal adds one initial budget, so K renewals cap the total at the initial
+  budget x (1 + K). A manual renewal adds the budget you last set yourself. With
+  you in the chat it never happens — the task pauses for your decision.
 - The irreversible-action fence remembers the last **50** actions of a
   conversation: after more than 50, the oldest one would no longer be blocked on
   replay.

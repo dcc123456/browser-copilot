@@ -4,30 +4,44 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.21] - 2026-11-22
 
-### Added — Explicit task budgets with pause, renew and completion
+### Added — Explicit task budgets: pause, report, renew, finish
 
 A task now carries its budget explicitly (rounds, spent, status, change log).
-At the limit the turn PAUSES and shows a card with the six-item report — goal,
-completed steps with their evidence, what is still to do, the stop reason, the
-cost and the next actions — then waits for you: renew a batch, change the
-budget, or end the task. Renewal extends the SAME task (spent rounds and the
-no-progress counters are never reset). A task only becomes done when the model
-declares it with locatable evidence; finishing quietly keeps it open, so the
-next message continues the same task instead of quietly opening a new budget.
+At the limit the turn **pauses** and shows a card with the six-item report —
+goal, completed steps with their evidence, what is still to do, the stop
+reason, the cost, and the next actions — then waits for you: renew, change the
+budget, or end the task and start a new one. Renewal extends the SAME task
+(spent rounds, spent tokens and the no-progress counters are never reset), and
+a renewal adds the budget you last set yourself. A task only becomes done when
+the model declares it with locatable evidence (URL, element or text); finishing
+quietly keeps it open, so the next message continues the same task instead of
+quietly opening a new budget. Round limits stopped being a brake: they are a
+measurement now, and the hidden ceiling (the old 20 x 10 batches) is gone.
+
+### Added — Unattended tasks extend themselves only on progress
+
+A scheduled task or AI-agent block with nobody watching renews at most **K**
+times (default 1, `0` turns it off, range 0–10), only when the segment that
+just ran made progress, and each renewal adds one initial budget, so K
+renewals cap the total at the initial budget x (1 + K). Every automatic
+renewal is recorded in the goal's change log with its segment number and the
+evidence that the page really moved. With you in the chat this never happens:
+the task pauses and waits.
 
 ### Changed — The element-picker crosshair is its own floating control
 
 The crosshair no longer docks inside the minimized plugin window, so it can be
-dragged whether or not that icon is on the page, and the two controls never
-overlap: whichever one is dragged keeps its drop point and the other steps
-aside. A press on the crosshair never reaches the page (window-capture swallow,
-the same mechanism the open picker uses) and the page's focus is restored after
-the picker overlay mounts — a dropdown that closes on `blur`/`focusout` or on a
-page-level `pointerdown` handler stays open, so elements inside it can actually
-be picked. The clipboard helper no longer leaves focus in its hidden textarea. Both control positions are kept
-in the existing per-window position record.
+dragged whether or not that icon is on the page, keeps its own remembered
+position, and the two controls never overlap: whichever one is dragged keeps
+its drop point and the other steps aside by at least 8px. A press on the
+crosshair never reaches the page (window-capture swallow, the same mechanism
+the open picker already used) and the page's focus is restored after the picker
+overlay mounts — a dropdown that closes on `blur`/`focusout` or on a page-level
+`pointerdown` handler stays open while you pick inside it. The clipboard helper
+no longer leaves focus in its hidden textarea, and in select-only mode one
+popup can be kept open across several picks.
 
 ### Changed — Unpublishing merges its own pull request
 
@@ -36,6 +50,16 @@ the repository, exactly like a publish: the marketplace cache is dropped, the
 card leaves the open list immediately, and no maintainer approval is needed. A
 token without write access — every third-party delist — still leaves the PR for
 review. `MARKETPLACE_AUTO_MERGE_PULLS = false` restores review for both paths.
+
+### Fixed — A renewal no longer adds the wrong amount, and no field is lost on load
+
+The renewal increment is the budget you last set explicitly, stored on the task
+and used by both manual and automatic renewals, so a budget edited to 5 renews
+to 10 and then 15 instead of jumping by the old default. The panel sends
+commands only — never a number captured from a stale render — and the
+whole-field round-trip test introduced here also caught three fields the loader
+was silently dropping (`archivedAt`, the archived-goal list, and negative
+`roundsAdded` entries written when a budget is lowered).
 
 ## [0.6.20] - 2026-11-21
 
