@@ -193,7 +193,7 @@ export type Command =
    */
   | { type: 'conversations.compact'; conversationId: string }
   /** Goal budget decisions and explicit completion from the panel (spec R10). */
-  | { type: 'goal.renew'; conversationId: string; rounds: number }
+  | { type: 'goal.renew'; conversationId: string }
   | { type: 'goal.setBudget'; conversationId: string; maxRounds: number }
   | {
       type: 'goal.complete'
@@ -1056,7 +1056,7 @@ export type AgentClientMessage =
    * Budget decisions for a paused goal (spec R10). The turn that paused stays
    * alive and continues from its breakpoint; these commands resolve it.
    */
-  | { type: 'goal.renew'; conversationId: string; rounds: number }
+  | { type: 'goal.renew'; conversationId: string }
   | { type: 'goal.setBudget'; conversationId: string; maxRounds: number }
   /** Explicit completion with locatable evidence; the ONLY way a goal is done. */
   | {
@@ -1162,8 +1162,6 @@ export type AgentServerMessage =
         stopReason: string
         usedRounds: number
         maxRounds: number
-        /** Rounds the Renew action adds (one initial budget; matches auto-renewal). */
-        renewIncrement: number
         remainingRounds: number
         nextActions: ('renew' | 'change-goal' | 'stop')[]
         cost?: {

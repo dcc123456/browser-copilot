@@ -14,7 +14,13 @@ import type { WireMessage } from '../lib/llm'
 import { LlmError, listModels, testConnection } from '../lib/llm'
 import { rejectionMessage, sanitizeAttachments } from '../lib/attachments'
 import { toHistoryMessages, toRestoreMessages } from './restore'
-import { archiveGoal, completeGoal, renewGoalBudget, setGoalBudget } from '../lib/task-progress'
+import {
+  archiveGoal,
+  completeGoal,
+  renewGoalBudget,
+  renewIncrementOf,
+  setGoalBudget,
+} from '../lib/task-progress'
 
 /**
  * Resolvers for a paused goal, keyed by conversation (spec R10). The turn that
@@ -3516,7 +3522,9 @@ async function handleCommand(
       if (!progress?.goal) return { type: 'goal.update', goal: null }
       let next = progress
       if (command.type === 'goal.renew') {
-        next = renewGoalBudget(progress, command.rounds, 'user')
+        // The increment is computed from the STORED goal, never sent by the
+        // panel: a card rendering an older budget must not decide the amount.
+        next = renewGoalBudget(progress, renewIncrementOf(progress.goal), 'user')
       } else if (command.type === 'goal.setBudget') {
         next = setGoalBudget(progress, command.maxRounds)
       } else if (command.type === 'goal.abandon') {

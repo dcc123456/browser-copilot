@@ -57,11 +57,13 @@ export interface TaskGoal {
   /** Explicit round budget; the only termination-by-count the product allows. */
   maxRounds: number
   /**
-   * The budget the task STARTED with. Renewals (manual or automatic) add this
-   * amount again, so the ceiling stays predictable: initial × (1 + renewals).
-   * Absent on goals stored before it existed — see {@link renewIncrementOf}.
+   * Rounds one renewal adds: the budget the USER last set explicitly (the
+   * initial budget at task start, updated by every budget edit). Renewals add
+   * this amount again, so the ceiling stays predictable at
+   * last-set × (1 + renewals). Absent on goals stored before it existed — see
+   * {@link renewIncrementOf}.
    */
-  initialMaxRounds?: number
+  renewIncrement?: number
   /** Rounds already spent against the budget (metric + budget accounting). */
   roundsStarted: number
   status: GoalStatus
@@ -156,7 +158,7 @@ export function beginTask(
             summary,
             startedAt: now,
             maxRounds: budget,
-            initialMaxRounds: budget,
+            renewIncrement: budget,
             roundsStarted: 0,
             status: 'active' as const,
             budgetLog: [],
@@ -298,14 +300,14 @@ export function renewGoalBudget(
 }
 
 /**
- * How many rounds one renewal adds: the task's initial budget again, so a
- * renewal is "another segment of the same size" instead of an exponential
- * doubling nobody asked for (K renewals cap the ceiling at initial × (1 + K)).
+ * How many rounds one renewal adds: the budget the user last set, so a renewal
+ * is "another segment of the size I asked for" instead of an exponential
+ * doubling nobody asked for (K renewals cap the ceiling at set × (1 + K)).
  */
 export function renewIncrementOf(goal: TaskGoal): number {
-  const initial = goal.initialMaxRounds
-  return initial !== undefined && Number.isFinite(initial) && initial > 0
-    ? Math.floor(initial)
+  const increment = goal.renewIncrement
+  return increment !== undefined && Number.isFinite(increment) && increment > 0
+    ? Math.floor(increment)
     : DEFAULT_GOAL_MAX_ROUNDS
 }
 
@@ -323,6 +325,9 @@ export function setGoalBudget(
     goal: {
       ...goal,
       maxRounds: next,
+      // The user's last explicit budget defines "another segment", so a
+      // renewal after editing 20 → 5 adds 5 (never a stale 20).
+      renewIncrement: next,
       status: next > goal.roundsStarted && goal.status === 'paused' ? 'active' : goal.status,
       budgetLog: [
         ...goal.budgetLog,
@@ -398,8 +403,6 @@ export interface GoalBudgetReport {
   remainingRounds: number
   usedRounds: number
   maxRounds: number
-  /** Rounds the Renew action adds, so manual and automatic renewal agree. */
-  renewIncrement: number
   nextActions: ('renew' | 'change-goal' | 'stop')[]
   cost?: TaskCost
 }
@@ -429,7 +432,6 @@ export function goalBudgetReport(
     remainingRounds: remainingGoalRounds(progress),
     usedRounds: goal.roundsStarted,
     maxRounds: goal.maxRounds,
-    renewIncrement: renewIncrementOf(goal),
     nextActions: ['renew', 'change-goal', 'stop'],
     ...(cost ? { cost } : {}),
   }

@@ -13,6 +13,7 @@ import {
   goalBudgetDraftProblem,
   goalBudgetReport,
   renewIncrementOf,
+  setGoalBudget,
   recordGoalRound,
   remainingGoalRounds,
   renewGoalBudget,
@@ -115,8 +116,8 @@ describe('auto-renewal K (unattended only)', () => {
 })
 
 describe('renewal increment', () => {
-  it('renews by the initial budget, never by the current one', () => {
-    const afterRenewal = renewGoalBudget(started(20), 20, 'user')
+  it('renews by one initial budget, never by the grown one', () => {
+    const afterRenewal = renewGoalBudget(started(20), renewIncrementOf(started(20).goal!), 'user')
     // A second renewal must add 20 again (60), not double the current 40 (80).
     const twice = renewGoalBudget(afterRenewal, renewIncrementOf(afterRenewal.goal!), 'user')
     expect(afterRenewal.goal?.maxRounds).toBe(40)
@@ -124,14 +125,20 @@ describe('renewal increment', () => {
     expect(renewIncrementOf(twice.goal!)).toBe(20)
   })
 
-  it('falls back to the default increment for goals stored before it existed', () => {
-    const goal = { ...started(20).goal!, initialMaxRounds: undefined }
-    expect(renewIncrementOf(goal)).toBe(20)
+  it('follows the budget the user last set, not the budget the task started with', () => {
+    // 20 → user edits to 5 → renew adds 5 (10), renew again adds 5 (15). The QA
+    // case that exposed this: the card said 5 and the renewal paid out 20.
+    const edited = setGoalBudget(started(20), 5)
+    expect(renewIncrementOf(edited.goal!)).toBe(5)
+    const renewed = renewGoalBudget(edited, renewIncrementOf(edited.goal!), 'user')
+    expect(renewed.goal?.maxRounds).toBe(10)
+    const twice = renewGoalBudget(renewed, renewIncrementOf(renewed.goal!), 'user')
+    expect(twice.goal?.maxRounds).toBe(15)
   })
 
-  it('reports the increment so the panel renews like the loop does', () => {
-    const report = goalBudgetReport(renewGoalBudget(started(5), 5, 'user'))
-    expect(report?.renewIncrement).toBe(5)
+  it('falls back to the default increment for goals stored before it existed', () => {
+    const goal = { ...started(20).goal!, renewIncrement: undefined }
+    expect(renewIncrementOf(goal)).toBe(20)
   })
 })
 

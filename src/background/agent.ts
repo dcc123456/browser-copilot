@@ -6117,7 +6117,6 @@ export async function runAgentTurn(
             stopReason: report.stopReason,
             usedRounds: report.usedRounds,
             maxRounds: report.maxRounds,
-            renewIncrement: report.renewIncrement,
             remainingRounds: report.remainingRounds,
             nextActions: report.nextActions,
             ...(report.cost ? { cost: report.cost } : {}),

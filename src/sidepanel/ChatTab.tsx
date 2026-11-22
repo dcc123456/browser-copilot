@@ -1688,7 +1688,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
     stopReason: string
     usedRounds: number
     maxRounds: number
-    renewIncrement: number
     remainingRounds: number
     nextActions: string[]
     cost?: {
@@ -4657,11 +4656,10 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
               <button
                 className="rounded border border-border bg-accent px-2 py-1 text-on-accent"
                 onClick={() => {
-                  void sendCommand({
-                    type: 'goal.renew',
-                    conversationId,
-                    rounds: goalReport.renewIncrement,
-                  })
+                  // No amount travels with the command: the worker renews by
+                  // the budget actually stored, so a stale card cannot pay out
+                  // the wrong number of rounds.
+                  void sendCommand({ type: 'goal.renew', conversationId })
                 }}
                 type="button"
               >
