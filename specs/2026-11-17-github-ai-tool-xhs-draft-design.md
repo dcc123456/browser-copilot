@@ -32,18 +32,18 @@
 
 ## 选型与证据 / Evidence (实测 2026-11-17)
 
-| 决策 | 证据（一手实测 / 源码） |
-| --- | --- |
-| 用 `save_workflow` MCP 直接提交 JSON | `specs/2026-11-16-manual-workflow-authoring-mcp-design.md`；本轮实测 `save_workflow` 保存成功、0 warning |
-| 真实测试走 `verify_workflow`（扩展侧桥接，真实 Chrome） | `list_tabs` 返回真实标签页；探针工作流 3/3 步通过（`verified:true`） |
-| AI 用 `ai-agent(actOnPage:false)` 生成文案 | 探针中 ai-agent 步骤通过；扩展侧有免密钥 provider，无需 BC_LLM_* |
-| 文件落"下载目录"用 `save-local` / `export-data`，读回用 `parse-excel(file-path)` | 探针 `save-local` 写入 `browser-data/bc-download-probe.txt` 成功；`docs/workflow/concepts.md`§Files |
-| 下载目录 = `browser-data/` | 探针文件实测落点；同目录已有 `xhs-candidates.csv` |
-| 去重台账用固定 CSV 文件名 | 与 `specs/2026-11-16-xiaohongshu-follow-workflow-split-design.md` 的台账闭环一致；`export-data` 覆盖写 + `parse-excel` 读回 |
-| `javascript-code` 需在 http(s) 页上下文 | 探针首次失败原因："插件窗口内没有可操作的网页标签页"，加 `new-tab` 打开 GitHub 后通过 |
-| Trending 采集选择器 | 实测 `article.Box-row`、`h2 a[href]`、`p.col-9`（描述）、`a[href$="/stargazers"]`（star）；`p` 会命中模板空节点，必须用 `p.col-9` |
-| GitHub 搜索页作为第二来源做容错 | 搜索页是 React 新版、DOM 用 `_R_` hash class 且对 `run_javascript` 报 CSP；不放进主关键路径，采不到自动跳过 |
-| 代码节点必须在触发 post 动作前 | 见节点顺序 |
+| 决策                                                                             | 证据（一手实测 / 源码）                                                                                                           |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 用 `save_workflow` MCP 直接提交 JSON                                             | `specs/2026-11-16-manual-workflow-authoring-mcp-design.md`；本轮实测 `save_workflow` 保存成功、0 warning                          |
+| 真实测试走 `verify_workflow`（扩展侧桥接，真实 Chrome）                          | `list_tabs` 返回真实标签页；探针工作流 3/3 步通过（`verified:true`）                                                              |
+| AI 用 `ai-agent(actOnPage:false)` 生成文案                                       | 探针中 ai-agent 步骤通过；扩展侧有免密钥 provider，无需 BC_LLM_*                                                                  |
+| 文件落"下载目录"用 `save-local` / `export-data`，读回用 `parse-excel(file-path)` | 探针 `save-local` 写入 `browser-data/bc-download-probe.txt` 成功；`docs/workflow/concepts.md`§Files                               |
+| 下载目录 = `browser-data/`                                                       | 探针文件实测落点；同目录已有 `xhs-candidates.csv`                                                                                 |
+| 去重台账用固定 CSV 文件名                                                        | 与 `specs/2026-11-16-xiaohongshu-follow-workflow-split-design.md` 的台账闭环一致；`export-data` 覆盖写 + `parse-excel` 读回       |
+| `javascript-code` 需在 http(s) 页上下文                                          | 探针首次失败原因："插件窗口内没有可操作的网页标签页"，加 `new-tab` 打开 GitHub 后通过                                             |
+| Trending 采集选择器                                                              | 实测 `article.Box-row`、`h2 a[href]`、`p.col-9`（描述）、`a[href$="/stargazers"]`（star）；`p` 会命中模板空节点，必须用 `p.col-9` |
+| GitHub 搜索页作为第二来源做容错                                                  | 搜索页是 React 新版、DOM 用 `_R_` hash class 且对 `run_javascript` 报 CSP；不放进主关键路径，采不到自动跳过                       |
+| 代码节点必须在触发 post 动作前                                                   | 见节点顺序                                                                                                                        |
 
 ## 数据流 / Data flow（v4：草稿进小红书草稿箱）
 
