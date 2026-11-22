@@ -374,6 +374,10 @@ export const EDITOR_STRINGS = {
     operatorAiNoChange:
       'The answer did not change any parameter, so the step stays as it was. Name the parameter and its new value and ask again.',
     operatorAiNoSteps: 'No step was placed on the canvas.',
+    operatorAiNothingToPlace:
+      'None of the offered steps could be placed there, so the canvas was left untouched.',
+    operatorAiNoOperations:
+      'That answer carried no operations, so nothing changed. Name the step and what should happen.',
     operatorAiNotApplied: 'Not applied —',
     operatorAiEdited: 'The assistant updated the selected step.',
     operatorAiReplaced: 'The selected step is now {name}.',
@@ -814,6 +818,8 @@ export const EDITOR_STRINGS = {
     operatorAiNoChange:
       '回答没有改变任何参数，该步骤保持原样；请说明要改哪个参数、改成什么值后再问。',
     operatorAiNoSteps: '画布上没有放置任何步骤。',
+    operatorAiNothingToPlace: '要放进去的步骤一个都落不了，画布保持原样。',
+    operatorAiNoOperations: '这次回答没有带任何操作，画布没有变化；请说明改哪个步骤、要做什么。',
     operatorAiNotApplied: '未改动 ——',
     operatorAiEdited: '助手已更新所选步骤。',
     operatorAiReplaced: '所选步骤已替换为 {name}。',

@@ -686,9 +686,10 @@ describe('operatorDigestOf', () => {
     )
     const lines = digest.split('\n')
     // The unwired step starts its own line, so it sorts before the selection.
-    expect(lines[0]).toBe('1. trigger')
-    expect(lines[1]).toBe('2. new-tab')
-    expect(lines[2]).toContain('3. get-data')
+    // Every line names its node id: position is a parameter, not a selection.
+    expect(lines[0]).toBe('1. [t] trigger')
+    expect(lines[1]).toBe('2. [orphan] new-tab')
+    expect(lines[2]).toContain('3. [g] get-data')
     expect(lines[2]).toContain('"limit":3')
     expect(lines[2]).toContain('-> {{rows}}')
     expect(lines[2]).toContain('<< selected')
@@ -1155,19 +1156,19 @@ describe('buildOperatorAdvisePrompt actions', () => {
     })
     expect(prompt).toContain('## The step the user selected')
     expect(prompt).toContain('new-tab {"url":"https://a"}')
-    expect(prompt).toContain('- "edit"')
-    expect(prompt).toContain('- "replace"')
-    expect(prompt).toContain('- "prepend"')
-    expect(prompt).toContain('Never name a node id')
-    expect(prompt).toContain('"action":"append|prepend|edit|replace"')
+    expect(prompt).toContain('"kind":"patch"')
+    expect(prompt).toContain('"kind":"insert"')
+    expect(prompt).toContain('"action":"edit"|"replace"')
+    expect(prompt).toContain('"anchorNodeId"')
+    // The old contract forbade naming nodes; the id IS the target now.
+    expect(prompt).not.toContain('Never name a node id')
   })
 
   it('offers append alone when nothing is selected', () => {
     const prompt = buildOperatorAdvisePrompt({ history, graphDigest: '', candidates })
     expect(prompt).not.toContain('## The step the user selected')
-    expect(prompt).not.toContain('- "edit"')
-    expect(prompt).not.toContain('- "prepend"')
-    expect(prompt).toContain('Only "append" is possible')
+    expect(prompt).toContain('"kind":"insert"')
+    expect(prompt).toContain('Nothing is selected right now')
   })
 })
 

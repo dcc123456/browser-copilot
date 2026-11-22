@@ -58,6 +58,8 @@ import type { WorkflowEdge, WorkflowNode } from './types'
 
 /** How many operators one answer may hand back. */
 export const OPERATOR_ADVISE_MAX_OPERATORS = 6
+/** How many wiring lines the digest prints before it stops listing edges. */
+const OPERATOR_DIGEST_MAX_EDGES = 80
 
 /** How many discovery hits ride along with the core operators. */
 const DISCOVERY_LIMIT = 12
@@ -135,6 +137,9 @@ export interface OperatorAdviseReply {
   proposals: OperatorProposal[]
   /** Ids the model asked for that it was never offered, or that exceeded the cap. */
   rejected: string[]
+  /** A multi-operation answer (insert + patch), applied atomically. Absent on a
+   *  single-action answer, which the editor lands through the legacy path. */
+  ops?: OperatorEditOp[]
 }
 
 /**
@@ -252,6 +257,9 @@ export interface OperatorAdviseResult {
   thinkingSkippedModel?: string
   /** Where the proposals belong; absent (or `append`) means add them to the flow. */
   action?: OperatorAction
+  /** A multi-operation answer (insert + patch); when present the editor applies
+   *  these atomically and ignores `action`/`proposals`. */
+  ops?: OperatorEditOp[]
   /** Operators the model asked for that this build can actually land. */
   proposals: OperatorProposal[]
   /** Ids it asked for that it was never offered, or that exceeded the cap. */
@@ -1124,39 +1132,41 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     '## Conversation',
     ...input.history.map((message) => `${message.role}: ${message.content}`),
     '',
-    '## What to do with your answer — the "action" field',
+    '## How to answer — the "ops" field',
+    'Nodes are named by the id in brackets in the digest above. An id that is not in that list is refused, never guessed or replaced by "the selected step".',
+    'An answer is a LIST of operations applied together, atomically: if one cannot land, the editor changes nothing.',
+    '- {"kind":"insert","anchorNodeId":"<id>","side":"after"|"before","proposals":[<operator rows>]} — insert a new chain next to that step. "after" splices it between the step and whatever it currently leads to; "before" puts it in front of the step.',
+    '- {"kind":"patch","nodeId":"<id>","action":"edit"|"replace","proposals":[<operator row>]} — change that step in place. "edit" keeps the operator and changes only the parameters you name; "replace" swaps the operator (exactly one proposal, a different operator id).',
     ...(selected === ''
       ? [
-          '- Only "append" is possible here (or omit it): nothing is selected, so the operators go after the last step.',
+          'Nothing is selected right now, which is fine: read the ids above and edit the steps the user names.',
+          'An "edit" or "replace" without a nodeId falls back to the selected step, and there is none — always name one.',
         ]
       : [
-          '- "append" (default, also when omitted): your operators are added as a new chain right AFTER the selected step.',
-          '- "prepend": your operators are inserted IN FRONT of the selected step: they run first, then the selected step runs unchanged. Choose by WHEN the new work happens — "prepend" for what must precede the selected step (wait for an element, close a popup, set a variable it reads), "append" for what follows it.',
-          '- "edit": change the selected step in place. Return EXACTLY ONE proposal, with the SAME operator id as that step, and put in "data" only the parameters to change — every other parameter of the node stays untouched. Write only key names that operator declares; a stray key ("mapping" on data-mapping, which renames through "sources") changes nothing the editor shows.',
-          '- "replace": turn the selected step into a different operator. Return EXACTLY ONE proposal with the new operator id (it must differ from the selected step\'s) and the parameters it should carry.',
-          '- Never name a node id: the editor only ever acts on the step the user selected.',
-          '- "prepend" needs a single path arriving at the selected step; the editor refuses the batch when the step is the trigger, is not wired, or several paths join there.',
+          'The user has one step selected (it is marked "<< selected" above) — use its id only when the user says "this step" / "这一步" and names no other.',
         ]),
     '',
+    '## Where an insert may land (engine rules, not style)',
+    "- A loop step (loop-data / loop-elements) runs the body its first output leads to; the path AFTER the loop comes from that body's loop-breakpoint step. Never put a step between a loop-breakpoint and its exit in a way that makes the breakpoint stop being the end of the body, and never move a breakpoint out of its loop.",
+    '- Inserting before the loop, between the loop and its body, or inside the body are all legal.',
+    "- A javascript-code step that must feed a later step cannot rely on its return value: it has to call automaSetVariable('name', value) for every such name and list it in outputVariables. A later step reads it as {{name}}.",
+    '- Values that must survive between RUNS (a history list, a running CSV) do not exist as workflow variables: they are per-run. Point such a step at a real store (page storage, a server/API, a file) instead of inventing a variable.',
+    '',
     '## Rules',
-    '- For "append" and "prepend", return the operators in execution order; they chain into one another automatically.',
-    '- Use only ids from the list above. Never invent an id; never return an operator the canvas already has unless the user asks for another one.',
-    '- "blockId" is the operator id exactly as listed (e.g. "data-mapping"), not an instance id with a number on the end ("data-mapping-1"); two steps of the same operator are two rows with that same id.',
+    '- Return the operators of one insert in execution order; they chain into one another automatically.',
+    '- Use only operator ids from the list above. Never invent an id; never return an operator the canvas already has unless the user asks for another one.',
+    '- "blockId" is the operator id exactly as listed (e.g. "data-mapping"), not an instance id with a number on the end.',
     '- Fill every value the user stated (URLs, text, selectors) and omit the rest — the catalog default is applied for you.',
     '- A value the form only draws once its flag is on is inert alone: return the flag with it (an output variable needs assignVariable: true, a saved table column needs saveData: true, a variable source needs dataSource: "variable").',
     '- When the last run log is present, fix the step it blames — a step the log shows working is not the failing one. Quote the log\'s own evidence in "rationale".',
     '- Where a value should come from an earlier step, reference it as {{variableName}} using a name the digest shows that step produces.',
-    "- A later step that must read a value a javascript-code step computes CANNOT use that step's return value: it references {{name}}, so the script body must call automaSetVariable('name', value) (or variables.name = …) for every such name and list each name in the step's outputVariables. return / a bare expression fill only {{lastResult}}.",
-    '- Prefer stable locators (#id, [data-testid], [name]) over generated classes or nth-child chains.',
-    `- At most ${maxOperators} operators (one for "edit"/"replace"). Return an empty "proposals" array when nothing on the list fits or the user is only asking a question — then "reply" must say why.`,
-    '- For "edit", if the step already holds every value the user asked for, return no proposals and say it is unchanged — never report a change your answer does not contain.',
-    '- If "proposals" is empty, "reply" must not say that anything was added or changed — say why no offered operator fits.',
-    '- "reply" is shown to the user, in the language they wrote in, and must match what you actually did.',
+    '- At most ' + String(maxOperators) + ' operators per operation.',
+    '- "reply" is shown to the user, in the language they wrote in, and must match what you actually did. If nothing on the list fits, return an empty "ops" array and say why there.',
     '',
     '## Response format',
     'Respond with ONLY a JSON object — no markdown fence, no commentary:',
-    '{"reply":"<one sentence for the user>","action":"append|prepend|edit|replace","proposals":[{"blockId":"<id>","data":{ …parameters… },"rationale":"<why this operator>"}]}',
-    '"proposals" is always an array of rows (one row is an array of one) and each row\'s "data" is an object; a parameter you cannot fill is left out of "data", not replaced by a string or an array.',
+    '{"reply":"<one sentence for the user>","ops":[{"kind":"insert","anchorNodeId":"<id>","side":"after","proposals":[{"blockId":"<id>","data":{ …parameters… },"rationale":"<why>"}]},{"kind":"patch","nodeId":"<id>","action":"edit","proposals":[{"blockId":"<id>","data":{ …only the changed parameters… }}]}]}',
+    'Each row\'s "data" is an object; a parameter you cannot fill is left out of "data", not replaced by a string or an array.',
   )
   return lines.join('\n')
 }
@@ -1324,8 +1334,73 @@ export function parseOperatorAdviseReply(
   if (proposals.length > kept.length) {
     rejected.push(...proposals.slice(maxOperators).map((proposal) => proposal.blockId))
   }
+  // A multi-operation answer is all-or-nothing further down, so a malformed one
+  // is refused here as a whole: landing half of it would be worse than saying the
+  // answer could not be read.
+  const rawOps = parsed['ops']
+  const ops = parseOperatorEditOps(rawOps, offeredBlockIds, maxOperators)
+  if (rawOps !== undefined && ops === undefined) return null
+
   const reply = typeof parsed['reply'] === 'string' ? parsed['reply'].trim() : ''
-  return { reply, action, proposals: kept, rejected }
+  return { reply, action, proposals: kept, rejected, ...(ops ? { ops } : {}) }
+}
+
+/**
+ * Reads an answer's `ops` array.
+ *
+ * Ids come from the model and are validated against the graph LATER (the editor
+ * owns the live canvas); what is checked here is the closed-world part: the
+ * operators must be ones this build offered, a side is `before`/`after`, and a
+ * patch names a node id. `undefined` means "not an ops answer"; a malformed
+ * `ops` also yields `undefined`, and the caller refuses the whole turn.
+ */
+function parseOperatorEditOps(
+  raw: unknown,
+  offeredBlockIds: readonly string[],
+  maxOperators: number,
+): OperatorEditOp[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const allowed = new Set(offeredBlockIds)
+  const ops: OperatorEditOp[] = []
+  for (const row of raw) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return undefined
+    const record = row as Record<string, unknown>
+    const proposals: OperatorProposal[] = []
+    for (const proposalRow of proposalRowsOf(record['proposals'])) {
+      if (!proposalRow || typeof proposalRow !== 'object' || Array.isArray(proposalRow)) continue
+      const rawBlockId = (proposalRow as Record<string, unknown>)['blockId']
+      if (typeof rawBlockId !== 'string') continue
+      const blockId = resolveOfferedBlockId(rawBlockId, allowed)
+      if (!blockId) continue
+      const rationale = (proposalRow as Record<string, unknown>)['rationale']
+      proposals.push({
+        blockId,
+        data: proposalDataOf((proposalRow as Record<string, unknown>)['data']),
+        rationale: typeof rationale === 'string' ? rationale.trim() : '',
+      })
+    }
+    if (proposals.length === 0) return undefined
+    const kind = record['kind']
+    if (kind === 'insert') {
+      const anchorNodeId =
+        typeof record['anchorNodeId'] === 'string' ? record['anchorNodeId'].trim() : ''
+      const side = record['side']
+      if (anchorNodeId === '') return undefined
+      if (side !== 'after' && side !== 'before') return undefined
+      ops.push({ kind: 'insert', anchorNodeId, side, proposals: proposals.slice(0, maxOperators) })
+      continue
+    }
+    if (kind === 'patch') {
+      const nodeId = typeof record['nodeId'] === 'string' ? record['nodeId'].trim() : ''
+      const action = record['action']
+      if (nodeId === '') return undefined
+      if (action !== 'edit' && action !== 'replace') return undefined
+      ops.push({ kind: 'patch', nodeId, action, proposals: proposals.slice(0, maxOperators) })
+      continue
+    }
+    return undefined
+  }
+  return ops
 }
 
 /** Parameters worth showing the model: scalars the user can read off the node.
@@ -1351,17 +1426,33 @@ function scalarParamsOf(node: WorkflowNode): Record<string, unknown> {
  */
 export function operatorDigestOf(graph: SuggestionGraph, selectedNodeId?: string): string {
   const ordered = chainOrderOf(graph)
-  return ordered
-    .map((node, index) => {
-      const params = scalarParamsOf(node)
-      const produced = producedVariableNames(node)
-      const parts = [`${index + 1}. ${blockIdOf(node)}`]
-      if (Object.keys(params).length > 0) parts.push(capModelPayload(params, 160))
-      if (produced.length > 0) parts.push(`-> {{${produced.join(', ')}}}`)
-      if (node.id === selectedNodeId) parts.push('<< selected')
-      return parts.join(' ')
-    })
-    .join('\n')
+  const line = (node: WorkflowNode, index: string): string => {
+    const params = scalarParamsOf(node)
+    const produced = producedVariableNames(node)
+    const parts = [`${index}. [${node.id}] ${blockIdOf(node)}`]
+    if (Object.keys(params).length > 0) parts.push(capModelPayload(params, 160))
+    if (produced.length > 0) parts.push(`-> {{${produced.join(', ')}}}`)
+    if (node.id === selectedNodeId) parts.push('<< selected')
+    return parts.join(' ')
+  }
+  const main = ordered.map((node, index) => line(node, String(index + 1)))
+  // The ordered list is not the whole graph: branches, loop bodies and steps the
+  // user has not wired yet never show up in it. The wiring below names both ends
+  // of every line, which is what makes those reachable by id.
+  const wired = new Set(graph.edges.flatMap((edge) => [edge.source, edge.target]))
+  const unwired = graph.nodes.filter((node) => !wired.has(node.id))
+  const wiring = graph.edges
+    .slice(0, OPERATOR_DIGEST_MAX_EDGES)
+    .map((edge) => `[${edge.source}] ${edge.sourceHandle ?? 'next'} -> [${edge.target}]`)
+  const truncated = graph.edges.length > OPERATOR_DIGEST_MAX_EDGES
+  return [
+    ...main,
+    ...(wiring.length > 0 ? ['', 'Wiring (source handle -> target):', ...wiring] : []),
+    ...(truncated ? [`(wiring truncated at ${OPERATOR_DIGEST_MAX_EDGES} lines)`] : []),
+    ...(unwired.length > 0
+      ? ['', `Not wired to anything yet: ${unwired.map((node) => `[${node.id}]`).join(', ')}`]
+      : []),
+  ].join('\n')
 }
 
 /** One node's parameters as an in-place edit sees them: every key, not only the
@@ -1771,5 +1862,140 @@ export function prependOperatorChain(
     skipped: chain.skipped,
     missing: chain.missing,
     splicedEdge: splicedEdgeOf(feed),
+  }
+}
+
+/**
+ * One edit an answer may carry. `insert` names an ANCHOR and a side; `patch`
+ * names the step itself. The model names nodes by id (the digest prints one per
+ * line), never "the selected one" — position is a parameter, not a UI state.
+ */
+export type OperatorEditOp =
+  | {
+      kind: 'insert'
+      anchorNodeId: string
+      side: 'after' | 'before'
+      proposals: OperatorProposal[]
+    }
+  | {
+      kind: 'patch'
+      nodeId: string
+      action: OperatorNodeAction
+      proposals: OperatorProposal[]
+    }
+
+/** Why one operation in an answer could not be applied. */
+export type OperatorEditProblemKind =
+  | OperatorChainProblem
+  | OperatorTargetProblem
+  /** The operation's chain placed nothing (every row was refused). */
+  | 'nothing-to-place'
+  /** The answer carried no operations at all. */
+  | 'no-operations'
+
+export interface OperatorEditProblem {
+  /** Position of the operation in the answer, 0-based. */
+  index: number
+  problem: OperatorEditProblemKind
+}
+
+export interface OperatorGraphEditResult {
+  /** The complete next node list (untouched when `problems` is non-empty). */
+  nodes: WorkflowNode[]
+  /** The complete next edge list (untouched when `problems` is non-empty). */
+  edges: WorkflowEdge[]
+  added: WorkflowNode[]
+  changed: OperatorParamChange[]
+  missing: OperatorMissingParams[]
+  pruned: OperatorPrunedPort[]
+  splicedEdges: OperatorSplicedEdge[]
+  /** Non-empty means NOTHING was applied: the answer is all-or-nothing. */
+  problems: OperatorEditProblem[]
+}
+
+/** A refused answer: the canvas exactly as it was, with the reason per op. */
+function untouchedGraphEdit(
+  graph: SuggestionGraph,
+  problems: OperatorEditProblem[],
+): OperatorGraphEditResult {
+  return {
+    nodes: graph.nodes.map((node) => ({ ...node })),
+    edges: graph.edges.map((edge) => ({ ...edge })),
+    added: [],
+    changed: [],
+    missing: [],
+    pruned: [],
+    splicedEdges: [],
+    problems,
+  }
+}
+
+/**
+ * Applies an answer's operations to a DRAFT of the graph, in order.
+ *
+ * Atomic on purpose (spec §R4): every operation runs against the draft, and one
+ * that cannot land rejects the WHOLE answer — a half-applied insert/patch pair
+ * is worse than a refusal, because the canvas would then look valid while the
+ * flow it was meant to create does not exist. Unknown node ids are refused, never
+ * resolved by guessing or by falling back to the selection.
+ */
+export function applyGraphEdits(
+  graph: SuggestionGraph,
+  ops: readonly OperatorEditOp[],
+  newId: () => string,
+): OperatorGraphEditResult {
+  if (ops.length === 0) return untouchedGraphEdit(graph, [{ index: 0, problem: 'no-operations' }])
+
+  let draft: SuggestionGraph = {
+    nodes: graph.nodes.map((node) => ({ ...node })),
+    edges: graph.edges.map((edge) => ({ ...edge })),
+    ...(graph.trigger ? { trigger: graph.trigger } : {}),
+  }
+  const added: WorkflowNode[] = []
+  const changed: OperatorParamChange[] = []
+  const missing: OperatorMissingParams[] = []
+  const pruned: OperatorPrunedPort[] = []
+  const splicedEdges: OperatorSplicedEdge[] = []
+
+  for (let index = 0; index < ops.length; index += 1) {
+    const op = ops[index]!
+    if (op.kind === 'insert') {
+      if (!draft.nodes.some((node) => node.id === op.anchorNodeId)) {
+        return untouchedGraphEdit(graph, [{ index, problem: 'unknown-target' }])
+      }
+      const patch =
+        op.side === 'before'
+          ? prependOperatorChain(draft, op.proposals, { anchorNodeId: op.anchorNodeId, newId })
+          : appendOperatorChain(draft, op.proposals, { anchorNodeId: op.anchorNodeId, newId })
+      if (patch.problem) return untouchedGraphEdit(graph, [{ index, problem: patch.problem }])
+      if (patch.added.length === 0) {
+        return untouchedGraphEdit(graph, [{ index, problem: 'nothing-to-place' }])
+      }
+      draft = { ...draft, nodes: [...draft.nodes, ...patch.added], edges: patch.edges }
+      added.push(...patch.added)
+      missing.push(...patch.missing)
+      if (patch.splicedEdge) splicedEdges.push(patch.splicedEdge)
+      continue
+    }
+
+    const target = draft.nodes.find((node) => node.id === op.nodeId)
+    if (!target) return untouchedGraphEdit(graph, [{ index, problem: 'unknown-target' }])
+    const patch = applyOperatorAction(draft, op.nodeId, op.action, op.proposals)
+    if (patch.problem) return untouchedGraphEdit(graph, [{ index, problem: patch.problem }])
+    draft = { ...draft, nodes: patch.nodes, edges: patch.edges }
+    changed.push(...patch.changed)
+    missing.push(...patch.missing)
+    pruned.push(...patch.pruned)
+  }
+
+  return {
+    nodes: draft.nodes,
+    edges: draft.edges,
+    added,
+    changed,
+    missing,
+    pruned,
+    splicedEdges,
+    problems: [],
   }
 }

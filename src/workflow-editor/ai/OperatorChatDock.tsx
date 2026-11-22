@@ -57,6 +57,7 @@ import type {
   OperatorAdviseMessage,
   OperatorChainAction,
   OperatorChainProblem,
+  OperatorEditOp,
   OperatorMissingParams,
   OperatorPageRef,
   OperatorParamChange,
@@ -74,13 +75,18 @@ import { describePickFailure, requestElementPick } from '../blocks/shared/elemen
 import type { EditorStringKey, TranslateFn } from '../i18n'
 
 /** Why a reply landed as nothing at all. */
-export type OperatorLandingProblem = OperatorChainProblem | OperatorTargetProblem | 'no-selection'
+export type OperatorLandingProblem =
+  | OperatorChainProblem
+  | OperatorTargetProblem
+  | 'nothing-to-place'
+  | 'no-operations'
+  | 'no-selection'
 
 /** What the canvas did with one reply. */
 export interface OperatorLanding {
-  /** Which of the two shapes the reply took: a chain spliced into the flow, or
-   *  one step changed where it stands. */
-  kind: 'chain' | 'node'
+  /** Which shape the reply took: a chain spliced into the flow, one step changed
+   *  where it stands, or a multi-operation answer applied as one graph. */
+  kind: 'chain' | 'node' | 'graph'
   /** Nodes actually placed (an in-place change never places any). */
   added: number
   /** The change actually reached the canvas. */
@@ -107,6 +113,9 @@ export interface OperatorApplyRequest {
   action: OperatorAction
   proposals: OperatorProposal[]
   targetNodeId?: string
+  /** A multi-operation answer (insert + patch), applied atomically. When present,
+   *  `action`/`proposals` are ignored. */
+  ops?: OperatorEditOp[]
 }
 
 export interface OperatorChatContext {
@@ -291,6 +300,8 @@ const PROBLEM_KEY: Record<OperatorLandingProblem, EditorStringKey> = {
   'replace-unofferable': 'operatorAiReplaceUnofferable',
   'replace-entry-point': 'operatorAiReplaceEntry',
   'no-change': 'operatorAiNoChange',
+  'nothing-to-place': 'operatorAiNothingToPlace',
+  'no-operations': 'operatorAiNoOperations',
 }
 
 /** One parameter value as the row shows it: JSON-quoted so an empty string stays
@@ -942,6 +953,22 @@ export default function OperatorChatDock({
           ...(data.reasoning ? { reasoning: data.reasoning } : {}),
           ...(data.thinkingSkippedModel ? { thinkingSkippedModel: data.thinkingSkippedModel } : {}),
           failed: true,
+        })
+        return
+      }
+      // A multi-operation answer (insert + patch) is applied as one atomic graph
+      // by the editor; it never enters the single-chain/held-batch path, which
+      // exists to fill ONE chain's page params.
+      if (data.ops && data.ops.length > 0) {
+        const opsLanding = onApply({ action: 'append', proposals: [], ops: data.ops })
+        pushTurn({
+          role: 'assistant',
+          content: data.reply,
+          proposals: [],
+          ...(data.raw ? { raw: data.raw } : {}),
+          ...(data.reasoning ? { reasoning: data.reasoning } : {}),
+          ...(data.thinkingSkippedModel ? { thinkingSkippedModel: data.thinkingSkippedModel } : {}),
+          ...(opsLanding ? { landing: opsLanding } : {}),
         })
         return
       }

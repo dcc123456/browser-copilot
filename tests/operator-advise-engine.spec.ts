@@ -54,14 +54,14 @@ describe('runOperatorAdvise', () => {
     )
     expect(prompts[0]).toContain('## The step the user selected')
     expect(prompts[0]).toContain('url: https://b')
-    expect(prompts[0]).toContain('- "edit": change the selected step in place')
+    expect(prompts[0]).toContain('"kind":"patch"')
     // The action is relayed, not decided here — the canvas is what applies it.
     expect(withSelection.action).toBe('edit')
 
     prompts.length = 0
     await runOperatorAdvise(input(), deps)
     expect(prompts[0]).not.toContain('## The step the user selected')
-    expect(prompts[0]).not.toContain('"edit": change the selected step')
+    expect(prompts[0]).not.toContain('The step the user currently has selected')
   })
 
   it('spells out the selected operator shape even when the offer abridged it', async () => {

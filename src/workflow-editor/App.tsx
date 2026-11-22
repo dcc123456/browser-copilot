@@ -47,6 +47,7 @@ import { ensureSecretProducer, type SuggestionGraph } from '../lib/workflow/var-
 import { parameterPromptInputsOf } from '../lib/workflow/workflow-inputs'
 import {
   appendOperatorChain,
+  applyGraphEdits,
   applyOperatorAction,
   edgesAfterBatchRemoved,
   isOperatorChainAction,
@@ -55,6 +56,7 @@ import {
   prependOperatorChain,
   selectedOperatorSpecOf,
   type OperatorBatch,
+  type OperatorEditOp,
   type OperatorMissingParams,
   type OperatorNodeAction,
   type OperatorNodeSnapshot,
@@ -225,7 +227,10 @@ function toCanvasEdge(e: WorkflowEdge): Edge {
 /** What the assistant's last landing did, in the form 撤销 can put back: either
  *  the batch of nodes it added, or the one node it changed in place. */
 type AiUndoRecord =
-  { kind: 'chain'; batch: OperatorBatch } | { kind: 'node'; before: OperatorNodeSnapshot }
+  | { kind: 'chain'; batch: OperatorBatch }
+  | { kind: 'node'; before: OperatorNodeSnapshot }
+  /** A multi-operation answer (insert + patch): the whole pre-answer graph. */
+  | { kind: 'graph'; before: { nodes: WorkflowNode[]; edges: WorkflowEdge[] } }
 
 export default function EditorApp() {
   const [workflowId, setWorkflowId] = useState<string | null>(null)
@@ -1795,9 +1800,55 @@ export default function EditorApp() {
     [applyEdgeList, installPatchedNode, locateNode, pushHistory, toast, t],
   )
 
+  /**
+   * Lands a multi-operation answer (insert a step AND edit another one) in one
+   * atomic step: the pure layer computes the whole next graph, and only a
+   * problem-free result reaches the canvas. Undo holds the pre-answer graph, so
+   * one click puts back exactly what the answer changed.
+   */
+  const applyGraphOpsFromAi = useCallback(
+    (graph: SuggestionGraph, ops: readonly OperatorEditOp[]): OperatorLanding => {
+      const result = applyGraphEdits(graph, ops, newId)
+      const landing: OperatorLanding = {
+        kind: 'graph',
+        added: result.added.length,
+        applied: false,
+        skipped: [],
+        pruned: result.pruned,
+        missing: result.missing,
+        changed: result.changed,
+        ...(result.problems.length > 0 ? { problem: result.problems[0]!.problem } : {}),
+      }
+      if (result.problems.length > 0) return landing
+      pushHistory()
+      setNodes(result.nodes.map(toFlowNode))
+      applyEdgeList(result.edges)
+      aiUndoRef.current = {
+        kind: 'graph',
+        before: {
+          nodes: graph.nodes.map((node) => ({ ...node })),
+          edges: graph.edges.map((edge) => ({ ...edge })),
+        },
+      }
+      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+      const last = result.added[result.added.length - 1]
+      if (last) requestAnimationFrame(() => locateNode(last.id))
+      toast.show(
+        t('operatorAiAdded').replace(
+          '{count}',
+          String(result.added.length || result.changed.length),
+        ),
+        'ok',
+      )
+      return { ...landing, applied: true }
+    },
+    [applyEdgeList, locateNode, pushHistory, toast, t],
+  )
+
   const applyOperatorsFromAi = useCallback(
     (request: OperatorApplyRequest): OperatorLanding => {
       const graph = suggestionGraphRef.current()
+      if (request.ops && request.ops.length > 0) return applyGraphOpsFromAi(graph, request.ops)
       if (!isOperatorChainAction(request.action))
         return applyNodeActionFromAi(graph, request.action, request.targetNodeId, request.proposals)
       // Both splice next to the anchor; appending with no anchor falls back to the
@@ -1829,14 +1880,21 @@ export default function EditorApp() {
       toast.show(t('operatorAiAdded').replace('{count}', String(patch.added.length)), 'ok')
       return landing
     },
-    [applyEdgeList, applyNodeActionFromAi, locateNode, pushHistory, toast, t],
+    [applyEdgeList, applyGraphOpsFromAi, applyNodeActionFromAi, locateNode, pushHistory, toast, t],
   )
 
   const undoAiBatch = useCallback(() => {
     const record = aiUndoRef.current
     aiUndoRef.current = null
     if (!record) return
-    if (record.kind === 'chain') {
+    if (record.kind === 'graph') {
+      pushHistory()
+      setNodes(record.before.nodes.map(toFlowNode))
+      applyEdgeList(record.before.edges)
+      setEditingId(null)
+      setSettingsForId(null)
+      setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
+    } else if (record.kind === 'chain') {
       const { batch } = record
       if (batch.nodeIds.length === 0) return
       const ids = new Set(batch.nodeIds)
@@ -1856,8 +1914,8 @@ export default function EditorApp() {
       pushHistory()
       restoreNodeSnapshot(record.before)
     }
-    toast.show(record.kind === 'chain' ? t('operatorAiUndone') : t('operatorAiNodeUndone'), 'info')
-  }, [pushHistory, restoreNodeSnapshot, setEdges, setNodes, toast, t])
+    toast.show(record.kind === 'node' ? t('operatorAiNodeUndone') : t('operatorAiUndone'), 'info')
+  }, [applyEdgeList, pushHistory, restoreNodeSnapshot, setEdges, setNodes, toast, t])
 
   const editOverlay =
     editNode && editBlock ? (
