@@ -729,6 +729,8 @@ export interface Messages {
   goalCostLabel: string
   goalNextLabel: string
   goalRounds: (params: { used: number; max: number }) => string
+  /** Refusal shown when a budget edit would go below the rounds already spent. */
+  goalBudgetBelowUsed: (params: { used: number }) => string
   /** Composer `/compact` command description (it replaced a toolbar button). */
   chatCompactContext: string
   /** Transient phase line while the manual compaction request runs. */
@@ -1223,6 +1225,8 @@ export interface Messages {
   settingsKeyPlaceholderLocal: string
   settingsMaxToolRounds: string
   settingsMaxToolRoundsHint: string
+  settingsGoalAutoRenewals: string
+  settingsGoalAutoRenewalsHint: string
   settingsModelsEmpty: string
   settingsModelsFailed: (params: { message: string }) => string
   settingsSaved: (params: { name: string }) => string
@@ -2573,6 +2577,7 @@ const en: Messages = {
   goalCostLabel: 'Cost',
   goalNextLabel: 'Next',
   goalRounds: ({ used, max }) => `${used}/${max} rounds`,
+  goalBudgetBelowUsed: ({ used }) => `Cannot be lower than the rounds already used (${used}).`,
   chatCompactContext: 'Compress context',
   chatCompactRunning: 'Compressing the context…',
   chatCompactDone: ({ removed }) =>
@@ -2979,6 +2984,9 @@ const en: Messages = {
   settingsMaxToolRounds: 'Round budget for a new task',
   settingsMaxToolRoundsHint:
     'How many action rounds (clicks, reads, scrolls, …) a new task starts with. When the budget runs out the turn stops and pauses for your decision — add rounds to continue, change the budget, or end the task. Scheduled tasks and AI-agent blocks have nobody to decide, so they settle and pause when the budget is spent. Range 1–100.',
+  settingsGoalAutoRenewals: 'Automatic renewals for unattended tasks',
+  settingsGoalAutoRenewalsHint:
+    'How many times a scheduled task or an AI-agent block may extend its own budget after it runs out; 0 turns automatic renewal off. A renewal happens only when the segment that just ran made progress, and each one doubles the budget. With you in the chat it never happens — the task pauses and waits for your decision. Range 0–10.',
   settingsModelsEmpty: 'The endpoint returned an empty model list.',
   settingsModelsFailed: ({ message }) =>
     `${message} — not all gateways expose /models; you can still type the model name.`,
@@ -4359,6 +4367,7 @@ const zhCN: Messages = {
   goalCostLabel: '成本',
   goalNextLabel: '下一步',
   goalRounds: ({ used, max }) => `${used}/${max} 轮`,
+  goalBudgetBelowUsed: ({ used }) => `不能小于已用轮次（${used}）。`,
   chatCompactContext: '压缩上下文',
   chatCompactRunning: '正在压缩上下文…',
   chatCompactDone: ({ removed }) => `上下文已压缩：较早的 ${removed} 条消息已合并为一段摘要。`,
@@ -4720,6 +4729,9 @@ const zhCN: Messages = {
   settingsMaxToolRounds: '新任务的初始轮次预算',
   settingsMaxToolRoundsHint:
     '每个新任务开始时拥有的动作轮次（点击、读取、滚动等）。预算用尽后本轮会停下并暂停，等你决定：加预算继续、改预算，或结束任务。定时任务与 AI 智能体块没有人可以决策，到达预算会结算并暂停。范围 1–100。',
+  settingsGoalAutoRenewals: '无人值守任务的自动续期次数',
+  settingsGoalAutoRenewalsHint:
+    '定时任务或 AI 智能体块预算用尽后可以自动续期几次；0 表示关闭自动续期。只有刚跑完的那一段确实有进展才会续期，每次续期把预算翻倍。你在聊天里时永远不会自动续期——任务会暂停等你决定。范围 0–10。',
   settingsModelsEmpty: '该接口返回的模型列表为空。',
   settingsModelsFailed: ({ message }) =>
     `${message}——并非所有网关都提供 /models，你仍可手动输入模型名称。`,

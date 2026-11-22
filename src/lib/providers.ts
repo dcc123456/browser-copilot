@@ -608,6 +608,7 @@ export function normalizeSettingsPayload(raw: unknown): {
   locale: LocaleSetting
   mode: AgentMode
   maxToolRounds: number
+  goalAutoRenewals: number
   disabledTools: string[]
   systemPromptOverride: string
   downloadAutoSave: boolean
@@ -655,6 +656,11 @@ export function normalizeSettingsPayload(raw: unknown): {
   const maxToolRounds = Number.isFinite(rounds)
     ? Math.min(100, Math.max(1, Math.round(rounds)))
     : 20
+  const autoRenewRaw = value.goalAutoRenewals
+  const autoRenew = typeof autoRenewRaw === 'number' ? autoRenewRaw : Number(autoRenewRaw)
+  const goalAutoRenewals = Number.isFinite(autoRenew)
+    ? Math.min(10, Math.max(0, Math.round(autoRenew)))
+    : 1
   const disabledTools = Array.isArray(value.disabledTools)
     ? (value.disabledTools as unknown[]).filter((n): n is string => typeof n === 'string')
     : []
@@ -711,6 +717,7 @@ export function normalizeSettingsPayload(raw: unknown): {
         ? (modeRaw as AgentMode)
         : 'semi',
     maxToolRounds,
+    goalAutoRenewals,
     disabledTools,
     systemPromptOverride,
     downloadAutoSave,

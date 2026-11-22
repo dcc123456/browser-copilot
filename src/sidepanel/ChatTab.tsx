@@ -34,6 +34,7 @@ import {
   type AiPrefillStep,
 } from '../lib/storage'
 import { freeAccessOf } from '../lib/providers'
+import { goalBudgetDraftProblem } from '../lib/task-progress'
 import { isCompactionSummaryText } from '../lib/context-compact'
 import { isTriggerNode } from '../lib/workflow/migrate'
 import { generateWorkflowName } from '../lib/workflow/generation-goal'
@@ -1696,8 +1697,15 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
       requests: number
     }
   } | null>(null)
-  /** Draft value of the budget input in the pause card. */
+  /** Draft value of the goal-bar / pause-card budget input. */
   const [goalBudgetDraft, setGoalBudgetDraft] = useState('')
+  // A budget below what the task already spent is refused instead of applied:
+  // accepting 5 for a task that used 20 seconds later shows "20/5", which reads
+  // as a successful edit while changing nothing.
+  const goalBudgetFloor = goalState?.roundsStarted ?? 0
+  const goalBudgetIssue = goalBudgetDraftProblem(goalBudgetDraft, goalBudgetFloor)
+  const goalBudgetDraftValid = goalBudgetIssue === null
+  const goalBudgetTooLow = goalBudgetIssue === 'below-used'
   /** A manual context compression the worker is still running. */
   const [compacting, setCompacting] = useState(false)
   /** Every configured provider, for the composer's model picker. */
@@ -4576,16 +4584,19 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 <input
                   aria-label={t.goalSetBudget}
                   className="w-14 rounded border border-border bg-panel px-1 py-0.5"
-                  min={1}
+                  min={Math.max(1, goalState.roundsStarted)}
                   onChange={(event) => setGoalBudgetDraft(event.target.value)}
                   type="number"
                   value={goalBudgetDraft}
                 />
                 <button
                   className="rounded border border-border px-2 py-0.5"
+                  disabled={goalBudgetTooLow || !goalBudgetDraftValid}
                   onClick={() => {
                     const value = Number(goalBudgetDraft)
-                    if (!Number.isFinite(value) || value <= 0) return
+                    // A budget below what is already spent is a no-op dressed
+                    // as a decision: refuse it instead of showing "20/5".
+                    if (!Number.isFinite(value) || value < goalState.roundsStarted) return
                     void sendCommand({
                       type: 'goal.setBudget',
                       conversationId,
@@ -4596,6 +4607,11 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 >
                   {t.goalSetBudget}
                 </button>
+                {goalBudgetTooLow && (
+                  <span className="text-err">
+                    {t.goalBudgetBelowUsed({ used: goalState.roundsStarted })}
+                  </span>
+                )}
               </>
             )}
           </div>
@@ -4653,22 +4669,26 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
               <input
                 aria-label={t.goalSetBudget}
                 className="w-16 rounded border border-border bg-panel px-1 py-1"
-                min={1}
+                min={Math.max(1, goalBudgetFloor)}
                 onChange={(event) => setGoalBudgetDraft(event.target.value)}
                 type="number"
                 value={goalBudgetDraft}
               />
               <button
                 className="rounded border border-border px-2 py-1"
+                disabled={goalBudgetTooLow || !goalBudgetDraftValid}
                 onClick={() => {
                   const value = Number(goalBudgetDraft)
-                  if (!Number.isFinite(value) || value <= 0) return
+                  if (!Number.isFinite(value) || value < goalBudgetFloor) return
                   void sendCommand({ type: 'goal.setBudget', conversationId, maxRounds: value })
                 }}
                 type="button"
               >
                 {t.goalSetBudget}
               </button>
+              {goalBudgetTooLow && (
+                <span className="text-err">{t.goalBudgetBelowUsed({ used: goalBudgetFloor })}</span>
+              )}
               <button
                 className="rounded border border-border px-2 py-1"
                 onClick={() => {

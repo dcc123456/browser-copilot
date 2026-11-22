@@ -3,6 +3,7 @@ import { sendCommand, type WindowChoice } from '../lib/messages'
 import { LOCALE_LABELS, LOCALES, type LocaleSetting, type Messages } from '../lib/i18n'
 import type { AgentStatus, ElementPickerFormat, UnattendedWindowPolicy } from '../lib/types'
 import {
+  GOAL_AUTO_RENEW_LIMITS,
   HISTORY_LIMITS,
   RUN_WINDOW_LIMITS,
   normalizeHistoryLimit,
@@ -1259,6 +1260,23 @@ export default function SettingsTab({ onLocaleChange }: Props) {
             }}
             style={{ maxWidth: 96 }}
             value={settings.maxToolRounds}
+          />
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">{t.settingsGoalAutoRenewals}</div>
+        <p className="hint">{t.settingsGoalAutoRenewalsHint}</p>
+        <div className="field">
+          <NumberInput
+            fallback={GOAL_AUTO_RENEW_LIMITS.default}
+            max={GOAL_AUTO_RENEW_LIMITS.max}
+            min={GOAL_AUTO_RENEW_LIMITS.min}
+            onChange={(value) => {
+              void mutate({ type: 'settings.set', patch: { goalAutoRenewals: value } })
+            }}
+            style={{ maxWidth: 96 }}
+            value={settings.goalAutoRenewals}
           />
         </div>
       </div>

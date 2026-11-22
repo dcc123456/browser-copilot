@@ -46,6 +46,7 @@ import type {
 } from './types'
 import {
   DEFAULT_LOCAL_AGENT_URL,
+  GOAL_AUTO_RENEW_LIMITS,
   HISTORY_LIMITS,
   RUN_WINDOW_LIMITS,
   isRemovedWebProvider,
@@ -118,6 +119,7 @@ export const DEFAULT_SETTINGS: Settings = {
   locale: 'auto',
   mode: 'semi',
   maxToolRounds: 20,
+  goalAutoRenewals: 1,
   disabledTools: [],
   systemPromptOverride: '',
   downloadAutoSave: true,
@@ -158,6 +160,17 @@ function coerceLocale(value: unknown): LocaleSetting {
 /** Bounds for the configurable tool-round cap. */
 export const MIN_TOOL_ROUNDS = 1
 export const MAX_TOOL_ROUNDS_CAP = 100
+
+/**
+ * Clamps the unattended auto-renewal cap (K) into its legal range. Each
+ * renewal doubles the task's budget, so an unbounded K turns a stuck
+ * unattended task into an unbounded spend with nobody watching.
+ */
+export function coerceGoalAutoRenewals(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return GOAL_AUTO_RENEW_LIMITS.default
+  return Math.min(GOAL_AUTO_RENEW_LIMITS.max, Math.max(GOAL_AUTO_RENEW_LIMITS.min, Math.round(n)))
+}
 
 /**
  * Clamps the configured tool-round limit to a sane integer range. A value too
@@ -266,6 +279,7 @@ export function normalizeStoredSettings(raw: unknown): Settings {
         ? value.mode
         : 'semi',
     maxToolRounds: coerceMaxToolRounds(value.maxToolRounds),
+    goalAutoRenewals: coerceGoalAutoRenewals(value.goalAutoRenewals),
     disabledTools: Array.isArray(value.disabledTools)
       ? value.disabledTools.filter((n): n is string => typeof n === 'string')
       : [],

@@ -137,6 +137,7 @@ import {
   archiveGoal,
   completeGoal,
   DEFAULT_GOAL_MAX_ROUNDS,
+  autoRenewDecision,
   goalBudgetExhausted,
   goalBudgetReport,
   recordGoalRound,
@@ -2626,6 +2627,14 @@ export interface AgentDeps {
    * edits the budget or stops. Unattended runs omit it and end paused.
    */
   awaitGoalDecision?: (report: GoalBudgetReport) => Promise<{ rounds: number } | null>
+  /**
+   * Unattended auto-renewal cap (K, spec R10). Read only when nobody can answer
+   * the pause: `0` disables automatic renewal, and a renewal still requires
+   * progress in the segment that just ran. When omitted, the setting's default
+   * (1) applies. Panel turns never read it — a human is present, so the pause
+   * waits for their decision instead.
+   */
+  getGoalAutoRenewals?: () => Promise<number>
   /**
    * Set when this turn IS a delegated specialist run. The turn then uses the
    * agent's identity prompt and tool whitelist and can never delegate again.
@@ -6115,6 +6124,48 @@ export async function runAgentTurn(
       }
       const decision =
         deps.awaitGoalDecision && report ? await deps.awaitGoalDecision(report) : null
+
+      // Nobody can answer this pause (scheduled task, Feishu command, workflow
+      // AI-agent block): K may extend the SAME task, but only while the segment
+      // that just ran made progress — no progress is never auto-renewed, and a
+      // panel turn never reaches this branch (a human is present, so their
+      // answer is the only way the budget moves).
+      if (!decision && !deps.awaitGoalDecision) {
+        const k = deps.getGoalAutoRenewals ? await deps.getGoalAutoRenewals() : 1
+        const stagnation = taskProgress.goal?.stagnation ?? currentGoal.stagnation
+        const unchanged = stagnation?.unchanged ?? 0
+        const unreadable = stagnation?.unreadable ?? 0
+        const auto = autoRenewDecision(taskProgress, {
+          unattended: true,
+          k,
+          progressDetected: unchanged === 0 && unreadable === 0,
+        })
+        if (auto.allowed) {
+          const segment = (currentGoal.autoRenewals ?? 0) + 1
+          const evidence =
+            `segment ${segment}: the page state kept changing ` +
+            `(unchanged=${unchanged}, unreadable=${unreadable})`
+          taskProgress = renewGoalBudget(
+            taskProgress,
+            currentGoal.maxRounds,
+            'strategy',
+            Date.now(),
+            evidence,
+          )
+          ctx.taskProgress = taskProgress
+          await saveTaskProgress(taskProgress)
+          broadcastGoal()
+          deps.send({
+            type: 'status',
+            text:
+              'Budget exhausted with nobody to ask: auto-renewed to ' +
+              `${taskProgress.goal?.maxRounds ?? 0} rounds ` +
+              `(${taskProgress.goal?.autoRenewals ?? 0}/${k}, ${evidence}).`,
+          })
+          continue
+        }
+      }
+
       if (!decision) {
         deps.send({
           type: 'status',
@@ -6346,6 +6397,8 @@ export async function runAgentTurn(
       recordGoalRound(ctx.taskProgress ?? taskProgress),
     )
     ctx.taskProgress = taskProgress
+    // The goal bar tracks the budget round by round, not only at pause time.
+    broadcastGoal()
   }
 }
 

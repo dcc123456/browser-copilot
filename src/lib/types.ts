@@ -114,10 +114,19 @@ export interface Settings {
   /** Agent autonomy mode. Defaults to `semi` (confirm each action). */
   mode: AgentMode
   /**
-   * Maximum number of model↔tool round trips allowed in one turn before the
-   * agent stops to avoid an infinite loop. Defaults to 20.
+   * Initial round budget of a NEW task (spec R10). When it runs out the task
+   * pauses and asks the user; `goalAutoRenewals` is the only automatic
+   * extension, and it belongs to unattended runs alone. Defaults to 20.
    */
   maxToolRounds: number
+  /**
+   * How many times an UNATTENDED task (scheduled task, Feishu command, workflow
+   * AI-agent block) may extend its own round budget after it runs out. `0`
+   * disables automatic renewal; a renewal is only allowed when the segment that
+   * just ran made progress. With a human present nothing is ever renewed
+   * automatically — the pause waits for a decision instead. Defaults to 1.
+   */
+  goalAutoRenewals: number
   /**
    * Tool names the user has turned OFF. Only names present here are withheld
    * from the model; everything else (including tools added in future versions)
@@ -289,6 +298,14 @@ export function normalizeRunWindowLimit(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return RUN_WINDOW_LIMITS.default
   return Math.min(RUN_WINDOW_LIMITS.max, Math.max(RUN_WINDOW_LIMITS.min, Math.round(value)))
 }
+
+/**
+ * Bounds for the unattended automatic-renewal cap (K, spec R10). `0` turns
+ * automatic renewal off, and a renewal is only allowed when the segment that
+ * just ran made progress. Kept small on purpose: each renewal doubles the
+ * task's budget, and nobody is watching an unattended run.
+ */
+export const GOAL_AUTO_RENEW_LIMITS = { default: 1, min: 0, max: 10 } as const
 
 /**
  * Bounds for the per-section history retention caps. The settings UI renders

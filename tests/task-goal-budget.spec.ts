@@ -10,6 +10,7 @@ import {
   coerceTaskProgress,
   emptyTaskProgress,
   goalBudgetExhausted,
+  goalBudgetDraftProblem,
   goalBudgetReport,
   recordGoalRound,
   remainingGoalRounds,
@@ -109,6 +110,22 @@ describe('auto-renewal K (unattended only)', () => {
         reason: 'k-exhausted',
       },
     )
+  })
+})
+
+describe('budget draft validation', () => {
+  it('refuses a value below the rounds already spent', () => {
+    expect(goalBudgetDraftProblem('5', 20)).toBe('below-used')
+    expect(goalBudgetDraftProblem('20', 20)).toBeNull()
+    expect(goalBudgetDraftProblem('25', 20)).toBeNull()
+  })
+
+  it('treats empty and non-positive drafts as unusable', () => {
+    expect(goalBudgetDraftProblem('', 0)).toBe('empty')
+    expect(goalBudgetDraftProblem('   ', 0)).toBe('empty')
+    expect(goalBudgetDraftProblem('0', 0)).toBe('invalid')
+    expect(goalBudgetDraftProblem('-2', 0)).toBe('invalid')
+    expect(goalBudgetDraftProblem('abc', 0)).toBe('invalid')
   })
 })
 

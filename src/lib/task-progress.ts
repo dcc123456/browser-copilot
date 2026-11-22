@@ -319,6 +319,26 @@ export function setGoalBudget(
   }
 }
 
+/** Why a typed budget cannot be applied, or null when it can. */
+export type GoalBudgetDraftProblem = 'empty' | 'invalid' | 'below-used'
+
+/**
+ * Validates the budget a user typed before it reaches a command.
+ *
+ * A value below the rounds already spent is refused, not clamped: applying it
+ * would leave a paused task showing "20/5", an edit that reads as accepted
+ * while changing nothing (spec AC-13⑩).
+ */
+export function goalBudgetDraftProblem(
+  draft: string,
+  usedRounds: number,
+): GoalBudgetDraftProblem | null {
+  if (draft.trim() === '') return 'empty'
+  const value = Number(draft)
+  if (!Number.isFinite(value) || value < 1) return 'invalid'
+  return value < usedRounds ? 'below-used' : null
+}
+
 export interface AutoRenewDecision {
   allowed: boolean
   reason: 'not-paused' | 'attended' | 'k-exhausted' | 'no-progress' | 'allowed'

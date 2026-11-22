@@ -41,6 +41,7 @@ function settingsWith(model: string, baseUrl: string): Settings {
     locale: 'en',
     mode: 'semi',
     maxToolRounds: 20,
+    goalAutoRenewals: 1,
     disabledTools: [],
     systemPromptOverride: '',
     downloadAutoSave: true,

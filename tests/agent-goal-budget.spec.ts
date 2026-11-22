@@ -30,9 +30,9 @@ const PAGE = {
   scrollY: 0,
   viewportHeight: 800,
 }
-const execMock = vi.fn(async (request: { action?: string }) =>
-  request.action === 'progress_signature' ? { ok: true, data: 'SIG' } : { ok: true, data: {} },
-)
+const defaultExec = async (request: { action?: string }) =>
+  request.action === 'progress_signature' ? { ok: true, data: 'SIG' } : { ok: true, data: {} }
+const execMock = vi.fn(defaultExec)
 const snapshotMock = vi.fn(async () => PAGE)
 vi.mock('../src/background/driver', async (importActual) => {
   const actual = await importActual<typeof import('../src/background/driver')>()
@@ -67,6 +67,8 @@ vi.mock('../src/lib/storage', async (importActual) => {
 
 const streamMock = vi.mocked(streamCompletion)
 const events: AgentServerMessage[] = []
+/** Bumped per `progress_signature` read so a test can decide "progress" vs "stuck". */
+let signatureSeq = 0
 
 function toolCall(id: string, name: string, args: Record<string, unknown> = {}) {
   return { id, type: 'function' as const, function: { name, arguments: JSON.stringify(args) } }
@@ -88,7 +90,7 @@ function scriptTool(tool: string, rounds: number): void {
               summary: 'Order placed',
               evidence: [{ kind: 'url', value: 'https://shop.test/order/42' }],
             })
-          : toolCall(`c${sent}`, 'snapshot_page', {}),
+          : toolCall(`c${sent}`, tool, tool === 'scroll' ? { direction: 'down' } : {}),
       ],
       finishReason: 'tool_calls',
       usage: null,
@@ -113,7 +115,8 @@ beforeEach(() => {
   events.length = 0
   saveMock.mockClear()
   loadMock.mockClear()
-  execMock.mockClear()
+  execMock.mockReset()
+  execMock.mockImplementation(defaultExec)
   snapshotMock.mockClear()
   streamMock.mockReset()
 })
@@ -172,7 +175,11 @@ describe('explicit goal budget in the loop', () => {
       } as StreamResult
     }) as never)
 
-    await runAgentTurn([{ role: 'user', content: 'watch the price' }] as never, deps() as never)
+    await runAgentTurn(
+      [{ role: 'user', content: 'watch the price' }] as never,
+      // A human reports no decision, so K cannot extend the edited budget.
+      deps({ awaitGoalDecision: async () => null }) as never,
+    )
 
     // The edited budget survived the run and the loop paused at it, not at 20.
     expect(stored?.goal?.maxRounds).toBe(3)
@@ -236,6 +243,112 @@ describe('explicit goal budget in the loop', () => {
           message.role === 'tool' && String(message.content).includes('Completion needs at least'),
       ),
     ).toBe(true)
+  })
+
+  it('auto-renews an unattended task once when the last segment made progress', async () => {
+    signatureSeq = 0
+    execMock.mockImplementation(async (request: { action?: string }) =>
+      request.action === 'progress_signature'
+        ? { ok: true, data: `SIG-${signatureSeq++}` }
+        : { ok: true, data: {} },
+    )
+    let sent = 0
+    streamMock.mockImplementation((async () => {
+      sent += 1
+      // Safety net: a regression would keep looping instead of pausing at K.
+      if (sent > 60) {
+        return { content: 'done', reasoning: '', toolCalls: [], finishReason: 'stop', usage: null }
+      }
+      return {
+        content: '',
+        reasoning: '',
+        toolCalls: [toolCall(`c${sent}`, 'snapshot_page', {})],
+        finishReason: 'tool_calls',
+        usage: null,
+      } as StreamResult
+    }) as never)
+
+    await runAgentTurn(
+      [{ role: 'user', content: 'watch the price' }] as never,
+      deps({ getGoalAutoRenewals: async () => 1 }) as never,
+    )
+
+    // K=1: exactly one automatic extension (20 → 40), then the pause sticks.
+    expect(stored?.goal?.autoRenewals).toBe(1)
+    expect(stored?.goal?.maxRounds).toBe(40)
+    expect(stored?.goal?.roundsStarted).toBe(40)
+    expect(stored?.goal?.status).toBe('paused')
+    const change = stored?.goal?.budgetLog.at(-1)
+    expect(change).toMatchObject({ kind: 'auto-renew', actor: 'strategy', roundsAdded: 20 })
+    expect(change?.evidence).toContain('segment 1')
+  })
+
+  it('never auto-renews when the last segment made no progress', async () => {
+    // A non-wait tool whose signature repeats: the loop's own no-progress judge
+    // sees stagnation, which is the evidence K requires and never gets here.
+    scriptTool('scroll', 100)
+    await runAgentTurn(
+      [{ role: 'user', content: 'watch the price' }] as never,
+      deps({ getGoalAutoRenewals: async () => 1 }) as never,
+    )
+    expect(stored?.goal?.autoRenewals).toBe(0)
+    expect(stored?.goal?.maxRounds).toBe(20)
+    expect(stored?.goal?.status).toBe('paused')
+  })
+
+  it('never auto-renews when K is 0 even though the segment progressed', async () => {
+    signatureSeq = 0
+    execMock.mockImplementation(async (request: { action?: string }) =>
+      request.action === 'progress_signature'
+        ? { ok: true, data: `SIG-${signatureSeq++}` }
+        : { ok: true, data: {} },
+    )
+    scriptTool('snapshot_page', 100)
+
+    await runAgentTurn(
+      [{ role: 'user', content: 'watch the price' }] as never,
+      deps({ getGoalAutoRenewals: async () => 0 }) as never,
+    )
+    expect(stored?.goal?.autoRenewals).toBe(0)
+    expect(stored?.goal?.maxRounds).toBe(20)
+    expect(stored?.goal?.status).toBe('paused')
+  })
+
+  it('never auto-renews when a human is present, however high K is', async () => {
+    signatureSeq = 0
+    execMock.mockImplementation(async (request: { action?: string }) =>
+      request.action === 'progress_signature'
+        ? { ok: true, data: `SIG-${signatureSeq++}` }
+        : { ok: true, data: {} },
+    )
+    scriptTool('snapshot_page', 100)
+
+    await runAgentTurn(
+      [{ role: 'user', content: 'watch the price' }] as never,
+      deps({
+        getGoalAutoRenewals: async () => 3,
+        // The panel is open and reports no decision: the pause waits for the
+        // user instead of extending itself.
+        awaitGoalDecision: async () => null,
+      }) as never,
+    )
+    expect(stored?.goal?.autoRenewals).toBe(0)
+    expect(stored?.goal?.maxRounds).toBe(20)
+    expect(stored?.goal?.status).toBe('paused')
+  })
+
+  it('keeps the goal bar in step with the rounds actually spent', async () => {
+    scriptTool('snapshot_page', 3)
+    await runAgentTurn(
+      [{ role: 'user', content: 'watch the price' }] as never,
+      deps({ getMaxToolRounds: async () => 3 }) as never,
+    )
+    const spent = events
+      .filter((event) => event.type === 'goal.state')
+      .map((event) => (event.type === 'goal.state' ? event.goal.roundsStarted : -1))
+    // Every round announces its own count, so the bar never shows a stale 0/20.
+    expect(spent).toContain(3)
+    expect(spent).toEqual([...spent].sort((a, b) => a - b))
   })
 
   it('keeps the same goal (and its spent rounds) when the model never declares completion', async () => {

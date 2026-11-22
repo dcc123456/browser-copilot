@@ -166,7 +166,11 @@ export async function runUnattendedPrompt(
           options.onStep?.('result', `← ${message.summary}`)
         }
         if (message.type === 'status') {
-          if (/^Stopped after \d+ tool rounds/.test(message.text)) stopNotice = message.text
+          // The round limit is now an explicit per-task budget (spec R10), so the
+          // pause line is the "why" an answerless block reports.
+          if (/^(Stopped after \d+ tool rounds|Goal budget exhausted)/.test(message.text)) {
+            stopNotice = message.text
+          }
           options.onStep?.('status', message.text)
         }
         if (message.type === 'phase') {
@@ -186,6 +190,9 @@ export async function runUnattendedPrompt(
       confirm: async (name) => modeOverride === 'full' || isObservationTool(name),
       getMode: async () => modeOverride ?? settings.mode,
       getMaxToolRounds: async () => options.maxToolRounds ?? settings.maxToolRounds,
+      // K (spec R10): the only automatic budget extension, and it exists
+      // exactly because this entry point has nobody to answer the pause.
+      getGoalAutoRenewals: async () => settings.goalAutoRenewals,
       ...(options.provider ? { getProvider: async () => options.provider } : {}),
       getToolConfig: async () => ({
         // The global switch still wins: a tool the user disabled everywhere

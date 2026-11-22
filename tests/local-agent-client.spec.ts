@@ -132,6 +132,7 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     locale: 'auto',
     mode: 'semi',
     maxToolRounds: 20,
+    goalAutoRenewals: 1,
     disabledTools: [],
     systemPromptOverride: '',
     downloadAutoSave: true,

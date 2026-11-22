@@ -338,6 +338,7 @@ describe('normalizeStoredSettings', () => {
       locale: 'auto' as const,
       mode: 'full' as const,
       maxToolRounds: 25,
+      goalAutoRenewals: 2,
       disabledTools: [],
       systemPromptOverride: '',
       downloadAutoSave: true,
@@ -393,6 +394,7 @@ describe('normalizeStoredSettings', () => {
       locale: 'auto',
       mode: 'semi',
       maxToolRounds: 20,
+      goalAutoRenewals: 1,
       disabledTools: [],
       systemPromptOverride: '',
       downloadAutoSave: true,
@@ -416,6 +418,18 @@ describe('normalizeStoredSettings', () => {
       historyLimitTaskRuns: 50,
       historyLimitOperations: 50,
     })
+  })
+
+  it('clamps the unattended auto-renewal cap and defaults it to one', () => {
+    const at = (value: unknown) =>
+      normalizeStoredSettings({ providers: [], activeProviderId: '', goalAutoRenewals: value })
+        .goalAutoRenewals
+    expect(at(undefined)).toBe(1)
+    expect(at('nope')).toBe(1)
+    expect(at(-3)).toBe(0)
+    expect(at(0)).toBe(0)
+    expect(at(99)).toBe(10)
+    expect(at(2.6)).toBe(3)
   })
 
   it('coerces a non-array providers value to an empty list', () => {
