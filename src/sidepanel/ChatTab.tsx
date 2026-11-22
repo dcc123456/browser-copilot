@@ -1688,6 +1688,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
     stopReason: string
     usedRounds: number
     maxRounds: number
+    renewIncrement: number
     remainingRounds: number
     nextActions: string[]
     cost?: {
@@ -4659,7 +4660,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                   void sendCommand({
                     type: 'goal.renew',
                     conversationId,
-                    rounds: goalReport.maxRounds || 20,
+                    rounds: goalReport.renewIncrement,
                   })
                 }}
                 type="button"

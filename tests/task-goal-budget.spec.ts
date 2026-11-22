@@ -12,6 +12,7 @@ import {
   goalBudgetExhausted,
   goalBudgetDraftProblem,
   goalBudgetReport,
+  renewIncrementOf,
   recordGoalRound,
   remainingGoalRounds,
   renewGoalBudget,
@@ -110,6 +111,27 @@ describe('auto-renewal K (unattended only)', () => {
         reason: 'k-exhausted',
       },
     )
+  })
+})
+
+describe('renewal increment', () => {
+  it('renews by the initial budget, never by the current one', () => {
+    const afterRenewal = renewGoalBudget(started(20), 20, 'user')
+    // A second renewal must add 20 again (60), not double the current 40 (80).
+    const twice = renewGoalBudget(afterRenewal, renewIncrementOf(afterRenewal.goal!), 'user')
+    expect(afterRenewal.goal?.maxRounds).toBe(40)
+    expect(twice.goal?.maxRounds).toBe(60)
+    expect(renewIncrementOf(twice.goal!)).toBe(20)
+  })
+
+  it('falls back to the default increment for goals stored before it existed', () => {
+    const goal = { ...started(20).goal!, initialMaxRounds: undefined }
+    expect(renewIncrementOf(goal)).toBe(20)
+  })
+
+  it('reports the increment so the panel renews like the loop does', () => {
+    const report = goalBudgetReport(renewGoalBudget(started(5), 5, 'user'))
+    expect(report?.renewIncrement).toBe(5)
   })
 })
 

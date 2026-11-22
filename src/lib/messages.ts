@@ -1162,6 +1162,8 @@ export type AgentServerMessage =
         stopReason: string
         usedRounds: number
         maxRounds: number
+        /** Rounds the Renew action adds (one initial budget; matches auto-renewal). */
+        renewIncrement: number
         remainingRounds: number
         nextActions: ('renew' | 'change-goal' | 'stop')[]
         cost?: {

@@ -142,6 +142,7 @@ import {
   goalBudgetReport,
   recordGoalRound,
   renewGoalBudget,
+  renewIncrementOf,
   type GoalBudgetReport,
   beginTask,
   emptyTaskProgress,
@@ -6116,6 +6117,7 @@ export async function runAgentTurn(
             stopReason: report.stopReason,
             usedRounds: report.usedRounds,
             maxRounds: report.maxRounds,
+            renewIncrement: report.renewIncrement,
             remainingRounds: report.remainingRounds,
             nextActions: report.nextActions,
             ...(report.cost ? { cost: report.cost } : {}),
@@ -6145,9 +6147,11 @@ export async function runAgentTurn(
           const evidence =
             `segment ${segment}: the page state kept changing ` +
             `(unchanged=${unchanged}, unreadable=${unreadable})`
+          // One initial budget per renewal, never a doubling: the ceiling stays
+          // predictable at initial × (1 + K) however long the task runs.
           taskProgress = renewGoalBudget(
             taskProgress,
-            currentGoal.maxRounds,
+            renewIncrementOf(currentGoal),
             'strategy',
             Date.now(),
             evidence,

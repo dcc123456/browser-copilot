@@ -283,6 +283,46 @@ describe('explicit goal budget in the loop', () => {
     expect(change?.evidence).toContain('segment 1')
   })
 
+  it('adds one initial budget per auto-renewal instead of doubling it', async () => {
+    signatureSeq = 0
+    execMock.mockImplementation(async (request: { action?: string }) =>
+      request.action === 'progress_signature'
+        ? { ok: true, data: `SIG-${signatureSeq++}` }
+        : { ok: true, data: {} },
+    )
+    let sent = 0
+    streamMock.mockImplementation((async () => {
+      sent += 1
+      if (sent > 80) {
+        return { content: 'done', reasoning: '', toolCalls: [], finishReason: 'stop', usage: null }
+      }
+      return {
+        content: '',
+        reasoning: '',
+        toolCalls: [toolCall(`c${sent}`, 'snapshot_page', {})],
+        finishReason: 'tool_calls',
+        usage: null,
+      } as StreamResult
+    }) as never)
+
+    await runAgentTurn(
+      [{ role: 'user', content: 'watch the price' }] as never,
+      deps({ getGoalAutoRenewals: async () => 2 }) as never,
+    )
+
+    // Initial budget 20, two renewals → 40 then 60. A doubling K would have
+    // exploded to 80 and kept climbing.
+    expect(stored?.goal?.maxRounds).toBe(60)
+    expect(stored?.goal?.roundsStarted).toBe(60)
+    expect(stored?.goal?.autoRenewals).toBe(2)
+    expect(stored?.goal?.status).toBe('paused')
+    expect(
+      stored?.goal?.budgetLog
+        .filter((entry) => entry.kind === 'auto-renew')
+        .map((entry) => entry.roundsAdded),
+    ).toEqual([20, 20])
+  })
+
   it('never auto-renews when the last segment made no progress', async () => {
     // A non-wait tool whose signature repeats: the loop's own no-progress judge
     // sees stagnation, which is the evidence K requires and never gets here.
