@@ -83,6 +83,7 @@ export type OperatorLandingProblem =
   | 'move-entry-point'
   | 'move-cycle'
   | 'delete-entry-point'
+  | 'dangling-reference'
   | 'no-selection'
 
 /** What the canvas did with one reply. */
@@ -105,6 +106,8 @@ export interface OperatorLanding {
    *  evidence that the canvas did something, since most parameters never show
    *  on the node card at all. */
   changed?: OperatorParamChange[]
+  /** Human-readable specifics for a refusal (the step and variable it named). */
+  detail?: string
   /** The operator a swap moved the step from and to, by display name. */
   swapped?: OperatorSwap
   problem?: OperatorLandingProblem
@@ -308,6 +311,7 @@ const PROBLEM_KEY: Record<OperatorLandingProblem, EditorStringKey> = {
   'move-entry-point': 'operatorAiMoveEntry',
   'move-cycle': 'operatorAiMoveCycle',
   'delete-entry-point': 'operatorAiDeleteEntry',
+  'dangling-reference': 'operatorAiDanglingReference',
 }
 
 /** One parameter value as the row shows it: JSON-quoted so an empty string stays
@@ -345,6 +349,7 @@ function Landing({
     return (
       <p className="mt-1 text-[11px] leading-snug text-warn">
         {t('operatorAiNotApplied')} <span>{t(PROBLEM_KEY[landing.problem])}</span>
+        {landing.detail ? <span> {landing.detail}</span> : null}
       </p>
     )
   // Not applied for a reason the patch could not name (every operator refused):

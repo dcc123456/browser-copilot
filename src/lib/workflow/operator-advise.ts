@@ -37,6 +37,7 @@ import {
 import { blockTakesElement, schemaRequiredArgs, missingRequirements } from './block-requirements'
 import { deepEqual } from './equality'
 import { isSecretKey, MASK, redactText } from './execution-evidence'
+import { referenceRoot, referencesIn } from './dynamic-data'
 import { isFallbackHandle, loopBackEdgeIds } from './graph-edges'
 import { NODE_INSERT_GAP, placeClearOfNodes, type SuggestionGraph } from './var-suggestions'
 import { blockIdOf, producedVariableNames } from './producer-completeness'
@@ -1139,6 +1140,7 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     '- {"kind":"patch","nodeId":"<id>","action":"edit"|"replace","proposals":[<operator row>]} — change that step in place. "edit" keeps the operator and changes only the parameters you name; "replace" swaps the operator (exactly one proposal, a different operator id).',
     '- {"kind":"move","nodeId":"<id>","anchorNodeId":"<id>","side":"after"|"before"} — re-place an existing step next to that anchor, carrying its wiring. Use it to reorder, not to duplicate: the editor refuses a move that would put a step inside its own downstream.',
     '- {"kind":"delete","nodeId":"<id>","reconnect":true|false} — remove that step; with reconnect the neighbours it sat between are joined. The entry point cannot be moved or deleted.',
+    '- A move or delete is refused when it would leave a step reading a variable whose producer is gone (a dangling reference). If the user wants that, move/delete together with the step that rewrites the reference in the same answer.',
     ...(selected === ''
       ? [
           'Nothing is selected right now, which is fine: read the ids above and edit the steps the user names.',
@@ -2003,6 +2005,8 @@ export type OperatorEditOp =
 export type OperatorEditProblemKind =
   | OperatorChainProblem
   | OperatorTargetProblem
+  /** Move/delete left a downstream step reading a variable nothing produces now. */
+  | 'dangling-reference'
   /** Moving the entry point is never legal: nothing runs before the trigger. */
   | 'move-entry-point'
   /** The move would put a step inside its own downstream (a cycle). */
@@ -2015,9 +2019,14 @@ export type OperatorEditProblemKind =
   | 'no-operations'
 
 export interface OperatorEditProblem {
-  /** Position of the operation in the answer, 0-based. */
+  /** Position of the operation in the answer, 0-based; -1 when the answer as a
+   *  whole is refused by the post-check (e.g. a dangling reference). */
   index: number
   problem: OperatorEditProblemKind
+  /** The step that reads a variable nothing produces any more. */
+  nodeId?: string
+  /** Those variables, in the order they were found. */
+  variables?: string[]
 }
 
 export interface OperatorGraphEditResult {
@@ -2049,6 +2058,60 @@ function untouchedGraphEdit(
     splicedEdges: [],
     problems,
   }
+}
+
+/** Every variable name a node's parameters reference through `{{…}}`. */
+function referencedVariablesOf(node: WorkflowNode): string[] {
+  const names = new Set<string>()
+  const walk = (value: unknown): void => {
+    if (typeof value === 'string') {
+      for (const reference of referencesIn(value)) names.add(referenceRoot(reference))
+      return
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) walk(entry)
+      return
+    }
+    if (value && typeof value === 'object') {
+      for (const entry of Object.values(value as Record<string, unknown>)) walk(entry)
+    }
+  }
+  walk(node.data)
+  // A loop-data node names its source in `variableName`, not as a `{{token}}`,
+  // so it would otherwise look like it references nothing.
+  const loopThrough = node.data['loopThrough']
+  const variableName = node.data['variableName']
+  if (
+    loopThrough === 'variable' &&
+    typeof variableName === 'string' &&
+    variableName.trim() !== ''
+  ) {
+    names.add(referenceRoot(variableName.trim()))
+  }
+  return [...names]
+}
+
+/** Everything the graph publishes, as a set of variable names.
+ *
+ * A loop's `variableName` is the source it READS, not something it produces —
+ * counting it here made "delete the producer" look like a no-op, because the
+ * consumer itself claimed to be the producer.
+ */
+function producerNamesOf(nodes: readonly WorkflowNode[]): Set<string> {
+  const names = new Set<string>()
+  for (const node of nodes) {
+    const blockId = blockIdOf(node)
+    const isLoop = blockId === 'loop-data' || blockId === 'loop-elements'
+    const source =
+      isLoop && node.data['loopThrough'] === 'variable'
+        ? String(node.data['variableName'] ?? '').trim()
+        : ''
+    for (const name of producedVariableNames(node)) {
+      if (source !== '' && name === source) continue
+      names.add(name)
+    }
+  }
+  return names
 }
 
 /** Whether `from` can reach `target` along normal edges (a cycle would be new). */
@@ -2250,6 +2313,29 @@ export function applyGraphEdits(
     changed.push(...patch.changed)
     missing.push(...patch.missing)
     pruned.push(...patch.pruned)
+  }
+
+  // A `move`/`delete` can take a PRODUCER away while a downstream step still
+  // reads its variable. Catching that at run time (the unresolved-token guard)
+  // means the user waited for a run that could never work, and the canvas looked
+  // fine — the same "structurally legal, semantically wrong" trap as an
+  // out-of-scope variable. Only producers that EXISTED and are now GONE count:
+  // references to declared inputs or names this build never produced are left
+  // alone, so a pre-existing hole is not blamed on this answer.
+  if (ops.some((op) => op.kind === 'move' || op.kind === 'delete')) {
+    const before = producerNamesOf(graph.nodes)
+    const after = producerNamesOf(draft.nodes)
+    const lost = [...before].filter((name) => !after.has(name))
+
+    if (lost.length > 0) {
+      for (const node of draft.nodes) {
+        const dangling = referencedVariablesOf(node).filter((name) => lost.includes(name))
+        if (dangling.length === 0) continue
+        return untouchedGraphEdit(graph, [
+          { index: -1, problem: 'dangling-reference', nodeId: node.id, variables: dangling },
+        ])
+      }
+    }
   }
 
   return {

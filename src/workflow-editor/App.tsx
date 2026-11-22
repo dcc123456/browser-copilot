@@ -1809,6 +1809,7 @@ export default function EditorApp() {
   const applyGraphOpsFromAi = useCallback(
     (graph: SuggestionGraph, ops: readonly OperatorEditOp[]): OperatorLanding => {
       const result = applyGraphEdits(graph, ops, newId)
+      const refused = result.problems[0]
       const landing: OperatorLanding = {
         kind: 'graph',
         added: result.added.length,
@@ -1817,7 +1818,11 @@ export default function EditorApp() {
         pruned: result.pruned,
         missing: result.missing,
         changed: result.changed,
-        ...(result.problems.length > 0 ? { problem: result.problems[0]!.problem } : {}),
+        ...(refused ? { problem: refused.problem } : {}),
+        // Name the step and the variable, so "nothing was applied" is actionable.
+        ...(refused?.nodeId && refused.variables?.length
+          ? { detail: `(${refused.nodeId}: {{${refused.variables.join('}}, {{')}}})` }
+          : {}),
       }
       if (result.problems.length > 0) return landing
       pushHistory()

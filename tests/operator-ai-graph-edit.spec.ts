@@ -259,16 +259,17 @@ describe('atomic graph edits', () => {
 
   it('deletes a step and stitches its neighbours back together', () => {
     const before = fixture()
+    // `open` produces nothing anybody reads, so the delete is allowed; the edge
+    // that fed it now feeds what came after it.
     const result = applyGraphEdits(
       before,
-      [{ kind: 'delete', nodeId: 'seed', reconnect: true }],
+      [{ kind: 'delete', nodeId: 'open', reconnect: true }],
       newId,
     )
     expect(result.problems).toEqual([])
-    expect(result.nodes.map((n) => n.id)).not.toContain('seed')
-    // open → seed → loop becomes open → loop; nothing dangles.
-    expect(result.edges.some((e) => e.source === 'open' && e.target === 'loop')).toBe(true)
-    expect(result.edges.some((e) => e.source === 'seed' || e.target === 'seed')).toBe(false)
+    expect(result.nodes.map((n) => n.id)).not.toContain('open')
+    expect(result.edges.some((e) => e.source === 'trigger' && e.target === 'seed')).toBe(true)
+    expect(result.edges.some((e) => e.source === 'open' || e.target === 'open')).toBe(false)
   })
 
   it('refuses to delete the entry point', () => {
@@ -280,6 +281,49 @@ describe('atomic graph edits', () => {
     )
     expect(result.problems).toEqual([{ index: 0, problem: 'delete-entry-point' }])
     expect(result.nodes).toEqual(before.nodes)
+  })
+
+  it('refuses a delete that would leave a downstream step reading a gone variable', () => {
+    const before = fixture()
+    // `seed` produces noteIds and `loop` reads it as its source. Deleting the
+    // producer must be refused at ANSWER time, not discovered at run time.
+    const result = applyGraphEdits(
+      before,
+      [{ kind: 'delete', nodeId: 'seed', reconnect: true }],
+      newId,
+    )
+    expect(result.problems).toHaveLength(1)
+    expect(result.problems[0]).toMatchObject({
+      index: -1,
+      problem: 'dangling-reference',
+      nodeId: 'loop',
+      variables: ['noteIds'],
+    })
+    expect(result.nodes).toEqual(before.nodes)
+    expect(result.edges).toEqual(before.edges)
+  })
+
+  it('allows a delete that removes no producer anything reads', () => {
+    const before = fixture()
+    // `save` produces csv and nobody references it → removing it is fine.
+    const result = applyGraphEdits(
+      before,
+      [{ kind: 'delete', nodeId: 'save', reconnect: true }],
+      newId,
+    )
+    expect(result.problems).toEqual([])
+    expect(result.nodes.map((n) => n.id)).not.toContain('save')
+  })
+
+  it('allows a move that keeps the producer, even though the step changes place', () => {
+    const before = fixture()
+    const result = applyGraphEdits(
+      before,
+      [{ kind: 'move', nodeId: 'seed', anchorNodeId: 'open', side: 'after' }],
+      newId,
+    )
+    expect(result.problems).toEqual([])
+    expect(result.nodes.map((n) => n.id)).toContain('seed')
   })
 
   it('refuses an empty answer instead of touching the canvas', () => {

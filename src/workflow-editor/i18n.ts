@@ -383,6 +383,8 @@ export const EDITOR_STRINGS = {
     operatorAiMoveCycle:
       'That move would put a step inside its own downstream (a loop), so it was not applied.',
     operatorAiDeleteEntry: 'The entry point cannot be deleted — a workflow needs a start step.',
+    operatorAiDanglingReference:
+      'That change would leave a step reading a variable nothing produces any more, so nothing was applied.',
     operatorAiNotApplied: 'Not applied —',
     operatorAiEdited: 'The assistant updated the selected step.',
     operatorAiGraphEdited: 'The assistant updated the workflow.',
@@ -830,6 +832,7 @@ export const EDITOR_STRINGS = {
       '入口（触发器）不能移动——它前面没有可接的位置。要换入口请先删除再重新声明。',
     operatorAiMoveCycle: '这次移动会把某个步骤放进它自己的下游（形成环），所以没有执行。',
     operatorAiDeleteEntry: '入口（触发器）不能删除——工作流必须有起点。',
+    operatorAiDanglingReference: '这次改动会让某个步骤读取一个已经没有生产者的变量，所以没有执行。',
     operatorAiNotApplied: '未改动 ——',
     operatorAiEdited: '助手已更新所选步骤。',
     operatorAiGraphEdited: '助手已更新工作流。',
