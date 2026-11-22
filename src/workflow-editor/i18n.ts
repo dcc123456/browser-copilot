@@ -378,8 +378,14 @@ export const EDITOR_STRINGS = {
       'None of the offered steps could be placed there, so the canvas was left untouched.',
     operatorAiNoOperations:
       'That answer carried no operations, so nothing changed. Name the step and what should happen.',
+    operatorAiMoveEntry:
+      'The entry point cannot be moved — nothing runs before it. Ask for it to be deleted and re-declared if that is what you meant.',
+    operatorAiMoveCycle:
+      'That move would put a step inside its own downstream (a loop), so it was not applied.',
+    operatorAiDeleteEntry: 'The entry point cannot be deleted — a workflow needs a start step.',
     operatorAiNotApplied: 'Not applied —',
     operatorAiEdited: 'The assistant updated the selected step.',
+    operatorAiGraphEdited: 'The assistant updated the workflow.',
     operatorAiReplaced: 'The selected step is now {name}.',
     operatorAiUndo: 'Undo',
     operatorAiUndone: 'Removed the operators the assistant had just added.',
@@ -820,8 +826,13 @@ export const EDITOR_STRINGS = {
     operatorAiNoSteps: '画布上没有放置任何步骤。',
     operatorAiNothingToPlace: '要放进去的步骤一个都落不了，画布保持原样。',
     operatorAiNoOperations: '这次回答没有带任何操作，画布没有变化；请说明改哪个步骤、要做什么。',
+    operatorAiMoveEntry:
+      '入口（触发器）不能移动——它前面没有可接的位置。要换入口请先删除再重新声明。',
+    operatorAiMoveCycle: '这次移动会把某个步骤放进它自己的下游（形成环），所以没有执行。',
+    operatorAiDeleteEntry: '入口（触发器）不能删除——工作流必须有起点。',
     operatorAiNotApplied: '未改动 ——',
     operatorAiEdited: '助手已更新所选步骤。',
+    operatorAiGraphEdited: '助手已更新工作流。',
     operatorAiReplaced: '所选步骤已替换为 {name}。',
     operatorAiUndo: '撤销',
     operatorAiUndone: '已撤销助手刚添加的算子。',

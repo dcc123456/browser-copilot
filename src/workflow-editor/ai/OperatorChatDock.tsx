@@ -80,6 +80,9 @@ export type OperatorLandingProblem =
   | OperatorTargetProblem
   | 'nothing-to-place'
   | 'no-operations'
+  | 'move-entry-point'
+  | 'move-cycle'
+  | 'delete-entry-point'
   | 'no-selection'
 
 /** What the canvas did with one reply. */
@@ -302,6 +305,9 @@ const PROBLEM_KEY: Record<OperatorLandingProblem, EditorStringKey> = {
   'no-change': 'operatorAiNoChange',
   'nothing-to-place': 'operatorAiNothingToPlace',
   'no-operations': 'operatorAiNoOperations',
+  'move-entry-point': 'operatorAiMoveEntry',
+  'move-cycle': 'operatorAiMoveCycle',
+  'delete-entry-point': 'operatorAiDeleteEntry',
 }
 
 /** One parameter value as the row shows it: JSON-quoted so an empty string stays

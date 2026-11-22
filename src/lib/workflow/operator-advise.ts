@@ -1137,6 +1137,8 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
     'An answer is a LIST of operations applied together, atomically: if one cannot land, the editor changes nothing.',
     '- {"kind":"insert","anchorNodeId":"<id>","side":"after"|"before","proposals":[<operator rows>]} — insert a new chain next to that step. "after" splices it between the step and whatever it currently leads to; "before" puts it in front of the step.',
     '- {"kind":"patch","nodeId":"<id>","action":"edit"|"replace","proposals":[<operator row>]} — change that step in place. "edit" keeps the operator and changes only the parameters you name; "replace" swaps the operator (exactly one proposal, a different operator id).',
+    '- {"kind":"move","nodeId":"<id>","anchorNodeId":"<id>","side":"after"|"before"} — re-place an existing step next to that anchor, carrying its wiring. Use it to reorder, not to duplicate: the editor refuses a move that would put a step inside its own downstream.',
+    '- {"kind":"delete","nodeId":"<id>","reconnect":true|false} — remove that step; with reconnect the neighbours it sat between are joined. The entry point cannot be moved or deleted.',
     ...(selected === ''
       ? [
           'Nothing is selected right now, which is fine: read the ids above and edit the steps the user names.',
@@ -1383,8 +1385,10 @@ function parseOperatorEditOps(
         rationale: typeof rationale === 'string' ? rationale.trim() : '',
       })
     }
-    if (proposals.length === 0) return undefined
     const kind = record['kind']
+    // `move` and `delete` re-place or remove a step that already exists, so they
+    // carry no operator rows; every other kind needs at least one.
+    if (kind !== 'move' && kind !== 'delete' && proposals.length === 0) return undefined
     if (kind === 'insert') {
       const anchorNodeId =
         typeof record['anchorNodeId'] === 'string' ? record['anchorNodeId'].trim() : ''
@@ -1400,6 +1404,23 @@ function parseOperatorEditOps(
       if (nodeId === '') return undefined
       if (action !== 'edit' && action !== 'replace') return undefined
       ops.push({ kind: 'patch', nodeId, action, proposals: proposals.slice(0, maxOperators) })
+      continue
+    }
+    if (kind === 'move') {
+      const nodeId = typeof record['nodeId'] === 'string' ? record['nodeId'].trim() : ''
+      const anchorNodeId =
+        typeof record['anchorNodeId'] === 'string' ? record['anchorNodeId'].trim() : ''
+      const side = record['side']
+      if (nodeId === '' || anchorNodeId === '') return undefined
+      if (side !== 'after' && side !== 'before') return undefined
+      // A move carries no operator rows: it re-places a step that already exists.
+      ops.push({ kind: 'move', nodeId, anchorNodeId, side })
+      continue
+    }
+    if (kind === 'delete') {
+      const nodeId = typeof record['nodeId'] === 'string' ? record['nodeId'].trim() : ''
+      if (nodeId === '') return undefined
+      ops.push({ kind: 'delete', nodeId, reconnect: record['reconnect'] !== false })
       continue
     }
     return undefined
@@ -1968,11 +1989,26 @@ export type OperatorEditOp =
       action: OperatorNodeAction
       proposals: OperatorProposal[]
     }
+  /** Re-place an existing step relative to an anchor, carrying its wiring with it. */
+  | {
+      kind: 'move'
+      nodeId: string
+      anchorNodeId: string
+      side: 'after' | 'before'
+    }
+  /** Remove a step; `reconnect` stitches the two neighbours it sat between. */
+  | { kind: 'delete'; nodeId: string; reconnect: boolean }
 
 /** Why one operation in an answer could not be applied. */
 export type OperatorEditProblemKind =
   | OperatorChainProblem
   | OperatorTargetProblem
+  /** Moving the entry point is never legal: nothing runs before the trigger. */
+  | 'move-entry-point'
+  /** The move would put a step inside its own downstream (a cycle). */
+  | 'move-cycle'
+  /** Deleting the entry point would leave a workflow with no start. */
+  | 'delete-entry-point'
   /** The operation's chain placed nothing (every row was refused). */
   | 'nothing-to-place'
   /** The answer carried no operations at all. */
@@ -2013,6 +2049,134 @@ function untouchedGraphEdit(
     splicedEdges: [],
     problems,
   }
+}
+
+/** Whether `from` can reach `target` along normal edges (a cycle would be new). */
+function reachesNode(graph: SuggestionGraph, from: string, target: string): boolean {
+  const next = normalOutgoing(graph)
+  const queue = [from]
+  const seen = new Set<string>()
+  while (queue.length > 0) {
+    const id = queue.shift() as string
+    if (id === target) return true
+    if (seen.has(id)) continue
+    seen.add(id)
+    for (const edge of next.get(id) ?? []) queue.push(edge.target)
+  }
+  return false
+}
+
+/**
+ * Moves a step next to an anchor, carrying its wiring: the node's incoming and
+ * outgoing normal edges are released, and the same splice rules as an insert
+ * place it — after the anchor (between the anchor and its continuation) or in
+ * front of it. Refused when the anchor is the node itself, when the move would
+ * place a node inside its own downstream (a cycle), or at a branch/join anchor,
+ * because choosing which path to cut is the user's call, not a guess.
+ */
+function moveNodeInGraph(
+  graph: SuggestionGraph,
+  nodeId: string,
+  anchorNodeId: string,
+  side: 'after' | 'before',
+): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } | { problem: OperatorEditProblemKind } {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId)
+  if (!node) return { problem: 'unknown-target' }
+  const anchor = graph.nodes.find((candidate) => candidate.id === anchorNodeId)
+  if (!anchor) return { problem: 'unknown-target' }
+  if (blockIdOf(node) === TRIGGER_BLOCK_ID) return { problem: 'move-entry-point' }
+  if (nodeId === anchorNodeId) return { problem: 'move-cycle' }
+  if (reachesNode(graph, nodeId, anchorNodeId)) return { problem: 'move-cycle' }
+
+  const outgoing = normalOutgoing(graph)
+  const incoming = normalIncoming(graph)
+  const outgoingFromNode = outgoing.get(nodeId) ?? []
+  if (outgoingFromNode.length > 1) return { problem: 'branch-anchor' }
+  const incomingToNode = incoming.get(nodeId) ?? []
+  if (side === 'before' && incomingToNode.length > 1) return { problem: 'join-anchor' }
+  const incomingToAnchor = incoming.get(anchor.id) ?? []
+  const outgoingFromAnchor = outgoing.get(anchor.id) ?? []
+  if (side === 'after' && outgoingFromAnchor.length > 1) return { problem: 'branch-anchor' }
+  if (side === 'before' && incomingToAnchor.length > 1) return { problem: 'join-anchor' }
+
+  // Release the node: both of its normal edges go, then it is spliced back in.
+  const released = new Set<string>([
+    ...outgoingFromNode.map((edge) => edge.id),
+    ...incomingToNode.map((edge) => edge.id),
+  ])
+  const edges: WorkflowEdge[] = graph.edges
+    .filter((edge) => !released.has(edge.id))
+    .map((edge) => ({ ...edge }))
+  const nodeOut = normalOutputHandleOfNode(node)
+  const nodeIn = inputHandleOfNode(node)
+  const linkToNode = (source: string, sourceHandle: string | undefined): WorkflowEdge => ({
+    id: `move-${source}-${nodeId}-${edges.length}`,
+    source,
+    sourceHandle: sourceHandle ?? normalOutputHandleOfNode(anchor),
+    target: nodeId,
+    ...(nodeIn ? { targetHandle: nodeIn } : {}),
+  })
+
+  if (side === 'after') {
+    // The anchor's own continuation is what the moved step takes over, so it is
+    // re-sourced instead of duplicated; the anchor then feeds the moved step.
+    const anchorContinuation = outgoingFromAnchor[0]
+    const spliced = edges.map((edge) =>
+      anchorContinuation && edge.id === anchorContinuation.id
+        ? { ...edge, source: nodeId, sourceHandle: nodeOut }
+        : edge,
+    )
+    spliced.push(linkToNode(anchor.id, normalOutputHandleOfNode(anchor)))
+    return { nodes: graph.nodes.map((candidate) => ({ ...candidate })), edges: spliced }
+  }
+
+  // In front of the anchor: the edge that fed the anchor now feeds the node, and
+  // the node leads into the anchor.
+  const feeding = incomingToAnchor[0]
+  if (!feeding) return { problem: 'prepend-no-incoming' }
+  const front = edges.filter((edge) => edge.id !== feeding.id)
+  front.push({
+    ...feeding,
+    id: `move-${feeding.source}-${nodeId}-${front.length}`,
+    target: nodeId,
+    ...(nodeIn ? { targetHandle: nodeIn } : { targetHandle: undefined }),
+  })
+  front.push({
+    id: `move-${nodeId}-${anchor.id}-${front.length}`,
+    source: nodeId,
+    sourceHandle: nodeOut,
+    target: anchor.id,
+    ...(inputHandleOfNode(anchor) ? { targetHandle: inputHandleOfNode(anchor)! } : {}),
+  })
+  return { nodes: graph.nodes.map((candidate) => ({ ...candidate })), edges: front }
+}
+
+/**
+ * Removes a step. With `reconnect` the two neighbours it sat between are joined
+ * (only when that is unambiguous: one normal incoming and one normal outgoing
+ * edge); otherwise the hole is left for the user to wire. Deleting the entry
+ * point is refused.
+ */
+function deleteNodeFromGraph(
+  graph: SuggestionGraph,
+  nodeId: string,
+  reconnect: boolean,
+): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } | { problem: OperatorEditProblemKind } {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId)
+  if (!node) return { problem: 'unknown-target' }
+  if (blockIdOf(node) === TRIGGER_BLOCK_ID) return { problem: 'delete-entry-point' }
+  const incoming = (normalIncoming(graph).get(nodeId) ?? [])[0]
+  const outgoing = (normalOutgoing(graph).get(nodeId) ?? [])[0]
+  const edges = graph.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId)
+  if (reconnect && incoming && outgoing) {
+    edges.push({
+      ...incoming,
+      id: `delete-${nodeId}-${edges.length}`,
+      target: outgoing.target,
+      targetHandle: outgoing.targetHandle,
+    })
+  }
+  return { nodes: graph.nodes.filter((candidate) => candidate.id !== nodeId), edges }
 }
 
 /**
@@ -2060,6 +2224,21 @@ export function applyGraphEdits(
       added.push(...patch.added)
       missing.push(...patch.missing)
       if (patch.splicedEdge) splicedEdges.push(patch.splicedEdge)
+      continue
+    }
+
+    if (op.kind === 'move') {
+      const moved = moveNodeInGraph(draft, op.nodeId, op.anchorNodeId, op.side)
+      if ('problem' in moved) return untouchedGraphEdit(graph, [{ index, problem: moved.problem }])
+      draft = { ...draft, nodes: moved.nodes, edges: moved.edges }
+      continue
+    }
+
+    if (op.kind === 'delete') {
+      const removed = deleteNodeFromGraph(draft, op.nodeId, op.reconnect)
+      if ('problem' in removed)
+        return untouchedGraphEdit(graph, [{ index, problem: removed.problem }])
+      draft = { ...draft, nodes: removed.nodes, edges: removed.edges }
       continue
     }
 

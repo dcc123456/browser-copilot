@@ -1833,11 +1833,12 @@ export default function EditorApp() {
       setMeta((m) => ({ ...m, settings: { ...m.settings, certificationStatus: 'unverified' } }))
       const last = result.added[result.added.length - 1]
       if (last) requestAnimationFrame(() => locateNode(last.id))
+      // A move or a delete changes the graph without adding a node, so the
+      // "added N steps" line would read as 0 for a change that really happened.
       toast.show(
-        t('operatorAiAdded').replace(
-          '{count}',
-          String(result.added.length || result.changed.length),
-        ),
+        result.added.length > 0
+          ? t('operatorAiAdded').replace('{count}', String(result.added.length))
+          : t('operatorAiGraphEdited'),
         'ok',
       )
       return { ...landing, applied: true }

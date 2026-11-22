@@ -226,6 +226,62 @@ describe('atomic graph edits', () => {
     expect(result.edges).toEqual(before.edges)
   })
 
+  it('moves a step next to an anchor, carrying its wiring', () => {
+    const before = fixture()
+    // `save` is the tail; move it in front of `seed`'s successor.
+    const result = applyGraphEdits(
+      before,
+      [{ kind: 'move', nodeId: 'save', anchorNodeId: 'seed', side: 'after' }],
+      newId,
+    )
+    expect(result.problems).toEqual([])
+    // Its old incoming edge is gone, the anchor now feeds it, and what the
+    // anchor used to lead to hangs off the moved step.
+    expect(result.edges.some((e) => e.source === 'break' && e.target === 'save')).toBe(false)
+    expect(result.edges.some((e) => e.source === 'seed' && e.target === 'save')).toBe(true)
+    expect(result.edges.some((e) => e.source === 'save' && e.target === 'loop')).toBe(true)
+    expect(result.nodes.map((n) => n.id)).toContain('save')
+  })
+
+  it('refuses a move that would put a step inside its own downstream', () => {
+    const before = fixture()
+    // Moving `open` after `seed` is fine, but `open` after `save` reaches back
+    // through `open` itself — a cycle the editor must not create.
+    const result = applyGraphEdits(
+      before,
+      [{ kind: 'move', nodeId: 'open', anchorNodeId: 'save', side: 'after' }],
+      newId,
+    )
+    expect(result.problems).toEqual([{ index: 0, problem: 'move-cycle' }])
+    expect(result.nodes).toEqual(before.nodes)
+    expect(result.edges).toEqual(before.edges)
+  })
+
+  it('deletes a step and stitches its neighbours back together', () => {
+    const before = fixture()
+    const result = applyGraphEdits(
+      before,
+      [{ kind: 'delete', nodeId: 'seed', reconnect: true }],
+      newId,
+    )
+    expect(result.problems).toEqual([])
+    expect(result.nodes.map((n) => n.id)).not.toContain('seed')
+    // open → seed → loop becomes open → loop; nothing dangles.
+    expect(result.edges.some((e) => e.source === 'open' && e.target === 'loop')).toBe(true)
+    expect(result.edges.some((e) => e.source === 'seed' || e.target === 'seed')).toBe(false)
+  })
+
+  it('refuses to delete the entry point', () => {
+    const before = fixture()
+    const result = applyGraphEdits(
+      before,
+      [{ kind: 'delete', nodeId: 'trigger', reconnect: true }],
+      newId,
+    )
+    expect(result.problems).toEqual([{ index: 0, problem: 'delete-entry-point' }])
+    expect(result.nodes).toEqual(before.nodes)
+  })
+
   it('refuses an empty answer instead of touching the canvas', () => {
     const before = fixture()
     const result = applyGraphEdits(before, [], newId)
