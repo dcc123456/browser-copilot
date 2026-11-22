@@ -1146,9 +1146,13 @@ export function buildOperatorAdvisePrompt(input: OperatorAdvisePromptInput): str
           'The user has one step selected (it is marked "<< selected" above) — use its id only when the user says "this step" / "这一步" and names no other.',
         ]),
     '',
+    '## What each step can read',
+    'Every line of the digest ends with `see: {{…}}` — the variables that step can read WHERE IT STANDS. A name that is not listed there does not exist at that position: writing `{{loopItem}}` outside a loop body, or naming a variable a later step produces, sends the braces themselves to the site.',
+    '',
     '## Where an insert may land (engine rules, not style)',
     "- A loop step (loop-data / loop-elements) runs the body its first output leads to; the path AFTER the loop comes from that body's loop-breakpoint step. Never put a step between a loop-breakpoint and its exit in a way that makes the breakpoint stop being the end of the body, and never move a breakpoint out of its loop.",
     '- Inserting before the loop, between the loop and its body, or inside the body are all legal.',
+    "- To FILTER what a loop iterates, insert BEFORE the loop and have that step rewrite the loop's source variable (automaSetVariable with the same name the loop reads, e.g. noteIds). The loop reads its source when it starts, so the rewritten array is what it iterates. Filtering inside the body is a different thing: it skips an item but the loop still goes round.",
     "- A javascript-code step that must feed a later step cannot rely on its return value: it has to call automaSetVariable('name', value) for every such name and list it in outputVariables. A later step reads it as {{name}}.",
     '- Values that must survive between RUNS (a history list, a running CSV) do not exist as workflow variables: they are per-run. Point such a step at a real store (page storage, a server/API, a file) instead of inventing a variable.',
     '',
@@ -1419,6 +1423,80 @@ function scalarParamsOf(node: WorkflowNode): Record<string, unknown> {
 }
 
 /**
+ * Which loop (if any) each node's BODY contains it.
+ *
+ * A loop runs the path its normal output leads to, and that path ends at its
+ * loop-breakpoint: everything reachable from the body start WITHOUT crossing the
+ * breakpoint's own output is inside. This is what tells `{{loopItem}}` apart from
+ * a variable that only exists before the loop.
+ */
+function loopBodyMembership(graph: SuggestionGraph): Map<string, string> {
+  const owner = new Map<string, string>()
+  const nextOf = new Map<string, string[]>()
+  for (const edge of graph.edges) {
+    if (isFallbackHandle(edge.sourceHandle)) continue
+    const list = nextOf.get(edge.source) ?? []
+    list.push(edge.target)
+    nextOf.set(edge.source, list)
+  }
+  for (const loop of graph.nodes) {
+    const blockId = blockIdOf(loop)
+    if (!LOOP_BODY_BLOCKS.has(blockId)) continue
+    const start = (nextOf.get(loop.id) ?? []).find((target) => target !== loop.id)
+    if (!start) continue
+    const queue = [start]
+    const seen = new Set<string>()
+    while (queue.length > 0) {
+      const id = queue.shift() as string
+      if (id === loop.id || seen.has(id)) continue
+      seen.add(id)
+      if (!owner.has(id)) owner.set(id, loop.id)
+      const node = graph.nodes.find((candidate) => candidate.id === id)
+      // The breakpoint's own output leaves the loop; that is where the body ends.
+      if (node && blockIdOf(node) === 'loop-breakpoint') continue
+      queue.push(...(nextOf.get(id) ?? []))
+    }
+  }
+  return owner
+}
+
+/** Variables a step can read where it stands: what runs before it, plus the loop
+ *  variables only when it is inside that loop's body. */
+function visibleVariablesOf(
+  graph: SuggestionGraph,
+  node: WorkflowNode,
+  producedBy: Map<string, string[]>,
+  inLoop: Map<string, string>,
+): string[] {
+  const names = new Set<string>()
+  const previous = new Map<string, string[]>()
+  for (const edge of graph.edges) {
+    if (isFallbackHandle(edge.sourceHandle)) continue
+    const list = previous.get(edge.target) ?? []
+    list.push(edge.source)
+    previous.set(edge.target, list)
+  }
+  const queue = [...(previous.get(node.id) ?? [])]
+  const seen = new Set<string>([node.id])
+  while (queue.length > 0 && seen.size < 200) {
+    const id = queue.shift() as string
+    if (seen.has(id)) continue
+    seen.add(id)
+    for (const name of producedBy.get(id) ?? []) names.add(name)
+    queue.push(...(previous.get(id) ?? []))
+  }
+  const loopId = inLoop.get(node.id)
+  if (loopId) {
+    names.add('loopItem')
+    names.add('loopIndex')
+  }
+  return [...names]
+}
+
+/** Blocks whose normal output is a loop BODY. */
+const LOOP_BODY_BLOCKS = new Set(['loop-data', 'loop-elements', 'repeat-task', 'while-loop'])
+
+/**
  * The canvas as text the model can reason about: step order, operator, filled
  * parameters, and the variable names each step publishes. This is what lets it
  * append in the right place and stop re-proposing an operator that is already there.
@@ -1426,12 +1504,19 @@ function scalarParamsOf(node: WorkflowNode): Record<string, unknown> {
  */
 export function operatorDigestOf(graph: SuggestionGraph, selectedNodeId?: string): string {
   const ordered = chainOrderOf(graph)
+  const producedBy = new Map(graph.nodes.map((node) => [node.id, producedVariableNames(node)]))
+  const inLoop = loopBodyMembership(graph)
   const line = (node: WorkflowNode, index: string): string => {
     const params = scalarParamsOf(node)
     const produced = producedVariableNames(node)
     const parts = [`${index}. [${node.id}] ${blockIdOf(node)}`]
     if (Object.keys(params).length > 0) parts.push(capModelPayload(params, 160))
     if (produced.length > 0) parts.push(`-> {{${produced.join(', ')}}}`)
+    // Where the step stands decides what it may read: a `{{loopItem}}` outside the
+    // loop's body is not a value, it is a literal, and the workflow would submit
+    // the braces themselves.
+    const visible = visibleVariablesOf(graph, node, producedBy, inLoop)
+    if (visible.length > 0) parts.push(`see: {{${visible.slice(0, 8).join(', ')}}}`)
     if (node.id === selectedNodeId) parts.push('<< selected')
     return parts.join(' ')
   }

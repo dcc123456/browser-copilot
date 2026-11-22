@@ -32,7 +32,10 @@ function fixture() {
   const nodes = [
     node('trigger', 'trigger', { type: 'manual' }),
     node('open', 'open-url', { url: 'https://shop.test/p' }),
-    node('seed', 'javascript-code', { code: "automaSetVariable('noteIds', ['a','b'])" }),
+    node('seed', 'javascript-code', {
+      code: "automaSetVariable('noteIds', ['a','b'])",
+      outputVariables: ['noteIds'],
+    }),
     node('loop', 'loop-data', { loopThrough: 'variable', variableName: 'noteIds' }),
     node('submit', 'javascript-code', { code: 'submit(loopItem)' }),
     node('break', 'loop-breakpoint', { loopId: '' }),
@@ -64,6 +67,22 @@ describe('graph digest', () => {
     expect(digest).toContain('Wiring (source handle -> target):')
     expect(digest).toContain('[loop] loop-output-1 -> [submit]')
     expect(digest).toContain('[break] break-output-1 -> [save]')
+  })
+
+  it('tells each step which variables it can actually read where it stands', () => {
+    const digest = operatorDigestOf(fixture())
+    const lines = digest.split('\n')
+    const submit = lines.find((line) => line.includes('[submit]'))!
+    const save = lines.find((line) => line.includes('[save]'))!
+    const open = lines.find((line) => line.includes('[open]'))!
+    // Inside the body: the loop variables exist, and the upstream variable arrives.
+    expect(submit).toContain('loopItem')
+    expect(submit).toContain('noteIds')
+    // After the loop: the loop variables are gone.
+    expect(save).not.toContain('loopItem')
+    expect(save).toContain('noteIds')
+    // Before the producer: not a value yet.
+    expect(open).not.toContain('noteIds')
   })
 
   it('names the steps the user has not wired yet, so they can still be targeted', () => {
