@@ -21,6 +21,7 @@ import {
   completeGoal,
   MAX_ARCHIVED_GOALS,
   startsNewGoal,
+  type TaskGoal,
   type TaskProgress,
 } from '../src/lib/task-progress'
 
@@ -139,6 +140,72 @@ describe('renewal increment', () => {
   it('falls back to the default increment for goals stored before it existed', () => {
     const goal = { ...started(20).goal!, renewIncrement: undefined }
     expect(renewIncrementOf(goal)).toBe(20)
+  })
+})
+
+describe('persistence round trip', () => {
+  it('keeps every goal field through save → coerceTaskProgress → load', () => {
+    // The chain under test is the real one: JSON (what storage holds) →
+    // coerceTaskProgress (what loadTaskProgress returns). Values are all
+    // NON-default, because a default is exactly what hides a dropped field —
+    // `renewIncrement` read back as the fallback 20 for an entire round.
+    const base = beginTask(emptyTaskProgress('conv-rt', 1_000), 'File the report', 1_000, 7)
+    const goal: TaskGoal = {
+      ...base.goal!,
+      renewIncrement: 3,
+      roundsStarted: 2,
+      status: 'paused',
+      autoRenewals: 2,
+      archivedAt: 5_000,
+      evidence: [{ kind: 'url', value: 'https://shop.test/order/42' }],
+      stagnation: {
+        signature: 'sig-1',
+        url: 'https://shop.test/p',
+        unchanged: 1,
+        unreadable: 2,
+        waiting: 3,
+      },
+      budgetLog: [
+        { at: 2_000, kind: 'edit', roundsAdded: -4, actor: 'user' },
+        {
+          at: 3_000,
+          kind: 'auto-renew',
+          roundsAdded: 7,
+          actor: 'strategy',
+          evidence: 'segment 1: changed',
+        },
+      ],
+    }
+    const progress: TaskProgress = {
+      ...base,
+      goal,
+      archivedGoals: [
+        {
+          summary: 'Previous task',
+          startedAt: 500,
+          status: 'done',
+          endedAt: 900,
+          completedSteps: [
+            { at: 600, tool: 'click', summary: 'Clicked', ok: true, url: 'https://shop.test/a' },
+          ],
+          autoRenewals: 1,
+        },
+      ],
+    }
+
+    const restored = coerceTaskProgress(JSON.parse(JSON.stringify(progress)) as unknown)
+
+    expect(restored).toBeDefined()
+    // Every goal field, not just the one that broke last time.
+    for (const key of Object.keys(goal) as (keyof TaskGoal)[]) {
+      expect([key, restored?.goal?.[key]]).toEqual([key, goal[key]])
+    }
+    expect(restored?.goal).toEqual(goal)
+    expect(restored?.archivedGoals).toEqual(progress.archivedGoals)
+    expect(restored?.steps).toEqual(progress.steps)
+    expect(restored?.destructiveOps).toEqual(progress.destructiveOps)
+    // The increment is the value the user set, not the fallback.
+    expect(renewIncrementOf(restored!.goal!)).toBe(3)
   })
 })
 

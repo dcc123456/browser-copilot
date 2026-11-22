@@ -6514,6 +6514,7 @@ async function adoptStoredBudget(progress: TaskProgress): Promise<TaskProgress> 
   if (!storedGoal || storedGoal.startedAt !== goal.startedAt) return progress
   if (
     storedGoal.maxRounds === goal.maxRounds &&
+    storedGoal.renewIncrement === goal.renewIncrement &&
     storedGoal.autoRenewals === goal.autoRenewals &&
     storedGoal.budgetLog.length === goal.budgetLog.length
   ) {
@@ -6526,6 +6527,10 @@ async function adoptStoredBudget(progress: TaskProgress): Promise<TaskProgress> 
       maxRounds: storedGoal.maxRounds,
       autoRenewals: storedGoal.autoRenewals,
       budgetLog: storedGoal.budgetLog,
+      // A record written before this field existed keeps the in-memory value.
+      ...(storedGoal.renewIncrement !== undefined
+        ? { renewIncrement: storedGoal.renewIncrement }
+        : {}),
     },
   }
 }

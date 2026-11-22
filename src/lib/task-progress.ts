@@ -561,13 +561,37 @@ function coerceBudgetChange(value: unknown): GoalBudgetChange | null {
   return {
     at: asNumber(record['at']),
     kind: kind as GoalBudgetChange['kind'],
-    ...(asNumber(record['roundsAdded']) > 0
+    // Edits record the DELTA and a shrink is negative (20 → 5 logs -15), so
+    // only a missing/zero delta is dropped.
+    ...(asNumber(record['roundsAdded']) !== 0
       ? { roundsAdded: Math.floor(asNumber(record['roundsAdded'])) }
       : {}),
     actor,
     ...(asString(record['evidence'])
       ? { evidence: asString(record['evidence']).slice(0, 300) }
       : {}),
+  }
+}
+
+function coerceArchivedGoal(value: unknown): ArchivedGoal | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const summary = asString(record['summary']).trim()
+  const status = asString(record['status'])
+  if (!summary) return null
+  if (status !== 'done' && status !== 'abandoned') return null
+  return {
+    summary: summary.slice(0, 400),
+    startedAt: asNumber(record['startedAt']),
+    status,
+    endedAt: asNumber(record['endedAt']),
+    completedSteps: Array.isArray(record['completedSteps'])
+      ? record['completedSteps']
+          .map(coerceStep)
+          .filter((step): step is TaskProgressStep => step !== null)
+          .slice(-12)
+      : [],
+    autoRenewals: Math.max(0, Math.floor(asNumber(record['autoRenewals']))),
   }
 }
 
@@ -611,6 +635,8 @@ export function coerceTaskProgress(value: unknown): TaskProgress | undefined {
             .filter((entry): entry is GoalBudgetChange => entry !== null)
             .slice(-MAX_BUDGET_LOG)
         : []
+      const renewIncrement = asNumber(raw['renewIncrement'])
+      const archivedAt = asNumber(raw['archivedAt'])
       goal = {
         summary: summary.slice(0, 400),
         startedAt: asNumber(raw['startedAt']),
@@ -624,6 +650,12 @@ export function coerceTaskProgress(value: unknown): TaskProgress | undefined {
           : 'active',
         budgetLog,
         autoRenewals: Math.max(0, Math.floor(asNumber(raw['autoRenewals']))),
+        ...(Number.isFinite(renewIncrement) && renewIncrement > 0
+          ? { renewIncrement: Math.floor(renewIncrement) }
+          : {}),
+        ...(Number.isFinite(archivedAt) && archivedAt > 0
+          ? { archivedAt: Math.floor(archivedAt) }
+          : {}),
         ...(Array.isArray(raw['evidence'])
           ? {
               evidence: raw['evidence']
@@ -644,12 +676,19 @@ export function coerceTaskProgress(value: unknown): TaskProgress | undefined {
   const destructiveOps = Array.isArray(record['destructiveOps'])
     ? record['destructiveOps'].map(coerceOp).filter((op): op is DestructiveOperation => op !== null)
     : []
+  const archivedGoals = Array.isArray(record['archivedGoals'])
+    ? record['archivedGoals']
+        .map(coerceArchivedGoal)
+        .filter((archived): archived is ArchivedGoal => archived !== null)
+        .slice(-MAX_ARCHIVED_GOALS)
+    : []
   return {
     version: 2,
     conversationId,
     ...(goal ? { goal } : {}),
     steps: steps.slice(-MAX_TASK_STEPS),
     destructiveOps: destructiveOps.slice(-MAX_DESTRUCTIVE_OPS),
+    ...(archivedGoals.length > 0 ? { archivedGoals } : {}),
     updatedAt: asNumber(record['updatedAt']),
   }
 }
