@@ -4,6 +4,54 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.22] - 2026-11-22
+
+### Added — The editor's AI assistant edits any step, not just the selected one
+
+Asking for a change used to require selecting the step first: the assistant
+could only patch the node the user had picked, so a request like "insert a
+dedupe step after step 10 and have the save step write the CSV" was answered
+with "please select step 10". The assistant now reads the whole graph — node
+ids, wiring, branches, loop bodies and error edges — and answers with a list of
+operations that can insert after or before a named step, patch it in place,
+move a step, or delete it and reconnect its neighbours. An answer can carry
+several operations: they land together or not at all, one undo returns the graph
+to its pre-answer state, and an unknown id rejects the whole answer rather than
+guessing at the closest node.
+
+### Added — Five whole-graph invariants guard every structural edit
+
+A legal-looking edit can still leave the graph semantically broken, which is
+what three separate regressions showed: a loop-scoped variable referenced
+outside the loop, a producer deleted while downstream steps still read it, and
+a move that carried the loop's exit edge away so nothing followed the loop.
+Structural edits are now checked as invariants of the whole graph, in one place:
+the entry step cannot be moved or deleted, a loop's breakpoint must stay inside
+its body and keep an outgoing edge, no reference may be left without a
+producer, and a move may not create a cycle. A move onto a node's own position
+is treated as a no-op instead of producing a self-loop.
+
+### Added — Variables that do not resolve are never submitted as literals
+
+A `javascript-code` step was outside the page-action list, so the unresolved
+variable guard never reached it: its text is a program, and a `{{loopItem}}`
+outside the loop was sent to the site as literal braces, mixed in with five real
+submissions. That node class now goes through the same guard and fails with a
+readable reason, while genuinely empty values (an empty string, an array that
+filtered down to nothing) still pass.
+
+### Changed — Rejections explain what to do, not which code fired
+
+A refused edit says "the entry step cannot be moved — there is nothing before
+it to attach to" or "this change would leave a loop with no exit, so the steps
+after the loop would never run", naming the reference or breakpoint involved.
+
+### Changed — The graph digest says what each step can see
+
+Each step in the digest now lists the variables reachable at its position
+(upstream outputs, plus `loopItem`/`loopIndex` only inside a loop body), so a
+prompt cannot place a loop-scoped reference where it does not exist.
+
 ## [0.6.21] - 2026-11-22
 
 ### Added — Explicit task budgets: pause, report, renew, finish

@@ -592,8 +592,14 @@ auto-lays-out the graph; `Ctrl+S` saves, `Ctrl+Enter` runs from the editor.
 from what is on disk, a bottom bar offers undo / redo / auto-layout, and a
 **Data table** tab lists every run-scoped variable's writers and readers with
 jump-to-node links. The canvas also has an AI assistant that writes operators
-from a prompt and shows its reasoning; its **Chat history** is stored per
-workflow, so each workflow opens its own threads (new, switch, delete — and
+from a prompt and shows its reasoning — it reads the whole graph, so it can
+insert a step before or after any named step, edit one in place, move it, or
+delete it and reconnect its neighbours, all without you selecting anything
+first. Structural edits are checked against whole-graph invariants before they
+land (entry not movable or deletable, a loop's breakpoint stays inside its body
+and keeps an outgoing edge, no dangling variable references, no cycles), one
+answer lands entirely or not at all, and one undo returns the graph to its
+pre-answer state. Its **Chat history** is stored per workflow, so each workflow opens its own threads (new, switch, delete — and
 deleting the workflow cleans its sessions up), and a footer **Last run log**
 switch sends this workflow's newest finished run with the request so a failing
 step does not have to be described by hand. While a run is live the bar's run
