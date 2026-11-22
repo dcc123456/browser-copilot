@@ -1070,9 +1070,11 @@ webhooks, Docker deployment, and a web console.
   the panel offers renew / change budget / end and start a new task. A goal only
   completes on an explicit `goal_complete` declaration with locatable evidence,
   so an unfinished task stays active across your messages instead of being
-  closed for you. **Unattended auto-renewal is not shipped yet**: a scheduled
-  task or AI-agent block stops at its budget and waits — that is the safe
-  default, not a defect.
+  closed for you. Unattended tasks may extend themselves: a scheduled task or
+  AI-agent block renews **only when the segment that just ran made progress**,
+  at most **K** times (default 1, `0` turns it off, range 0–10), and each
+  renewal adds one budget step. With you in the chat it never happens — the
+  task pauses for your decision.
 - The irreversible-action fence remembers the last **50** actions of a
   conversation: after more than 50, the oldest one would no longer be blocked on
   replay.
