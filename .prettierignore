@@ -15,3 +15,7 @@ public
 *.ttf
 pnpm-lock.yaml
 package-lock.json
+
+# The change log index is a frozen table: prettier re-aligns every row when one
+# cell grows, which rewrites historical rows that must stay byte-identical.
+memory/index.md

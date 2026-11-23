@@ -54,7 +54,10 @@ console.log('- 变更：<用户可见的行为变化，一句话；不是文件�
 console.log(
   `- 模块：${shown.join('、') || '<无文件变化>'}${modules.length > shown.length ? `、等 ${modules.length} 项` : ''}`,
 )
-console.log('- 验证：typecheck / test / build；真机 <哪条判据>')
-console.log('- 遗留：无')
+// Defaults must not read like a conclusion: a skeleton left unedited has to
+// say "not verified", never "verified" — forgetting to fill it in must not
+// produce a fake green (AGENTS.md §9.5).
+console.log('- 验证：未运行（填写实际跑过的命令与结果）')
+console.log('- 遗留：未填写')
 console.log('')
 console.log(`追加到 memory/${date}.md，并更新 memory/index.md 的今日行（历史行不动）。`)
