@@ -58,9 +58,13 @@ function modulesOf(files) {
  *  The `（回填）` marker is stripped BEFORE comparing: leaving it in the key made
  *  every backfilled entry look new on the next run (the marker is not part of the
  *  commit subject), which is exactly the duplicate this check exists to prevent. */
-/** One normalization for both sides of the comparison: some old subjects carry a
- *  leading BOM, and `trim()` silently strips it — so a file entry and the git
- *  subject compared unequal and every run re-added those six commits. */
+/** Comparison key: BOM stripped and edges trimmed. A file entry and the git
+ *  subject must agree on this, or every run re-adds the same commits (that is how
+ *  the BOM and the padded subject were caught).
+ *
+ *  What is WRITTEN is `subject.trim()`: prettier collapses leading/trailing run
+ *  whitespace in Markdown and `format:check` must pass, so one historical subject
+ *  with leading spaces is stored without them. */
 const normalizeSubject = (subject) => subject.replace(/^\uFEFF/, '').trim()
 
 function loggedSubjects(text) {
@@ -105,8 +109,8 @@ for (const [date, dayCommits] of [...byDate.entries()].sort()) {
     blocks.push(
       entryBlock({
         time: timeOf(commit.hash),
-        title: normalizeSubject(commit.subject),
-        change: normalizeSubject(commit.subject),
+        title: commit.subject.trim(),
+        change: commit.subject.trim(),
         modules: modulesOf(commit.files),
       }),
     )
@@ -125,7 +129,7 @@ for (const [date, dayCommits] of [...byDate.entries()].sort()) {
         entryBlock({
           time: timeOf(missing[0].hash),
           title: `docs: 文档与规范变更（${missing.length} 条）`,
-          change: missing.map((commit) => normalizeSubject(commit.subject)).join('；'),
+          change: missing.map((commit) => commit.subject.trim()).join('；'),
           modules: modulesOf(missing.flatMap((commit) => commit.files)),
         }),
       )
