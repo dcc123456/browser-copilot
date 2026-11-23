@@ -142,26 +142,55 @@ for (const [date, dayCommits] of [...byDate.entries()].sort()) {
   added.push({ date, entries: blocks.length })
 }
 
-// index.md: one row per day, newest first. Existing rows are kept verbatim.
+// index.md: ONE row per day file, and every existing row is kept byte-identical.
+// A day file without its row is an incomplete log — that is exactly how the first
+// backfill shipped 76 files with 2 index rows.
 const indexPath = join(MEMORY, 'index.md')
 const indexText = existsSync(indexPath) ? readFileSync(indexPath, 'utf8') : '# 修改记忆索引\n'
 const knownDates = new Set([...indexText.matchAll(/^\| (\d{4}-\d{2}-\d{2}) \|/gm)].map((m) => m[1]))
-const rows = added
-  .filter((day) => !knownDates.has(day.date))
-  .sort((a, b) => (a.date < b.date ? 1 : -1))
-  .map(
-    (day) =>
-      `| ${day.date} | 回填：${day.entries} 条记录（按提交信息，未核实） | [详情](${day.date}.md) |`,
-  )
+
+/** A short, factual summary: how many commits and what they were about. */
+function summaryOf(dayCommits) {
+  // Keep the conventional prefix: `chore(release): 0.6.1` and `0.6.10` differ only
+  // by it, and a summary that drops it reads as the wrong release.
+  const topics = dayCommits
+    .map((commit) => {
+      const subject = normalizeSubject(commit.subject)
+      return subject.length > 46 ? `${subject.slice(0, 45)}…` : subject
+    })
+    .slice(0, 3)
+  const more = dayCommits.length > topics.length ? ` 等 ${dayCommits.length} 项` : ''
+  return `${dayCommits.length} 次提交：${topics.join('；')}${more}（回填）`
+}
+
+const rows = [...byDate.entries()]
+  .filter(([date]) => !knownDates.has(date))
+  .map(([date, dayCommits]) => `| ${date} | ${summaryOf(dayCommits)} | [详情](${date}.md) |`)
+
+// Newest first, inserted after the last existing row so the frozen rows stay on top.
+rows.sort((a, b) => (a < b ? 1 : -1))
 if (rows.length > 0 && !dryRun) {
   const lines = indexText.replace(/\s*$/, '').split('\n')
-  // Newest-first: insert after the last existing data row, keeping 11-23/11-22 on top.
   const lastRow = lines.findLastIndex((line) => line.startsWith('| 20'))
   lines.splice(lastRow + 1, 0, ...rows)
   writeFileSync(indexPath, `${lines.join('\n')}\n`)
 }
 
+// Both directions must hold: every day file has a row, every row has a file.
+const dayFiles = [...byDate.keys()]
+const missingRows = dayFiles.filter(
+  (date) => !knownDates.has(date) && !rows.some((row) => row.includes(`| ${date} |`)),
+)
+const indexDates = [
+  ...knownDates,
+  ...rows.map((row) => row.match(/^\| (\d{4}-\d{2}-\d{2}) \|/)?.[1]),
+]
+const missingFiles = indexDates.filter((date) => date && !existsSync(join(MEMORY, `${date}.md`)))
+if (missingRows.length > 0) console.log(`WARN rows missing after write: ${missingRows.join(', ')}`)
+if (missingFiles.length > 0)
+  console.log(`WARN index rows without a file: ${missingFiles.join(', ')}`)
+
 console.log(
-  `${dryRun ? '[dry-run] ' : ''}commits=${commits.length} days=${added.length} indexRows=${rows.length}`,
+  `${dryRun ? '[dry-run] ' : ''}commits=${commits.length} days=${added.length} indexRows=${rows.length} indexTotal=${knownDates.size + rows.length}`,
 )
 for (const day of added) console.log(`  ${day.date}: +${day.entries}`)
