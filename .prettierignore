@@ -19,3 +19,8 @@ package-lock.json
 # The change log index is a frozen table: prettier re-aligns every row when one
 # cell grows, which rewrites historical rows that must stay byte-identical.
 memory/index.md
+
+# Runner runtime output: gitignored, so CI never sees it — checking it locally
+# makes "local red, CI green" and teaches people to ignore a red gate.
+server/data
+server/workflows.json
