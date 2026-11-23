@@ -41,6 +41,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "memory:log": "node scripts/memory-log.mjs",
     "verify:injected": "node scripts/verify-injected-functions.mjs",
     "bench:debug": "node scripts/bench-debug.mjs",
     "server:start": "pnpm --filter browser-copilot-runner start",
