@@ -94,6 +94,7 @@ import {
   type GroupPackFailure,
   type WorkflowGroupChild,
 } from '../lib/workflow/group'
+import { blockEntryOf, canvasFieldsOf } from '../lib/workflow/node-shape'
 import { withCurrentLayout } from '../lib/workflow/workflow-versions'
 import { edgeTypes } from './flow/CustomEdge'
 import {
@@ -173,20 +174,23 @@ function flowTypeOf(block: BlockCatalogEntry | undefined, blockId: string): stri
 const nodeTypes = { ...blockNodeTypes, GroupNode }
 
 function toFlowNode(n: WorkflowNode): FlowNode {
-  const blockId = (n.data.blockId as string) ?? n.label
+  // The ORIGINAL id and label ride along in the node's data: a block this build
+  // cannot resolve must survive a save (see lib/workflow/node-shape), and a
+  // stripped `blockId` used to make the next save write `unknown`.
+  const fields = canvasFieldsOf(n)
   // Fall back to the FULL catalog (cloud blocks included): a miss here makes
   // BlockNode render `null` (an invisible node with no handles, silently
-  // dropping its edges) and buildWorkflow then persists `blockId: "unknown"`,
-  // corrupting the workflow on the next save.
-  const block = BLOCK_BY_ID.get(blockId) ?? CATALOG_BY_ID.get(blockId)
-  const { blockId: _, ...blockData } = n.data as Record<string, unknown>
+  // dropping its edges).
+  const block = blockEntryOf(fields.blockId) ?? CATALOG_BY_ID.get(fields.blockId)
   return {
     id: n.id,
-    type: flowTypeOf(block, blockId),
+    type: flowTypeOf(block, fields.blockId),
     position: n.position,
     data: {
       block: block as BlockCatalogEntry,
-      blockData: blockData as Record<string, unknown>,
+      blockId: fields.blockId,
+      label: fields.label,
+      blockData: fields.blockData,
     },
   }
 }
@@ -205,20 +209,19 @@ function newFlowNode(block: BlockCatalogEntry, position: { x: number; y: number 
 
 /** A canvas node in the shape the workflow file (and the run gate) uses. */
 function toWorkflowNode(n: FlowNode): WorkflowNode {
+  const entry = n.data.block
+  const blockId = n.data.blockId ?? entry?.id ?? 'unknown'
+  const label = entry?.name ?? n.data.label ?? blockId
   return {
     id: n.id,
-    label: n.data.block?.name ?? n.id,
+    label,
     position: n.position,
     // A block this build cannot resolve must keep its ORIGINAL id: rewriting it
     // to `unknown` silently mangles the graph on save (and the next load shows a
     // different operator than the one the user placed).
     data: {
       ...n.data.blockData,
-      blockId:
-        n.data.block?.id ??
-        (typeof n.data.blockData['blockId'] === 'string'
-          ? String(n.data.blockData['blockId'])
-          : 'unknown'),
+      blockId: n.data.blockId ?? n.data.block?.id ?? 'unknown',
     },
   }
 }

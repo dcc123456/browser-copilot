@@ -53,6 +53,14 @@ export interface BlockNodeData extends Record<string, unknown> {
   block: BlockCatalogEntry
   /** The block's `data` payload (selector, url, description, ...). */
   blockData: Record<string, unknown>
+  /**
+   * The block id exactly as the workflow file had it. Kept on the node because a
+   * block this build cannot resolve must not be rewritten to `unknown` on save —
+   * `blockData` has the id stripped, so it cannot answer that question.
+   */
+  blockId?: string
+  /** The file's label, used when the block id is unknown here. */
+  label?: string
   /** True when a run is currently executing this node. */
   running?: boolean
   /** Outcome from the last run, for the node border tint. */
