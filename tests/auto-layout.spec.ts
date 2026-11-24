@@ -65,7 +65,7 @@ describe('autoLayout', () => {
     expect(pos.get('c')!.x).toBeGreaterThan(pos.get('b')!.x)
   })
 
-  it('wraps a long chain into stepped rows that keep growing rightward', () => {
+  it('wraps a long chain into compact left-aligned rows', () => {
     const nodes = Array.from({ length: 6 }, (_, i) => ({ id: `n${i}` }))
     const edges = Array.from({ length: 5 }, (_, i) => ({
       source: `n${i}`,
@@ -74,15 +74,35 @@ describe('autoLayout', () => {
     // Default columns are 200 wide + 70 gap → three columns fill 740; the
     // fourth wraps, so this lays out as two rows of three.
     const pos = autoLayout(nodes, edges, { maxRowWidth: 740 })
-    // Every step goes right — including the one into the next row. Restarting a
-    // row at the left edge drew that connector backwards, which reads as a
-    // mis-wired graph.
-    for (let i = 0; i < 5; i++) {
-      expect(pos.get(`n${i + 1}`)!.x).toBeGreaterThan(pos.get(`n${i}`)!.x)
-    }
-    // Row 1 sits below row 0 and starts to the RIGHT of where row 0 ended.
+    expect(pos.get('n0')!.x).toBeLessThan(pos.get('n1')!.x)
+    expect(pos.get('n1')!.x).toBeLessThan(pos.get('n2')!.x)
+    expect(pos.get('n3')!.x).toBeLessThan(pos.get('n4')!.x)
+    expect(pos.get('n4')!.x).toBeLessThan(pos.get('n5')!.x)
+    // The next row sits below and starts at the same left edge. Continuing it
+    // to the right made the whole graph a long diagonal with unreadable text.
     expect(pos.get('n3')!.y).toBeGreaterThan(pos.get('n0')!.y)
-    expect(pos.get('n3')!.x).toBeGreaterThan(pos.get('n2')!.x)
+    expect(pos.get('n3')!.x).toBe(pos.get('n0')!.x)
+    expect(pos.get('n2')!.x).toBe(pos.get('n5')!.x)
+  })
+
+  it('keeps a typical branching graph on one horizontal axis while it is readable', () => {
+    const nodes = ['start', 'open', 'condition', 'a', 'b', 'merge'].map((id) => ({ id }))
+    const edges = [
+      { source: 'start', target: 'open' },
+      { source: 'open', target: 'condition' },
+      { source: 'condition', target: 'a' },
+      { source: 'condition', target: 'b' },
+      { source: 'a', target: 'merge' },
+      { source: 'b', target: 'merge' },
+    ]
+    const pos = autoLayout(nodes, edges, { maxRowWidth: 1032 })
+    // Five ranks: 1280px. It exceeds the preferred row width slightly, but
+    // fit-view can still show it at a readable scale, so there is no wrap.
+    // One main axis plus the two branch rows.
+    expect(new Set([...pos.values()].map((point) => point.y)).size).toBe(3)
+    expect(pos.get('merge')!.y).toBe(pos.get('start')!.y)
+    expect(pos.get('a')!.x).toBe(pos.get('b')!.x)
+    expect(pos.get('merge')!.x).toBeGreaterThan(pos.get('a')!.x)
   })
 
   it('never splits a layer across rows and positions every node', () => {
@@ -97,6 +117,29 @@ describe('autoLayout', () => {
     const pos = autoLayout(nodes, edges, { maxRowWidth: 300 })
     for (const n of nodes) expect(pos.get(n.id)).toBeDefined()
     expect(pos.get('b')!.x).toBe(pos.get('c')!.x)
+  })
+
+  it('keeps an 18-step chain readable after the real viewport fit calculation', () => {
+    const nodes = Array.from({ length: 18 }, (_, i) => ({ id: `n${i}` }))
+    const edges = Array.from({ length: 17 }, (_, i) => ({
+      source: `n${i}`,
+      target: `n${i + 1}`,
+    }))
+    const pos = autoLayout(nodes, edges, { maxRowWidth: 1032 })
+    const points = [...pos.values()]
+    const minX = Math.min(...points.map((point) => point.x))
+    const minY = Math.min(...points.map((point) => point.y))
+    const maxX = Math.max(...points.map((point) => point.x + 200))
+    const maxY = Math.max(...points.map((point) => point.y + 64))
+    const fit = viewportForBounds(
+      { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+      { width: 1440, height: 900 },
+      360,
+      48,
+    )
+    expect(fit.zoom * 13).toBeGreaterThanOrEqual(9)
+    expect(fit.zoom * 200).toBeGreaterThanOrEqual(110)
+    expect(new Set(points.map((point) => point.y)).size).toBeGreaterThan(1)
   })
 })
 

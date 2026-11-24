@@ -1433,9 +1433,9 @@ export default function EditorApp() {
   }, [recording, nodes, edges, pushHistory, reactFlow, toast, t])
 
   const handleAutoLayout = useCallback(() => {
-    // Pack Z-shaped rows to the canvas width the LEFT SIDEBAR leaves visible:
-    // the panel is an absolute overlay, so using the raw `.react-flow` width
-    // pushed the first column underneath it.
+    // Size rows for the canvas the LEFT SIDEBAR leaves visible: the panel is an
+    // absolute overlay, so using the raw `.react-flow` width would push the
+    // first column underneath it. Long graphs wrap; readable small ones do not.
     const rect = document.querySelector('.react-flow')?.getBoundingClientRect()
     const leftInset = paletteOpen ? paletteWidth : 0
     const maxRowWidth =

@@ -151,7 +151,7 @@ describe('auto-layout edge cases', () => {
   })
 })
 
-/** Every forward edge must point right: a leftward line reads as "I wired it wrong". */
+/** Forward edges that turn back because their target is on a wrapped row. */
 function backwardForwardEdges(
   placed: Map<string, LayoutPoint>,
   edges: readonly LayoutInputEdge[],
@@ -180,15 +180,14 @@ function overlappingPairs(
   return pairs
 }
 
-describe('stepped wrapping (beautify must never draw a forward edge leftwards)', () => {
-  // A chain longer than one row, so the layout has to wrap.
+describe('readable overview wrapping', () => {
   const chain: LayoutInputEdge[] = Array.from({ length: 9 }, (_, i) => ({
     source: `n${i}`,
     target: `n${i + 1}`,
   }))
   const chainIds = Array.from({ length: 10 }, (_, i) => `n${i}`)
 
-  it('keeps every forward edge pointing right across the wrap', () => {
+  it('starts each row at the left instead of growing into a diagonal', () => {
     const placed = autoLayout(
       chainIds.map((id) => ({ id })),
       chain,
@@ -196,10 +195,13 @@ describe('stepped wrapping (beautify must never draw a forward edge leftwards)',
     )
     const rows = new Set([...placed.values()].map((p) => Math.round(p.y)))
     const columns = new Set([...placed.values()].map((p) => Math.round(p.x)))
-    // The wrapping actually happened (several rows), yet the columns keep growing.
     expect(rows.size).toBeGreaterThan(1)
-    expect(columns.size).toBe(chainIds.length)
-    expect(backwardForwardEdges(placed, chain, [])).toEqual([])
+    expect(columns.size).toBe(2)
+    expect(placed.get('n2')!.x).toBe(placed.get('n0')!.x)
+    expect(placed.get('n4')!.x).toBe(placed.get('n0')!.x)
+    // A wrap connector may turn back into the adjacent row; that is the accepted
+    // trade for keeping the whole flow on screen at a readable scale.
+    expect(backwardForwardEdges(placed, chain, []).length).toBeGreaterThan(0)
   })
 
   it('keeps the wrapped rows free of overlaps', () => {
@@ -209,6 +211,28 @@ describe('stepped wrapping (beautify must never draw a forward edge leftwards)',
       { maxRowWidth: 500 },
     )
     expect(overlappingPairs(placed)).toEqual([])
+  })
+
+  it('never turns a forward edge back across more than one row', () => {
+    // n2 → n6 skips four ranks. With three ranks per row it would go from the
+    // right end of row 0 to the left edge of row 2 — exactly the long sweep the
+    // product rule forbids. Ordinary adjacent-row wrap lines are still allowed.
+    const edges = [...chain, { source: 'n2', target: 'n6' }]
+    const placed = autoLayout(
+      chainIds.map((id) => ({ id })),
+      edges,
+      { maxRowWidth: 740 },
+    )
+    const rowValues = [...new Set([...placed.values()].map((point) => point.y))].sort(
+      (a, b) => a - b,
+    )
+    const rowOf = (id: string): number => rowValues.indexOf(placed.get(id)!.y)
+    expect(rowOf('n6') - rowOf('n2')).toBeGreaterThan(1)
+    expect(placed.get('n6')!.x).toBeGreaterThan(placed.get('n2')!.x)
+    for (const edge of backwardForwardEdges(placed, edges, [])) {
+      const [source, target] = edge.split('->')
+      expect(rowOf(target!) - rowOf(source!)).toBeLessThanOrEqual(1)
+    }
   })
 })
 

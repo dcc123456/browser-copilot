@@ -1,24 +1,17 @@
 /**
  * One-click graph beautify — a dependency-free layered (Sugiyama-style)
- * auto-layout for the workflow canvas with Z-shaped row wrapping.
+ * auto-layout for the workflow canvas.
  *
- * Steps: assign each node a layer (longest-path rank from the roots, so a node
- * sits to the right of every predecessor), order nodes within a layer by
- * barycenter sweeps to reduce edge crossings, then pack whole layers into rows
- * no wider than `maxRowWidth` (the editor passes the live canvas width).
+ * Each rank is a vertical column and ranks advance left→right. A typical graph
+ * stays on one horizontal axis; a graph too wide to read is split into
+ * left-aligned rows so fit-view can show the whole flow without shrinking the
+ * cards to illegibility. Wrap connectors may turn back between ADJACENT rows,
+ * but never sweep back across several rows.
  *
- * Rows read like lines of text: every row flows left→right, and when one row
- * can't fit the remaining layers the layout wraps to the next row below — the
- * connector from a row's last node back to the next row's first node draws the
- * "Z" through the inter-row gap. After the editor's fit-view the whole graph
- * stays inside the viewport at a readable zoom.
- *
- * Because rows never reverse, nodes keep the standard orientation (input on
- * the left, outputs on the right). Edges that would close a cycle — a fallback
- * that retries an earlier block, a loop that runs back to its head — are
- * EXCLUDED from layer assignment; treating them as "next layer" makes the rank
- * order meaningless and drops nodes to the left of their own predecessors.
- * Disconnected nodes are handled gracefully.
+ * Edges that would close a cycle — a fallback that retries an earlier block, a
+ * loop that runs back to its head — are EXCLUDED from layer assignment. They
+ * still render, but they do not decide where cards belong. Ordering is derived
+ * from stable node ids, never from the stored array order.
  *
  * @module workflow-editor/auto-layout
  */
@@ -53,7 +46,7 @@ export interface AutoLayoutOptions {
   hGap?: number
   /** Vertical gap between nodes in the same layer (px). */
   vGap?: number
-  /** Maximum width of one Z-row before the layout wraps (px). */
+  /** Preferred row width; a small graph may exceed it while staying readable. */
   maxRowWidth?: number
   /** Vertical gap between rows (px). */
   rowGap?: number
@@ -301,14 +294,10 @@ export function autoLayout(
     }
   }
 
-  // --- Stepped row packing --------------------------------------------------
-  // Pack whole layers into rows no wider than `maxRowWidth` (a layer is never
-  // split — its nodes share an x column). When a row fills up, the next layers
-  // continue on the row below, STARTING TO THE RIGHT of the row just filled.
-  // Wrapping used to restart each row at x=0, which drew the first connector of
-  // a new row backwards (Z shape): users read a leftward edge as "I wired it
-  // wrong". The graph now grows rightward the whole way — wider canvas, no
-  // backwards arrows.
+  // --- Readable row packing -------------------------------------------------
+  // A layer is never split: its nodes share an x column. Small graphs keep one
+  // horizontal axis. Long graphs use several compact rows instead of the old
+  // right-and-down staircase, which made fit-view text unreadably small.
   const layerW = (l: number): number =>
     Math.max(...layers.get(l)!.map((id) => dims.get(id)!.w), nodeWidth)
   const layerH = (l: number): number => {
@@ -325,11 +314,20 @@ export function autoLayout(
   }
 
   const maxWidth = Math.max(maxRowWidth, nodeWidth + hGap)
+  const unwrappedWidth = layerKeys.reduce(
+    (width, layerKey, index) => width + layerW(layerKey) + (index > 0 ? hGap : 0),
+    0,
+  )
+  // Fit-view still has to leave the 13px node title readable. The slight
+  // overflow allowed here is what keeps a typical graph on one horizontal axis.
+  const MIN_READABLE_OVERVIEW_ZOOM = 0.8
+  const rowWidthLimit =
+    unwrappedWidth <= maxWidth / MIN_READABLE_OVERVIEW_ZOOM ? unwrappedWidth : maxWidth
   const rows: Row[] = []
   let current: Row = { layers: [], width: 0, height: 0 }
   for (const l of layerKeys) {
     const lw = layerW(l)
-    if (current.layers.length > 0 && current.width + hGap + lw > maxWidth) {
+    if (current.layers.length > 0 && current.width + hGap + lw > rowWidthLimit) {
       rows.push(current)
       current = { layers: [], width: 0, height: 0 }
     }
@@ -340,17 +338,42 @@ export function autoLayout(
   if (current.layers.length > 0) rows.push(current)
 
   // --- Position assignment --------------------------------------------------
-  // Rows stack top→bottom with `rowGap` between them, and each row continues
-  // where the previous one ended: x only ever grows, so every forward edge
-  // points right. Nodes keep the standard left-input / right-output orientation.
-  const totalHeight = rows.reduce((sum, r) => sum + r.height, 0) + rowGap * (rows.length - 1)
+  const rowOfLayer = new Map<number, number>()
+  const layerOffsets = rows.map((row, rowIndex) => {
+    const offsets = new Map<number, number>()
+    let x = 0
+    for (const layerKey of row.layers) {
+      rowOfLayer.set(layerKey, rowIndex)
+      offsets.set(layerKey, x)
+      x += layerW(layerKey) + hGap
+    }
+    return offsets
+  })
+  const rowStarts = rows.map(() => 0)
 
+  // Ordinary wrap connectors turn back only into the next row. A forward jump
+  // over several rows must not also shoot all the way back to the left edge:
+  // shift just its destination row enough to keep that edge local/readable.
+  // Rows without such a jump stay left-aligned; this is not the old staircase.
+  for (let targetRow = 1; targetRow < rows.length; targetRow++) {
+    for (const edge of forwardEdges) {
+      if (!dims.has(edge.source) || !dims.has(edge.target)) continue
+      const sourceLayer = layer.get(edge.source)!
+      const targetLayer = layer.get(edge.target)!
+      const sourceRow = rowOfLayer.get(sourceLayer)!
+      if (rowOfLayer.get(targetLayer) !== targetRow || targetRow - sourceRow <= 1) continue
+      const sourceX = rowStarts[sourceRow]! + layerOffsets[sourceRow]!.get(sourceLayer)!
+      const targetOffset = layerOffsets[targetRow]!.get(targetLayer)!
+      const requiredStart = sourceX + dims.get(edge.source)!.w + hGap - targetOffset
+      rowStarts[targetRow] = Math.max(rowStarts[targetRow]!, requiredStart)
+    }
+  }
+
+  const totalHeight = rows.reduce((sum, r) => sum + r.height, 0) + rowGap * (rows.length - 1)
   const positions = new Map<string, LayoutPoint>()
-  // Center the whole block on the canvas origin (fit-view re-centers anyway).
   let rowTop = -totalHeight / 2
-  let rowStartX = 0
-  for (const row of rows) {
-    let cursor = rowStartX
+  for (const [rowIndex, row] of rows.entries()) {
+    let cursor = rowStarts[rowIndex]!
     for (const l of row.layers) {
       const arr = layers.get(l)!
       const colY = rowTop + (row.height - layerH(l)) / 2
@@ -361,8 +384,6 @@ export function autoLayout(
       }
       cursor += layerW(l) + hGap
     }
-    // `cursor` already carries the trailing gap; the next row starts there.
-    rowStartX = cursor
     rowTop += row.height + rowGap
   }
 
