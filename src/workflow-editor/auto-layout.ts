@@ -80,8 +80,16 @@ export interface AutoLayoutOptions {
 const DEFAULTS = {
   nodeWidth: 200,
   nodeHeight: 64,
-  hGap: 20,
-  vGap: 36,
+  /**
+   * Gaps are in CANVAS units, while what the user sees is gap × fit zoom. 40 was
+   * chosen so the on-screen gap clears 28px on the graphs people complained
+   * about; the earlier 20 (a regression from 70 when atomic branch groups landed)
+   * showed up as 14px on the typical graph and read as "the cards are cramped".
+   * Raising it trades against the fit zoom: a wider graph zooms out, so the
+   * readable node count drops — that tradeoff is recorded in the layout spec.
+   */
+  hGap: 40,
+  vGap: 40,
   maxRowWidth: 1600,
   rowGap: 90,
 }

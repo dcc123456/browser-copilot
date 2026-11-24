@@ -138,13 +138,26 @@ describe('autoLayout', () => {
       expect(placed.get('t7')!.x).toBeGreaterThan(placed.get('t5')!.x)
     })
 
-    it('keeps the whole typical graph on one axis at the real viewport width', () => {
-      const placed = autoLayout(branchNodes, branchEdges, { maxRowWidth: 1032 })
-      expect(placed.get('t1')!.y).toBe(placed.get('t4')!.y)
+    it('keeps the branch group intact when the wider gaps force a re-pack', () => {
+      // 40px gaps no longer fit this graph on one axis at the real viewport
+      // width, so it wraps; the semantic unit must survive that (approved A).
+      const reported: LayoutPackingInfo[] = []
+      const placed = autoLayout(branchNodes, branchEdges, {
+        maxRowWidth: 1032,
+        maxRowHeight: 804,
+        onPacking: (info) => reported.push(info),
+      })
+      expect(reported[0]!.rows).toBeGreaterThan(1)
+      // The branch unit survives the wrap: condition and merge share its axis,
+      // the alternatives share their own column, and the merge stays to their
+      // right. The node AFTER the unit may start a new row — that is the accepted
+      // cost of wider gaps.
       expect(placed.get('t7')!.y).toBe(placed.get('t4')!.y)
-      expect(placed.get('t8')!.y).toBe(placed.get('t4')!.y)
-      expect(placed.get('t8')!.x).toBeGreaterThan(placed.get('t7')!.x)
       expect(placed.get('t5')!.x).toBe(placed.get('t6')!.x)
+      expect(placed.get('t5')!.x).toBeGreaterThan(placed.get('t4')!.x)
+      expect(placed.get('t7')!.x).toBeGreaterThan(placed.get('t5')!.x)
+      expect(placed.get('t8')!.y).toBeGreaterThanOrEqual(placed.get('t4')!.y)
+      expect([...placed.keys()]).toHaveLength(branchNodes.length)
     })
 
     it('keeps the atomic layout deterministic when node order is reversed', () => {
