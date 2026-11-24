@@ -152,6 +152,54 @@ describe('autoLayout', () => {
     })
   })
 
+  it('keeps an approved small graph exactly as laid out and reports no re-pack', () => {
+    const nodes = ['start', 'open', 'condition', 'a', 'b', 'merge'].map((id) => ({ id }))
+    const edges = [
+      { source: 'start', target: 'open' },
+      { source: 'open', target: 'condition' },
+      { source: 'condition', target: 'a' },
+      { source: 'condition', target: 'b' },
+      { source: 'a', target: 'merge' },
+      { source: 'b', target: 'merge' },
+    ]
+    const reported: { columnsPerRow: number; rows: number; fitZoom: number; repacked: boolean }[] =
+      []
+    const baseline = autoLayout(nodes, edges, { maxRowWidth: 1032 })
+    const withReport = autoLayout(nodes, edges, {
+      maxRowWidth: 1032,
+      maxRowHeight: 804,
+      onPacking: (info) => reported.push(info),
+    })
+    // Readable graph: the search must not touch the approved shape.
+    expect([...withReport]).toEqual([...baseline])
+    expect(reported).toHaveLength(1)
+    expect(reported[0]!.repacked).toBe(false)
+    expect(reported[0]!.rows).toBe(1)
+  })
+
+  it('re-packs a graph that would read too small and reports the chosen columns', () => {
+    const nodes = Array.from({ length: 60 }, (_, i) => ({ id: `n${i}`, width: 180, height: 52 }))
+    const edges = Array.from({ length: 59 }, (_, i) => ({
+      source: `n${i}`,
+      target: `n${i + 1}`,
+    }))
+    const reported: { columnsPerRow: number; rows: number; fitZoom: number; repacked: boolean }[] =
+      []
+    const placed = autoLayout(nodes, edges, {
+      maxRowWidth: 1032,
+      maxRowHeight: 804,
+      onPacking: (info) => reported.push(info),
+    })
+    const packing = reported[0]!
+    // The whole reason for the search: filling the width would be too tall to read.
+    expect(packing.repacked).toBe(true)
+    expect(packing.fitZoom).toBeGreaterThan(0.55)
+    expect(packing.columnsPerRow).toBeGreaterThan(5)
+    expect(packing.rows).toBeGreaterThan(1)
+    // Still one card per layer position: nothing overlaps in the same column.
+    expect([...placed.keys()]).toHaveLength(60)
+  })
+
   it('never splits a layer across rows and positions every node', () => {
     const nodes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]
     const edges = [

@@ -1455,7 +1455,15 @@ export default function EditorApp() {
           target: e.target,
           sourceHandle: e.sourceHandle,
         })),
-        maxRowWidth ? { maxRowWidth } : undefined,
+        maxRowWidth
+          ? {
+              maxRowWidth,
+              ...(rect ? { maxRowHeight: rect.height - 96 } : {}),
+              // Observable so a changed layout strategy can be told apart from a
+              // lucky fit (columns per row / rows / fit zoom / repacked).
+              onPacking: (packing) => console.debug('[auto-layout]', packing),
+            }
+          : undefined,
       )
       return nds.map((n) => {
         const p = positions.get(n.id)

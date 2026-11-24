@@ -39,6 +39,21 @@ export interface LayoutPoint {
   y: number
 }
 
+/** What the packing search settled on (see `onPacking`). */
+export interface LayoutPackingInfo {
+  /** Columns per row in the chosen packing. */
+  columnsPerRow: number
+  /** Rows the graph was split into. */
+  rows: number
+  /** Estimated fit-view zoom for the chosen packing. */
+  fitZoom: number
+  /**
+   * True when the approved "fill the width" packing was replaced because it read
+   * below the legibility floor. A false value means the graph kept its usual shape.
+   */
+  repacked: boolean
+}
+
 export interface AutoLayoutOptions {
   /** Fallback node size when the node hasn't been measured yet. */
   nodeWidth?: number
@@ -51,6 +66,14 @@ export interface AutoLayoutOptions {
   maxRowWidth?: number
   /** Vertical gap between rows (px). */
   rowGap?: number
+  /** Visible viewport height; the packing search uses it to estimate fit zoom. */
+  maxRowHeight?: number
+  /**
+   * Reports the packing that was actually used. The chosen column count is a
+   * layout decision, so it must be observable: otherwise nobody can tell a
+   * strategy change from a lucky fit.
+   */
+  onPacking?: (info: LayoutPackingInfo) => void
 }
 
 const DEFAULTS = {
@@ -203,7 +226,10 @@ export function autoLayout(
   edges: readonly LayoutInputEdge[],
   opts: AutoLayoutOptions = {},
 ): Map<string, LayoutPoint> {
-  const { nodeWidth, nodeHeight, hGap, vGap, maxRowWidth, rowGap } = { ...DEFAULTS, ...opts }
+  const { nodeWidth, nodeHeight, hGap, vGap, maxRowWidth, rowGap, maxRowHeight, onPacking } = {
+    ...DEFAULTS,
+    ...opts,
+  }
   const dims = new Map<string, { w: number; h: number }>()
   for (const n of nodes) {
     const w = n.measured?.width ?? n.width ?? nodeWidth
@@ -378,25 +404,73 @@ export function autoLayout(
   }
 
   const maxWidth = Math.max(maxRowWidth, nodeWidth + hGap)
+  const packRows = (rowWidthLimit: number): Row[] => {
+    const packed: Row[] = []
+    let current: Row = { units: [], width: 0, height: 0 }
+    for (const unit of units) {
+      if (current.units.length > 0 && current.width + hGap + unit.width > rowWidthLimit) {
+        packed.push(current)
+        current = { units: [], width: 0, height: 0 }
+      }
+      current.units.push(unit)
+      current.width = current.units.length === 1 ? unit.width : current.width + hGap + unit.width
+      current.height = Math.max(current.height, unit.height)
+    }
+    if (current.units.length > 0) packed.push(current)
+    return packed
+  }
+  const fitZoomOf = (packed: Row[]): number => {
+    const width = Math.max(...packed.map((row) => row.width))
+    const height = packed.reduce((sum, row) => sum + row.height, 0) + rowGap * (packed.length - 1)
+    return Math.min(
+      maxRowWidth / Math.max(1, width),
+      (maxRowHeight ?? maxRowWidth) / Math.max(1, height),
+    )
+  }
+
+  const MIN_READABLE_OVERVIEW_ZOOM = 0.65
   const unwrappedWidth = units.reduce(
     (width, unit, index) => width + unit.width + (index > 0 ? hGap : 0),
     0,
   )
-  const MIN_READABLE_OVERVIEW_ZOOM = 0.65
-  const rowWidthLimit =
+  const baselineLimit =
     unwrappedWidth <= maxWidth / MIN_READABLE_OVERVIEW_ZOOM ? unwrappedWidth : maxWidth
-  const rows: Row[] = []
-  let current: Row = { units: [], width: 0, height: 0 }
-  for (const unit of units) {
-    if (current.units.length > 0 && current.width + hGap + unit.width > rowWidthLimit) {
-      rows.push(current)
-      current = { units: [], width: 0, height: 0 }
+  let rows = packRows(baselineLimit)
+
+  // A fit zoom below this reads as unreadable for the 13px node title: 13 × 0.7
+  // ≈ 9.1px, the legibility floor. 0.75 was rejected because it would re-pack
+  // graphs that are already comfortable (the approved 8-node graph sits at 0.71)
+  // and change shapes nobody complained about.
+  const READABLE_TARGET_ZOOM = 0.7
+  const baselineZoom = fitZoomOf(rows)
+  let repacked = false
+  if (baselineZoom < READABLE_TARGET_ZOOM) {
+    // "Fill the width, then wrap" is not the same as "biggest readable overview":
+    // a 50-node graph filled to every column grows so tall that fit-view shrinks
+    // the text below legibility. Try every achievable column count — a branch unit
+    // spans several columns and is never split, so the search starts at its span.
+    const widestUnitColumns = Math.max(...units.map((unit) => unit.endIndex - unit.startIndex + 1))
+    let bestZoom = baselineZoom
+    for (let columns = widestUnitColumns; columns <= layerKeys.length; columns++) {
+      const packed = packRows(columns * (nodeWidth + hGap))
+      const zoom = fitZoomOf(packed)
+      if (zoom > bestZoom + 1e-6) {
+        bestZoom = zoom
+        rows = packed
+        repacked = true
+      }
     }
-    current.units.push(unit)
-    current.width = current.units.length === 1 ? unit.width : current.width + hGap + unit.width
-    current.height = Math.max(current.height, unit.height)
   }
-  if (current.units.length > 0) rows.push(current)
+  onPacking?.({
+    columnsPerRow: Math.max(
+      ...rows.map((row) =>
+        row.units.reduce((span, unit) => span + unit.endIndex - unit.startIndex + 1, 0),
+      ),
+    ),
+    rows: rows.length,
+    fitZoom: Number(fitZoomOf(rows).toFixed(3)),
+    repacked,
+  })
 
   // --- Position assignment --------------------------------------------------
   // Units stay intact. Inside a branch unit the condition is on the left, its
