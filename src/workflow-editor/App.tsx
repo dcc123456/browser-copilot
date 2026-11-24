@@ -1460,7 +1460,8 @@ export default function EditorApp() {
               maxRowWidth,
               ...(rect ? { maxRowHeight: rect.height - 96 } : {}),
               // Observable so a changed layout strategy can be told apart from a
-              // lucky fit (columns per row / rows / fit zoom / repacked).
+              // lucky fit: columns, rows, content box, whether it re-packed, and
+              // which gap tier was used.
               onPacking: (packing) => console.debug('[auto-layout]', packing),
             }
           : undefined,

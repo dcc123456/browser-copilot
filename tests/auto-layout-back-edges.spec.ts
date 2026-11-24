@@ -187,18 +187,24 @@ describe('readable overview wrapping', () => {
   }))
   const chainIds = Array.from({ length: 10 }, (_, i) => `n${i}`)
 
-  it('starts each row at the left instead of growing into a diagonal', () => {
+  it('starts every row at the left and never emits a one- or two-column fragment', () => {
     const placed = autoLayout(
       chainIds.map((id) => ({ id })),
       chain,
       { maxRowWidth: 500 },
     )
-    const rows = new Set([...placed.values()].map((p) => Math.round(p.y)))
-    const columns = new Set([...placed.values()].map((p) => Math.round(p.x)))
+    // Group cards into rows by y, then check each row's shape.
+    const rows = new Map<number, number[]>()
+    for (const point of placed.values()) {
+      const key = Math.round(point.y)
+      rows.set(key, [...(rows.get(key) ?? []), point.x])
+    }
     expect(rows.size).toBeGreaterThan(1)
-    expect(columns.size).toBe(2)
-    expect(placed.get('n2')!.x).toBe(placed.get('n0')!.x)
-    expect(placed.get('n4')!.x).toBe(placed.get('n0')!.x)
+    for (const xs of rows.values()) {
+      expect(Math.min(...xs)).toBe(0)
+      // A fragment row reads as a detour rather than a flow.
+      expect(xs.length).toBeGreaterThanOrEqual(3)
+    }
     // A wrap connector may turn back into the adjacent row; that is the accepted
     // trade for keeping the whole flow on screen at a readable scale.
     expect(backwardForwardEdges(placed, chain, []).length).toBeGreaterThan(0)

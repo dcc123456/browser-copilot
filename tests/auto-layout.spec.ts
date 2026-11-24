@@ -148,6 +148,8 @@ describe('autoLayout', () => {
         onPacking: (info) => reported.push(info),
       })
       expect(reported[0]!.rows).toBeGreaterThan(1)
+      // No fragment rows: every row keeps at least three columns.
+      for (const columns of reported[0]!.rowsColumns) expect(columns).toBeGreaterThanOrEqual(3)
       // The branch unit survives the wrap: condition and merge share its axis,
       // the alternatives share their own column, and the merge stays to their
       // right. The node AFTER the unit may start a new row — that is the accepted
@@ -214,6 +216,51 @@ describe('autoLayout', () => {
     expect(packing.contentHeight).toBeLessThan(1400)
     // Still one card per layer position: nothing overlaps in the same column.
     expect([...placed.keys()]).toHaveLength(60)
+  })
+
+  it('falls back to the compact spacing instead of shrinking a big graph', () => {
+    const nodes = Array.from({ length: 50 }, (_, i) => ({ id: `n${i}`, width: 180, height: 52 }))
+    const edges = Array.from({ length: 49 }, (_, i) => ({
+      source: `n${i}`,
+      target: `n${i + 1}`,
+    }))
+    const reported: LayoutPackingInfo[] = []
+    autoLayout(nodes, edges, {
+      maxRowWidth: 1032,
+      maxRowHeight: 804,
+      onPacking: (info) => reported.push(info),
+    })
+    // 50 nodes cannot keep the wide gaps readable, so the compact tier is used.
+    expect(reported[0]!.gapMode).toBe('compact')
+  })
+
+  it('keeps the wide spacing when the graph stays readable', () => {
+    const nodes = ['start', 'open', 'condition', 'a', 'b', 'merge'].map((id) => ({ id }))
+    const edges = [
+      { source: 'start', target: 'open' },
+      { source: 'open', target: 'condition' },
+      { source: 'condition', target: 'a' },
+      { source: 'condition', target: 'b' },
+      { source: 'a', target: 'merge' },
+      { source: 'b', target: 'merge' },
+    ]
+    const reported: LayoutPackingInfo[] = []
+    const placed = autoLayout(nodes, edges, {
+      maxRowWidth: 1032,
+      maxRowHeight: 804,
+      onPacking: (info) => reported.push(info),
+    })
+    expect(reported[0]!.gapMode).toBe('wide')
+    // Wider gaps than the compact tier, on the same semantic shape.
+    const compact = autoLayout(nodes, edges, {
+      maxRowWidth: 1032,
+      maxRowHeight: 804,
+      hGap: 20,
+      vGap: 36,
+    })
+    const gapOf = (map: Map<string, { x: number; y: number }>, a: string, b: string): number =>
+      map.get(b)!.x - map.get(a)!.x
+    expect(gapOf(placed, 'condition', 'a')).toBeGreaterThan(gapOf(compact, 'condition', 'a'))
   })
 
   it('never splits a layer across rows and positions every node', () => {
