@@ -1940,11 +1940,21 @@ async function handleCommand(
           revisionHistory: nextSave.revisionHistory,
         }
       }
-      await saveWorkflow(workflow)
+      // The STORED form (normalised settings included) is what a version must
+      // describe: fingerprinting the caller's shape produced a "ghost" version
+      // whenever the two differed by a default field.
+      const storedWorkflow = await saveWorkflow(workflow)
       // Save history: one snapshot per content change. Failure here must never
       // fail the save itself — history is a convenience, the workflow is the work.
+      let versions:
+        { saved: boolean; refused?: 'node-payload' | 'too-large'; evicted: number } | undefined
       try {
-        await saveWorkflowVersionSnapshot(workflow)
+        const versionResult = await saveWorkflowVersionSnapshot(storedWorkflow)
+        versions = {
+          saved: versionResult.saved,
+          ...(versionResult.refused ? { refused: versionResult.refused } : {}),
+          evicted: versionResult.evicted.length,
+        }
       } catch (error) {
         console.warn('[versions] snapshot skipped:', error)
       }
@@ -1962,7 +1972,7 @@ async function handleCommand(
       // later, which is where the health card and the generation card read it.
       if (command.fromGeneration && command.verifyRun)
         void recordGenerationTrial(workflow, generationScope)
-      return { type: 'workflows.save' }
+      return { type: 'workflows.save', ...(versions ? { versions } : {}) }
     }
 
     case 'workflows.delete':

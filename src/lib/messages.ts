@@ -766,7 +766,7 @@ export type CommandResult =
        * an eviction are invisible otherwise: the save succeeded, but the version
        * list did not move, and the user reads that as a broken feature.
        */
-      versions?: { saved: boolean; refused?: 'node-payload'; evicted: number }
+      versions?: { saved: boolean; refused?: 'node-payload' | 'too-large'; evicted: number }
     }
   | { type: 'workflows.delete' }
   | { type: 'workflows.versions.list'; index: WorkflowVersionIndex }

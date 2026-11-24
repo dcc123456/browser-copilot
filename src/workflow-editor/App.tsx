@@ -923,6 +923,8 @@ export default function EditorApp() {
       // a broken feature, because the user just pressed Save.
       if (saved.type === 'workflows.save' && saved.versions) {
         if (saved.versions.refused === 'node-payload') toast.show(t('versionsRefusedNote'), 'info')
+        else if (saved.versions.refused === 'too-large')
+          toast.show(t('versionsRefusedTooLarge'), 'info')
         else if (saved.versions.evicted > 0) toast.show(t('versionsEvictedNote'), 'info')
       }
       newWorkflowFolderRef.current = null
