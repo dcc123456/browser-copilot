@@ -917,7 +917,14 @@ export default function EditorApp() {
     setSaving(true)
     setError(null)
     try {
-      await sendCommand({ type: 'workflows.save', workflow: wf })
+      const saved = await sendCommand({ type: 'workflows.save', workflow: wf })
+      // The save history speaks only when something went wrong with it: a node
+      // too large to snapshot, or an eviction. Silently doing either looks like
+      // a broken feature, because the user just pressed Save.
+      if (saved.type === 'workflows.save' && saved.versions) {
+        if (saved.versions.refused === 'node-payload') toast.show(t('versionsRefusedNote'), 'info')
+        else if (saved.versions.evicted > 0) toast.show(t('versionsEvictedNote'), 'info')
+      }
       newWorkflowFolderRef.current = null
       savedSignatureRef.current = JSON.stringify({
         nodes: wf.drawflow.nodes,

@@ -138,6 +138,13 @@ describe('current version and deletion', () => {
     expect(canDeleteVersion(index, 1, 'b')).toEqual({ ok: true })
   })
 
+  it('marks nothing current when the canvas matches no version, and allows deleting any', () => {
+    // The canvas was edited after the last save, or an old version was applied:
+    // "current" is undefined, so no row is pinned and every row may go.
+    expect(currentVersionOf(index, 'edited-but-unsaved')).toBeUndefined()
+    expect(canDeleteVersion(index, 2, 'edited-but-unsaved')).toEqual({ ok: true })
+  })
+
   it('reports a missing version instead of pretending it deleted', () => {
     expect(canDeleteVersion(index, 9, 'b')).toEqual({ ok: false, reason: 'missing' })
   })

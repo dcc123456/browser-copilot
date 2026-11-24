@@ -373,7 +373,8 @@ function makeVerification(signal: AbortSignal, scopeWindowId: number | undefined
 // --- Commit -------------------------------------------------------------------
 
 export interface SaveAdapter {
-  saveWorkflow: (workflow: Workflow) => Promise<void>
+  /** Returns the form that was written; callers that only care about the write may ignore it. */
+  saveWorkflow: (workflow: Workflow) => Promise<Workflow>
   /** Re-read the formal workflow (revision conflict check). */
   getWorkflow: (id: string) => Promise<Workflow | undefined>
 }

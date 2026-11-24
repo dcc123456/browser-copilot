@@ -40,7 +40,7 @@ const start = (): Promise<unknown> =>
     runId: 'r1',
     failure: {} as never,
     save: {
-      saveWorkflow: vi.fn(async () => undefined),
+      saveWorkflow: vi.fn(async (saved: Workflow) => saved),
       getWorkflow: vi.fn(async () => undefined),
     },
     forward,

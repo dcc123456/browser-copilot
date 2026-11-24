@@ -97,6 +97,9 @@ export const EDITOR_STRINGS = {
     versionsHint:
       'One version per save that changed something. Applying an old version puts it on the canvas and adds a "rolled back from" line; delete removes only the history entry.',
     versionsLoading: 'Loading…',
+    versionsRefusedNote:
+      'Saved, but no version was created: one node holds more than 256 KB of data.',
+    versionsEvictedNote: 'Saved. Older versions were trimmed to keep the latest 20.',
     versionsEmpty: 'No versions yet — the next save with changes creates one.',
     versionsMissing: 'That snapshot is gone.',
     versionsApplied: 'Applied version',
@@ -585,6 +588,8 @@ export const EDITOR_STRINGS = {
     versionsHint:
       '每次有改动的保存生成一个版本。应用旧版本会把整张图放回画布，并新增一条「回滚自」记录；删除只删历史，不改画布。',
     versionsLoading: '加载中…',
+    versionsRefusedNote: '已保存，但没有生成版本：某个节点的数据超过 256 KB。',
+    versionsEvictedNote: '已保存。为保留最近 20 个版本，较旧的版本已被移除。',
     versionsEmpty: '还没有版本——下一次有改动的保存会生成一个。',
     versionsMissing: '那一版快照已不存在。',
     versionsApplied: '已应用版本',

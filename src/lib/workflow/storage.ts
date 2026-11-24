@@ -452,12 +452,12 @@ function coerceVersionIndex(value: unknown, workflowId: string): WorkflowVersion
 export async function saveWorkflow(
   workflow: Workflow,
   options: { touchUpdatedAt?: boolean } = {},
-): Promise<void> {
+): Promise<Workflow> {
   // Serialized per key: the read-modify-write below would otherwise race a
   // concurrent save (both read the same base list, the later write silently
   // dropped the other's workflow). All content writes run in the service
   // worker, so this one-context queue is a complete serialization.
-  await withKeyLock(KEY_WORKFLOWS, async () => {
+  return withKeyLock(KEY_WORKFLOWS, async () => {
     const list = await listWorkflows()
     const updatedAt = options.touchUpdatedAt === false ? workflow.updatedAt : Date.now()
     const normalized = asWorkflow({ ...workflow, updatedAt })
@@ -476,6 +476,9 @@ export async function saveWorkflow(
     if (index >= 0) list[index] = storable
     else list.push(storable)
     await area.set({ [KEY_WORKFLOWS]: list })
+    // Returned on purpose: the save history has to fingerprint the form that was
+    // actually written (normalised settings included), not the caller's shape.
+    return storable
   })
 }
 

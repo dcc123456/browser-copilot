@@ -759,7 +759,15 @@ export type CommandResult =
   // --- Workflows ---
   | { type: 'workflows.list'; workflows: Workflow[] }
   | { type: 'workflows.get'; workflow?: Workflow }
-  | { type: 'workflows.save' }
+  | {
+      type: 'workflows.save'
+      /**
+       * What the save history did. A refusal (a node too large to snapshot) and
+       * an eviction are invisible otherwise: the save succeeded, but the version
+       * list did not move, and the user reads that as a broken feature.
+       */
+      versions?: { saved: boolean; refused?: 'node-payload'; evicted: number }
+    }
   | { type: 'workflows.delete' }
   | { type: 'workflows.versions.list'; index: WorkflowVersionIndex }
   | { type: 'workflows.versions.read'; workflow?: Workflow }
