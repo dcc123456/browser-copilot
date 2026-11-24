@@ -187,23 +187,25 @@ describe('readable overview wrapping', () => {
   }))
   const chainIds = Array.from({ length: 10 }, (_, i) => `n${i}`)
 
-  it('starts every row at the left and never emits a one- or two-column fragment', () => {
+  it('starts every row at the left and only allows a short TAIL row on a pure chain', () => {
     const placed = autoLayout(
       chainIds.map((id) => ({ id })),
       chain,
       { maxRowWidth: 500 },
     )
-    // Group cards into rows by y, then check each row's shape.
+    // Group cards into rows by y, then check each row's shape top to bottom.
     const rows = new Map<number, number[]>()
     for (const point of placed.values()) {
       const key = Math.round(point.y)
       rows.set(key, [...(rows.get(key) ?? []), point.x])
     }
-    expect(rows.size).toBeGreaterThan(1)
-    for (const xs of rows.values()) {
+    const ordered = [...rows.entries()].sort(([a], [b]) => a - b).map(([, xs]) => xs)
+    expect(ordered.length).toBeGreaterThan(1)
+    for (const [index, xs] of ordered.entries()) {
       expect(Math.min(...xs)).toBe(0)
-      // A fragment row reads as a detour rather than a flow.
-      expect(xs.length).toBeGreaterThanOrEqual(3)
+      // A pure chain may end on a short tail row (like a paragraph's last line),
+      // but no row in the middle may be a 1-2 column fragment.
+      if (index < ordered.length - 1) expect(xs.length).toBeGreaterThanOrEqual(3)
     }
     // A wrap connector may turn back into the adjacent row; that is the accepted
     // trade for keeping the whole flow on screen at a readable scale.

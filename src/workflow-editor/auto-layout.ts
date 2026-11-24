@@ -403,6 +403,8 @@ export function autoLayout(
    * columns and are left-aligned, so the graph resumes at the left edge.
    */
   const MIN_ROW_COLUMNS_PER_ROW = 3
+  /** True when the graph has at least one condition with several paths. */
+  const hasBranchGroups = atomicRanges.length > 0
 
   // `dims` already contains the fallback for an unmeasured node. Applying
   // nodeWidth again as a minimum here widened every measured 180px card to a
@@ -473,10 +475,14 @@ export function autoLayout(
       }
       if (current.units.length > 0) packed.push(current)
       if (!keepRowsWhole) return packed
-      // A row holding one or two columns is a fragment: it reads as a staircase
-      // detour rather than a flow, and the main chain visibly folds backwards.
-      // Such a row is absorbed by its neighbour instead; rows stay left-aligned,
-      // so the graph grows rightward within a row and resumes at the left edge.
+      // A row holding one or two columns is a fragment when it lands in the middle
+      // of a flow with branch groups: the main chain visibly folds backwards.
+      // Such a row is absorbed by its neighbour; rows stay left-aligned.
+      //
+      // A pure chain is different: its LAST row is just the tail, the way a
+      // paragraph's last line may be short. Forcing it full only squeezes the
+      // node budget, so the tail is left alone.
+      const allowShortTail = !hasBranchGroups
       // Repeat until no fragment is left: merging a short row can leave the row
       // it merged into still short, so a single pass over the array is not enough.
       for (let changed = true; changed;) {
@@ -485,6 +491,7 @@ export function autoLayout(
           if (packed.length < 2 || columnsOfRow(packed[index]!) >= MIN_ROW_COLUMNS_PER_ROW) {
             continue
           }
+          if (allowShortTail && index === packed.length - 1) continue
           if (index === 0) {
             packed[0] = mergeRows(packed[0]!, packed[1]!)
             packed.splice(1, 1)

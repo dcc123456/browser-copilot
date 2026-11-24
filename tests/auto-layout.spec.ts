@@ -263,6 +263,51 @@ describe('autoLayout', () => {
     expect(gapOf(placed, 'condition', 'a')).toBeGreaterThan(gapOf(compact, 'condition', 'a'))
   })
 
+  it('keeps a branch graph free of fragment rows but lets a pure chain taper', () => {
+    const branchNodes = ['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8'].map((id) => ({
+      id,
+      width: 180,
+      height: 52,
+    }))
+    const branchEdges = [
+      { source: 't1', target: 't2' },
+      { source: 't2', target: 't3' },
+      { source: 't3', target: 't4' },
+      { source: 't4', target: 't5' },
+      { source: 't4', target: 't6' },
+      { source: 't5', target: 't7' },
+      { source: 't6', target: 't7' },
+      { source: 't7', target: 't8' },
+    ]
+    const branchReport: LayoutPackingInfo[] = []
+    autoLayout(branchNodes, branchEdges, {
+      maxRowWidth: 1032,
+      maxRowHeight: 804,
+      onPacking: (info) => branchReport.push(info),
+    })
+    // Every row of a graph WITH branch groups keeps at least three columns.
+    for (const columns of branchReport[0]!.rowsColumns) expect(columns).toBeGreaterThanOrEqual(3)
+
+    const chainNodes = Array.from({ length: 10 }, (_, i) => ({
+      id: `c${i}`,
+      width: 180,
+      height: 52,
+    }))
+    const chainEdges = Array.from({ length: 9 }, (_, i) => ({
+      source: `c${i}`,
+      target: `c${i + 1}`,
+    }))
+    const chainReport: LayoutPackingInfo[] = []
+    autoLayout(chainNodes, chainEdges, {
+      maxRowWidth: 500,
+      maxRowHeight: 804,
+      onPacking: (info) => chainReport.push(info),
+    })
+    const rows = chainReport[0]!.rowsColumns
+    // A pure chain may taper on its last row, never in the middle.
+    for (const columns of rows.slice(0, -1)) expect(columns).toBeGreaterThanOrEqual(3)
+  })
+
   it('never splits a layer across rows and positions every node', () => {
     const nodes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]
     const edges = [
