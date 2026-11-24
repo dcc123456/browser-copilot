@@ -50,6 +50,7 @@ function renderToolbar(overrides: Record<string, unknown> = {}): void {
     onOpenLogs: () => {},
     onOpenGoal: () => {},
     onOpenDataTable: () => {},
+    onOpenVersions: () => {},
     parameterCount: 0,
     onOpenParameters: () => {},
     onToggleRecording: () => {},

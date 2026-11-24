@@ -27,6 +27,7 @@ import type { FeishuConfig, ScheduledTask, TaskRunLog } from './scheduler-types'
 import type { TokenDashboard, TokenRange } from './token-ledger'
 import type { RunOutcomeKind, RunSource, RunStep, RunWindowKind } from '../background/running-tasks'
 import type { Workflow, WorkflowMarketplaceRef } from './workflow/types'
+import type { WorkflowVersionIndex } from './workflow/workflow-versions'
 import type { WorkflowGroup } from './workflow/groups'
 import type { WorkflowDebugResult } from './workflow/auto-debug-patch'
 import type { PendingTakeoverInfo } from './workflow/takeover-pending'
@@ -244,6 +245,23 @@ export type Command =
       verifyRun?: boolean
     }
   | { type: 'workflows.delete'; id: string }
+  /** The save history of one workflow (newest entry last), for the version panel. */
+  | { type: 'workflows.versions.list'; workflowId: string }
+  /** The graph an old version holds, so it can be previewed before applying. */
+  | { type: 'workflows.versions.read'; workflowId: string; version: number }
+  /**
+   * Records that the user re-applied an old version. The editor sends the graph
+   * it just put on the canvas: the entry carries its fingerprint, so the list
+   * can still tell which version the canvas matches.
+   */
+  | { type: 'workflows.versions.rollback'; workflow: Workflow; fromVersion: number }
+  /** Deletes one version; `currentFingerprint` protects the version in use. */
+  | {
+      type: 'workflows.versions.delete'
+      workflowId: string
+      version: number
+      currentFingerprint: string
+    }
   /**
    * Saves the values the workflow panel collected for its `parameter-prompt`
    * blocks. Deliberately not a `workflows.save`: the graph is unchanged, so this
@@ -743,6 +761,15 @@ export type CommandResult =
   | { type: 'workflows.get'; workflow?: Workflow }
   | { type: 'workflows.save' }
   | { type: 'workflows.delete' }
+  | { type: 'workflows.versions.list'; index: WorkflowVersionIndex }
+  | { type: 'workflows.versions.read'; workflow?: Workflow }
+  | { type: 'workflows.versions.rollback'; index: WorkflowVersionIndex }
+  | {
+      type: 'workflows.versions.delete'
+      ok: boolean
+      reason?: 'current' | 'missing'
+      index?: WorkflowVersionIndex
+    }
   | { type: 'workflows.parameterValues' }
   | { type: 'workflows.marketplace' }
   | { type: 'workflows.duplicate'; workflow?: Workflow }

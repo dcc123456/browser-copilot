@@ -28,6 +28,19 @@ import type {
   WorkflowRevisionMetadata,
   WorkflowSettings,
 } from './types'
+import {
+  appendVersion,
+  canDeleteVersion,
+  nextVersionNumber,
+  oversizedNodeOf,
+  rollbackEntryOf,
+  snapshotBytesOf,
+  workflowFingerprint,
+  type VersionRefusal,
+  type WorkflowVersionEntry,
+  type WorkflowVersionIndex,
+} from './workflow-versions'
+import { currentRevisionOf } from './workflow-revision'
 
 const KEY_WORKFLOWS = 'workflows'
 
@@ -256,6 +269,177 @@ export async function getWorkflow(id: string): Promise<Workflow | undefined> {
   return (await listWorkflows()).find((workflow) => workflow.id === id)
 }
 
+// --- Save history (spec 2026-11-24-workflow-version-history-design.md) --------
+//
+// One key per snapshot plus one small index key: a save must not rewrite every
+// version, which is exactly what a single "versions" key of several MB would do.
+
+const versionIndexKey = (workflowId: string): string => `workflow-versions:${workflowId}`
+const versionSnapshotKey = (workflowId: string, version: number): string =>
+  `workflow-versions:${workflowId}:${version}`
+
+/** Stored index, or an empty one for a workflow that has no history yet. */
+export async function loadWorkflowVersionIndex(workflowId: string): Promise<WorkflowVersionIndex> {
+  const stored = (await area.get(versionIndexKey(workflowId)))[versionIndexKey(workflowId)]
+  const index = coerceVersionIndex(stored, workflowId)
+  return index ?? { workflowId, entries: [], updatedAt: 0 }
+}
+
+/** Writes the index and one snapshot, evicting whatever the limits dropped. */
+export async function saveWorkflowVersionSnapshot(
+  workflow: Workflow,
+  options: {
+    source?: 'save' | 'rollback'
+    now?: number
+    limit?: number
+    budgetBytes?: number
+  } = {},
+): Promise<{
+  saved: boolean
+  index: WorkflowVersionIndex
+  evicted: number[]
+  refused?: VersionRefusal
+}> {
+  const oversized = oversizedNodeOf(workflow)
+  if (oversized) {
+    const index = await loadWorkflowVersionIndex(workflow.id)
+    return { saved: false, index, evicted: [], refused: 'node-payload' }
+  }
+  const bytes = snapshotBytesOf(workflow)
+  const fingerprint = workflowFingerprint(workflow)
+  return withKeyLock(versionIndexKey(workflow.id), async () => {
+    const index = await loadWorkflowVersionIndex(workflow.id)
+    const latest = index.entries[index.entries.length - 1]
+    // No change, no version — the whole point of the fingerprint.
+    if (latest && latest.fingerprint === fingerprint) {
+      return { saved: false, index, evicted: [] as number[] }
+    }
+    const entry: WorkflowVersionEntry = {
+      version: nextVersionNumber(index),
+      at: options.now ?? Date.now(),
+      source: options.source ?? 'save',
+      fingerprint,
+      revision: currentRevisionOf(workflow),
+      nodes: workflow.drawflow.nodes.length,
+      edges: workflow.drawflow.edges.length,
+      bytes,
+    }
+    const plan = appendVersion(index, entry, {
+      ...(options.limit !== undefined ? { limit: options.limit } : {}),
+      ...(options.budgetBytes !== undefined ? { budgetBytes: options.budgetBytes } : {}),
+      ...(options.now !== undefined ? { now: options.now } : {}),
+    })
+    if (plan.refused) return { saved: false, index, evicted: [], refused: plan.refused }
+    await area.set({
+      [versionSnapshotKey(workflow.id, entry.version)]: { workflow, entry },
+    })
+    await area.set({ [versionIndexKey(workflow.id)]: plan.index })
+    if (plan.evicted.length > 0) {
+      await area.remove(plan.evicted.map((version) => versionSnapshotKey(workflow.id, version)))
+    }
+    return { saved: true, index: plan.index, evicted: plan.evicted }
+  })
+}
+
+/**
+ * Records that the user re-applied an older version. The entry has NO snapshot
+ * of its own — it carries the applied content's fingerprint and the version it
+ * came from, so twenty slots are never spent on the same bytes.
+ */
+export async function recordWorkflowRollback(
+  workflow: Workflow,
+  fromVersion: number,
+  now = Date.now(),
+): Promise<WorkflowVersionIndex> {
+  const fingerprint = workflowFingerprint(workflow)
+  return withKeyLock(versionIndexKey(workflow.id), async () => {
+    const index = await loadWorkflowVersionIndex(workflow.id)
+    const entry = rollbackEntryOf(index, fromVersion, {
+      at: now,
+      revision: currentRevisionOf(workflow),
+      fingerprint,
+      nodes: workflow.drawflow.nodes.length,
+      edges: workflow.drawflow.edges.length,
+      bytes: snapshotBytesOf(workflow),
+    })
+    const plan = appendVersion(index, entry, { now })
+    await area.set({ [versionIndexKey(workflow.id)]: plan.index })
+    if (plan.evicted.length > 0) {
+      await area.remove(plan.evicted.map((version) => versionSnapshotKey(workflow.id, version)))
+    }
+    return plan.index
+  })
+}
+
+/** The graph a version holds, or undefined when its key is gone. */
+export async function readWorkflowVersionSnapshot(
+  workflowId: string,
+  version: number,
+): Promise<Workflow | undefined> {
+  const key = versionSnapshotKey(workflowId, version)
+  const stored = (await area.get(key))[key] as { workflow?: Workflow } | undefined
+  return stored?.workflow
+}
+
+/**
+ * Deletes one version's snapshot and index line. The caller supplies the
+ * canvas fingerprint so the CURRENT version can be refused: it is "where you
+ * are now", and losing it leaves the list unable to name the current state.
+ */
+export async function deleteWorkflowVersion(
+  workflowId: string,
+  version: number,
+  currentFingerprint: string,
+): Promise<
+  { ok: true; index: WorkflowVersionIndex } | { ok: false; reason: 'current' | 'missing' }
+> {
+  return withKeyLock(versionIndexKey(workflowId), async () => {
+    const index = await loadWorkflowVersionIndex(workflowId)
+    const verdict = canDeleteVersion(index, version, currentFingerprint)
+    if (!verdict.ok) return verdict
+    const next = {
+      ...index,
+      entries: index.entries.filter((entry) => entry.version !== version),
+      updatedAt: Date.now(),
+    }
+    await area.set({ [versionIndexKey(workflowId)]: next })
+    await area.remove([versionSnapshotKey(workflowId, version)])
+    return { ok: true as const, index: next }
+  })
+}
+
+/** Reads back a stored index defensively: a corrupt line must not break saving. */
+function coerceVersionIndex(value: unknown, workflowId: string): WorkflowVersionIndex | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  if (!Array.isArray(record['entries'])) return undefined
+  const entries: WorkflowVersionEntry[] = []
+  for (const raw of record['entries']) {
+    if (!raw || typeof raw !== 'object') continue
+    const entry = raw as Record<string, unknown>
+    if (typeof entry['version'] !== 'number' || !Number.isFinite(entry['version'])) continue
+    entries.push({
+      version: Math.floor(entry['version']),
+      at: typeof entry['at'] === 'number' ? entry['at'] : 0,
+      source: entry['source'] === 'rollback' ? 'rollback' : 'save',
+      fingerprint: typeof entry['fingerprint'] === 'string' ? entry['fingerprint'] : '',
+      revision: typeof entry['revision'] === 'number' ? Math.floor(entry['revision']) : 0,
+      nodes: typeof entry['nodes'] === 'number' ? entry['nodes'] : 0,
+      edges: typeof entry['edges'] === 'number' ? entry['edges'] : 0,
+      bytes: typeof entry['bytes'] === 'number' ? entry['bytes'] : 0,
+      ...(typeof entry['fromVersion'] === 'number'
+        ? { fromVersion: Math.floor(entry['fromVersion']) }
+        : {}),
+      ...(typeof entry['note'] === 'string' ? { note: entry['note'] } : {}),
+    })
+  }
+  return {
+    workflowId,
+    entries,
+    updatedAt: typeof record['updatedAt'] === 'number' ? record['updatedAt'] : 0,
+  }
+}
+
 /**
  * Writes one workflow. `updatedAt` is stamped on every save except a
  * metadata-only write (`touchUpdatedAt: false`), which must not pretend the
@@ -333,7 +517,17 @@ export async function deleteWorkflows(ids: string[]): Promise<void> {
   })
   // Outside the workflows lock: the chat keys have their own locks, so nesting
   // here would only widen the critical section without adding atomicity.
-  for (const id of ids) await deleteOperatorChatSessionsForWorkflow(id)
+  for (const id of ids) {
+    await deleteOperatorChatSessionsForWorkflow(id)
+    // The save history is workflow-scoped too: keeping it would leak storage and
+    // resurrect an old graph under a re-created workflow with the same id.
+    const index = await loadWorkflowVersionIndex(id)
+    const keys = [
+      versionIndexKey(id),
+      ...index.entries.map((entry) => versionSnapshotKey(id, entry.version)),
+    ]
+    await area.remove(keys)
+  }
 }
 
 /**

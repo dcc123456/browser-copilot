@@ -17,6 +17,7 @@ import {
   CircleStop,
   Group,
   LoaderCircle,
+  History,
   PanelLeftClose,
   PanelLeftOpen,
   Pause,
@@ -51,6 +52,7 @@ export default function TopToolbar({
   onOpenLogs,
   onOpenGoal,
   onOpenDataTable,
+  onOpenVersions,
   parameterCount,
   onOpenParameters,
   onToggleRecording,
@@ -85,6 +87,8 @@ export default function TopToolbar({
   onOpenGoal: () => void
   /** Open the data-table explanation panel. */
   onOpenDataTable: () => void
+  /** Open the workflow save history. */
+  onOpenVersions: () => void
   /** How many inputs the workflow's parameter-input blocks declare. */
   parameterCount: number
   /** Open the panel that sets those input values ahead of a run. */
@@ -139,6 +143,15 @@ export default function TopToolbar({
         >
           <Table2 size={14} />
           {t('dataTable')}
+        </button>
+        <button
+          type="button"
+          className="wf-tab inline-flex items-center gap-1.5"
+          onClick={onOpenVersions}
+          title={t('versionsTitle')}
+        >
+          <History size={14} />
+          {t('versionsTab')}
         </button>
         {/* Only meaningful once a block actually declares inputs: an always-on
             tab would open an empty editor on every ordinary workflow. */}

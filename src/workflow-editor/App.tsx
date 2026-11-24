@@ -145,6 +145,7 @@ import {
 } from './locale-context'
 import { autoLayout, viewportForBounds } from './auto-layout'
 import DataTablePanel from './ui/DataTablePanel'
+import VersionHistoryPanel from './ui/VersionHistoryPanel'
 import { dataTableUsage } from './data-table-usage'
 import './editor.css'
 
@@ -246,6 +247,7 @@ export default function EditorApp() {
   const [goalOpen, setGoalOpen] = useState(false)
   /** Whether the data-table explanation panel is open. */
   const [dataTableOpen, setDataTableOpen] = useState(false)
+  const [versionsOpen, setVersionsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [paletteWidth, setPaletteWidth] = useState(() => loadWidth('left'))
   /** Node id being edited in the LEFT overlay (Automa: double-click opens the
@@ -1688,6 +1690,43 @@ export default function EditorApp() {
     })
   }, [])
 
+  /** The canvas as a workflow record, without the viewport: what a version compares against. */
+  const versionCurrent = useMemo<Workflow>(() => {
+    const wfNodes = nodes.map(toWorkflowNode)
+    return {
+      id: workflowId ?? '',
+      name: meta.name || '',
+      description: meta.description,
+      createdAt: 0,
+      updatedAt: 0,
+      drawflow: { nodes: wfNodes, edges: edges.map(workflowEdgeOf) },
+      trigger: triggerFromNodes(wfNodes) ?? meta.trigger,
+      settings: meta.settings,
+    }
+  }, [workflowId, nodes, edges, meta])
+
+  /**
+   * Puts a stored version on the canvas as ONE undoable step, then records the
+   * rollback: without that record the list could not say the canvas is back on
+   * an older version, and Ctrl+Z would silently undo a change nobody can find.
+   */
+  const applyVersionSnapshot = useCallback(
+    async (snapshot: Workflow, fromVersion: number) => {
+      pushHistory()
+      setNodes(snapshot.drawflow.nodes.map(toFlowNode))
+      applyEdgeList(snapshot.drawflow.edges)
+      setMeta((m) => ({
+        ...m,
+        name: snapshot.name,
+        description: snapshot.description ?? '',
+        settings: snapshot.settings,
+      }))
+      setDirty(true)
+      await sendCommand({ type: 'workflows.versions.rollback', workflow: snapshot, fromVersion })
+    },
+    [applyEdgeList, pushHistory, setDirty],
+  )
+
   // Picking a credential secures its `get-secret` producer here; the pure patcher
   // decided the graph surgery, this applies it the way every other canvas edit
   // does — mutate, invalidate the certification, tell the user — and hands back
@@ -2011,6 +2050,7 @@ export default function EditorApp() {
           onOpenLogs={() => setLogsOpen(true)}
           onOpenGoal={() => setGoalOpen(true)}
           onOpenDataTable={() => setDataTableOpen(true)}
+          onOpenVersions={() => setVersionsOpen(true)}
           parameterCount={parameterInputs.length}
           onOpenParameters={() => setParametersOpen(true)}
           onToggleRecording={() => void toggleRecording()}
@@ -2228,6 +2268,15 @@ export default function EditorApp() {
           onClose={() => setDataTableOpen(false)}
           usage={tableUsage}
           onFocusNode={focusTableNode}
+        />
+        <VersionHistoryPanel
+          open={versionsOpen}
+          workflowId={workflowId ?? ''}
+          current={versionCurrent}
+          onClose={() => setVersionsOpen(false)}
+          onApply={applyVersionSnapshot}
+          toast={(text, tone) => toast.show(text, tone)}
+          t={t}
         />
         <LogsModal
           open={logsOpen}

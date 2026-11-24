@@ -226,6 +226,11 @@ import {
   deleteWorkflows,
   duplicateWorkflow,
   setWorkflowGroup,
+  saveWorkflowVersionSnapshot,
+  loadWorkflowVersionIndex,
+  readWorkflowVersionSnapshot,
+  recordWorkflowRollback,
+  deleteWorkflowVersion,
 } from '../lib/workflow/storage'
 import {
   deleteOperatorChatSession,
@@ -1936,6 +1941,13 @@ async function handleCommand(
         }
       }
       await saveWorkflow(workflow)
+      // Save history: one snapshot per content change. Failure here must never
+      // fail the save itself — history is a convenience, the workflow is the work.
+      try {
+        await saveWorkflowVersionSnapshot(workflow)
+      } catch (error) {
+        console.warn('[versions] snapshot skipped:', error)
+      }
       await rescheduleAllWorkflowTriggers()
       // A generated workflow is replayed once for real before the user ever
       // runs it — but only when the card's "verify run after save" box was
@@ -1957,6 +1969,38 @@ async function handleCommand(
       await deleteWorkflow(command.id)
       await rescheduleAllWorkflowTriggers()
       return { type: 'workflows.delete' }
+
+    case 'workflows.versions.list':
+      return {
+        type: 'workflows.versions.list',
+        index: await loadWorkflowVersionIndex(command.workflowId),
+      }
+
+    case 'workflows.versions.read':
+      return {
+        type: 'workflows.versions.read',
+        workflow: await readWorkflowVersionSnapshot(command.workflowId, command.version),
+      }
+
+    case 'workflows.versions.rollback':
+      return {
+        type: 'workflows.versions.rollback',
+        index: await recordWorkflowRollback(command.workflow, command.fromVersion),
+      }
+
+    case 'workflows.versions.delete': {
+      const result = await deleteWorkflowVersion(
+        command.workflowId,
+        command.version,
+        command.currentFingerprint,
+      )
+      return {
+        type: 'workflows.versions.delete',
+        ok: result.ok,
+        ...(result.ok ? {} : { reason: result.reason }),
+        ...(result.ok ? { index: result.index } : {}),
+      }
+    }
 
     // Editor AI assistant chat history. The dock owns the transcript; the
     // worker owns the durable copy so file-backed storage stays in one context.

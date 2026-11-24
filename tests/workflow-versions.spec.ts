@@ -1,0 +1,191 @@
+import { describe, expect, it } from 'vitest'
+import type { Workflow } from '../src/lib/workflow/types'
+import {
+  appendVersion,
+  canDeleteVersion,
+  currentVersionOf,
+  nextVersionNumber,
+  oversizedNodeOf,
+  rollbackEntryOf,
+  rollbackSourceDeleted,
+  WORKFLOW_VERSION_LIMIT,
+  workflowFingerprint,
+  type WorkflowVersionEntry,
+  type WorkflowVersionIndex,
+} from '../src/lib/workflow/workflow-versions'
+
+/**
+ * The version list is defined by what it REFUSES to treat as a change: the
+ * revision counter, the save timestamp, the viewport. Those move on every save,
+ * so a fingerprint that included them would make every save a "version" — the
+ * exact failure this layer exists to prevent.
+ */
+
+function workflow(overrides: Partial<Workflow> = {}): Workflow {
+  return {
+    id: 'wf-1',
+    name: 'Watch price',
+    description: 'watch',
+    createdAt: 1,
+    updatedAt: 1,
+    settings: {
+      saveLog: false,
+      debugMode: false,
+      notification: false,
+      reuseLastState: false,
+    } as Workflow['settings'],
+    drawflow: {
+      nodes: [
+        { id: 'a', label: 'trigger', position: { x: 0, y: 0 }, data: { blockId: 'trigger' } },
+        { id: 'b', label: 'open-url', position: { x: 0, y: 80 }, data: { blockId: 'open-url' } },
+      ],
+      edges: [{ id: 'e', source: 'a', target: 'b' }],
+    },
+    ...overrides,
+  } as Workflow
+}
+
+function entry(version: number, fingerprint: string, bytes = 100): WorkflowVersionEntry {
+  return {
+    version,
+    at: version * 1000,
+    source: 'save',
+    fingerprint,
+    revision: version,
+    nodes: 2,
+    edges: 1,
+    bytes,
+  }
+}
+
+const emptyIndex = (): WorkflowVersionIndex => ({ workflowId: 'wf-1', entries: [], updatedAt: 0 })
+
+describe('content fingerprint', () => {
+  it('ignores the fields that move on every save', () => {
+    const first = workflow()
+    const second = workflow({
+      updatedAt: 999,
+      revision: 7,
+      revisionHistory: [{ revision: 7, updatedAt: 999, source: 'manual-edit' }],
+    } as Partial<Workflow>)
+    expect(workflowFingerprint(second)).toBe(workflowFingerprint(first))
+  })
+
+  it('ignores panning and zooming the canvas', () => {
+    const first = workflow()
+    const panned = workflow()
+    panned.drawflow.position = { x: 400, y: -120 }
+    panned.drawflow.zoom = 1.7
+    expect(workflowFingerprint(panned)).toBe(workflowFingerprint(first))
+  })
+
+  it('changes when a node or an edge really changes', () => {
+    const first = workflow()
+    const edited = workflow()
+    edited.drawflow.nodes[1]!.data = { blockId: 'open-url', url: 'https://shop.test/2' }
+    expect(workflowFingerprint(edited)).not.toBe(workflowFingerprint(first))
+    const rewired = workflow()
+    rewired.drawflow.edges = []
+    expect(workflowFingerprint(rewired)).not.toBe(workflowFingerprint(first))
+  })
+})
+
+describe('append and evict', () => {
+  it('keeps at most the limit, dropping the oldest', () => {
+    let index = emptyIndex()
+    for (let version = 1; version <= 4; version += 1) {
+      index = appendVersion(index, entry(version, `fp-${version}`), { limit: 3 }).index
+    }
+    expect(index.entries.map((item) => item.version)).toEqual([2, 3, 4])
+  })
+
+  it('evicts for the byte budget too, and keeps the newest entry', () => {
+    const plan = appendVersion(
+      { ...emptyIndex(), entries: [entry(1, 'a', 900), entry(2, 'b', 900)] },
+      entry(3, 'c', 900),
+      { budgetBytes: 2000 },
+    )
+    expect(plan.index.entries.map((item) => item.version)).toEqual([2, 3])
+    expect(plan.evicted).toEqual([1])
+  })
+
+  it('refuses a single snapshot that cannot fit the budget', () => {
+    const plan = appendVersion(emptyIndex(), entry(1, 'a', 5000), { budgetBytes: 4000 })
+    expect(plan.refused).toBe('too-large')
+    expect(plan.index.entries).toEqual([])
+  })
+
+  it('keeps version numbers monotonic after eviction', () => {
+    let index = emptyIndex()
+    for (let version = 1; version <= 4; version += 1) {
+      index = appendVersion(index, entry(version, `fp-${version}`), { limit: 2 }).index
+    }
+    expect(nextVersionNumber(index)).toBe(5)
+  })
+})
+
+describe('current version and deletion', () => {
+  const index = { ...emptyIndex(), entries: [entry(1, 'a'), entry(2, 'b')] }
+
+  it('finds the newest entry that matches the canvas', () => {
+    expect(currentVersionOf(index, 'a')?.version).toBe(1)
+    expect(currentVersionOf(index, 'nope')).toBeUndefined()
+  })
+
+  it('refuses to delete the version the canvas is on', () => {
+    expect(canDeleteVersion(index, 2, 'b')).toEqual({ ok: false, reason: 'current' })
+    expect(canDeleteVersion(index, 1, 'b')).toEqual({ ok: true })
+  })
+
+  it('reports a missing version instead of pretending it deleted', () => {
+    expect(canDeleteVersion(index, 9, 'b')).toEqual({ ok: false, reason: 'missing' })
+  })
+})
+
+describe('rollback entries', () => {
+  const index = { ...emptyIndex(), entries: [entry(1, 'a'), entry(2, 'b')] }
+
+  it('records which version was re-applied, without a snapshot of its own', () => {
+    const rollback = rollbackEntryOf(index, 1, {
+      at: 5000,
+      revision: 9,
+      fingerprint: 'a',
+      nodes: 2,
+      edges: 1,
+      bytes: 120,
+    })
+    expect(rollback).toMatchObject({ version: 3, source: 'rollback', fromVersion: 1 })
+    expect(rollback.note).toContain('v1')
+  })
+
+  it('marks the trace when the source version has been deleted', () => {
+    const rollback = rollbackEntryOf(index, 1, {
+      at: 5000,
+      revision: 9,
+      fingerprint: 'a',
+      nodes: 2,
+      edges: 1,
+      bytes: 120,
+    })
+    const withRollback = { ...index, entries: [...index.entries, rollback] }
+    expect(rollbackSourceDeleted(withRollback, rollback)).toBe(false)
+    const sourceGone = {
+      ...withRollback,
+      entries: withRollback.entries.filter((e) => e.version !== 1),
+    }
+    expect(rollbackSourceDeleted(sourceGone, rollback)).toBe(true)
+  })
+})
+
+describe('payload guard', () => {
+  it('refuses a node whose data is bigger than the per-node limit', () => {
+    const heavy = workflow()
+    heavy.drawflow.nodes[1]!.data = { blockId: 'open-url', screenshot: 'x'.repeat(300 * 1024) }
+    expect(oversizedNodeOf(heavy)).toMatchObject({ nodeId: 'b' })
+    expect(oversizedNodeOf(workflow())).toBeNull()
+  })
+
+  it('keeps the published limit at 20 versions', () => {
+    expect(WORKFLOW_VERSION_LIMIT).toBe(20)
+  })
+})
