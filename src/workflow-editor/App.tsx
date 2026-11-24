@@ -1448,7 +1448,13 @@ export default function EditorApp() {
       }))
       const positions = autoLayout(
         layoutNodes,
-        edges.map((e) => ({ source: e.source, target: e.target })),
+        // The handle says whether an edge is an onError fallback, which the
+        // layout must never treat as the next step (see auto-layout).
+        edges.map((e) => ({
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle,
+        })),
         maxRowWidth ? { maxRowWidth } : undefined,
       )
       return nds.map((n) => {

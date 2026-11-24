@@ -65,7 +65,7 @@ describe('autoLayout', () => {
     expect(pos.get('c')!.x).toBeGreaterThan(pos.get('b')!.x)
   })
 
-  it('wraps a long chain into Z-shaped rows (every row reads left→right)', () => {
+  it('wraps a long chain into stepped rows that keep growing rightward', () => {
     const nodes = Array.from({ length: 6 }, (_, i) => ({ id: `n${i}` }))
     const edges = Array.from({ length: 5 }, (_, i) => ({
       source: `n${i}`,
@@ -74,17 +74,15 @@ describe('autoLayout', () => {
     // Default columns are 200 wide + 70 gap → three columns fill 740; the
     // fourth wraps, so this lays out as two rows of three.
     const pos = autoLayout(nodes, edges, { maxRowWidth: 740 })
-    // Row 0: n0 → n2 left→right.
-    expect(pos.get('n0')!.x).toBeLessThan(pos.get('n1')!.x)
-    expect(pos.get('n1')!.x).toBeLessThan(pos.get('n2')!.x)
-    // Row 1 also reads left→right (Z-shape, not serpentine).
-    expect(pos.get('n3')!.x).toBeLessThan(pos.get('n4')!.x)
-    expect(pos.get('n4')!.x).toBeLessThan(pos.get('n5')!.x)
-    // Row 1 sits below row 0 and starts at the same left edge; the connector
-    // from n2 back to n3 draws the Z's return stroke.
+    // Every step goes right — including the one into the next row. Restarting a
+    // row at the left edge drew that connector backwards, which reads as a
+    // mis-wired graph.
+    for (let i = 0; i < 5; i++) {
+      expect(pos.get(`n${i + 1}`)!.x).toBeGreaterThan(pos.get(`n${i}`)!.x)
+    }
+    // Row 1 sits below row 0 and starts to the RIGHT of where row 0 ended.
     expect(pos.get('n3')!.y).toBeGreaterThan(pos.get('n0')!.y)
-    expect(pos.get('n3')!.x).toBe(pos.get('n0')!.x)
-    expect(pos.get('n2')!.x).toBe(pos.get('n5')!.x)
+    expect(pos.get('n3')!.x).toBeGreaterThan(pos.get('n2')!.x)
   })
 
   it('never splits a layer across rows and positions every node', () => {

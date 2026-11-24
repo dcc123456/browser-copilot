@@ -14,11 +14,16 @@
  * stays inside the viewport at a readable zoom.
  *
  * Because rows never reverse, nodes keep the standard orientation (input on
- * the left, outputs on the right). Back-edges (loops) and disconnected nodes
- * are handled gracefully.
+ * the left, outputs on the right). Edges that would close a cycle — a fallback
+ * that retries an earlier block, a loop that runs back to its head — are
+ * EXCLUDED from layer assignment; treating them as "next layer" makes the rank
+ * order meaningless and drops nodes to the left of their own predecessors.
+ * Disconnected nodes are handled gracefully.
  *
  * @module workflow-editor/auto-layout
  */
+
+import { isFallbackHandle } from '../lib/workflow/graph-edges'
 
 export interface LayoutInputNode {
   id: string
@@ -29,6 +34,11 @@ export interface LayoutInputNode {
 export interface LayoutInputEdge {
   source: string
   target: string
+  /**
+   * The drawn handle the edge leaves from. A fallback port (onError) is an error
+   * path, never the next step of the flow, so it must not become a layer.
+   */
+  sourceHandle?: string | null
 }
 export interface LayoutPoint {
   x: number
@@ -58,9 +68,145 @@ const DEFAULTS = {
   rowGap: 90,
 }
 
+/**
+ * Indexes of the edges that must not become a layer.
+ *
+ * Two sources, in order of reliability:
+ * 1. The edge leaves an onError fallback port. That port is an error path by
+ *    definition, so it is excluded without guessing.
+ * 2. Anything left inside a cycle. Cycles are found as strongly connected
+ *    components; within one, every node is ranked by its distance from the
+ *    component's ENTRY (the node the flow arrives from, i.e. one with an
+ *    incoming edge from another component), and the edges pointing back up that
+ *    order are the retries. This is what makes "loop body → breakpoint → loop
+ *    head" break the return edge rather than the body's own entrance.
+ *
+ * Both rules read the graph only, never the order the nodes sit in the file, so
+ * one workflow always lays out the same way.
+ */
+function backEdgeIndexes(ids: readonly string[], edges: readonly LayoutInputEdge[]): Set<number> {
+  const back = new Set<number>()
+  const candidates: number[] = []
+  edges.forEach((edge, index) => {
+    if (isFallbackHandle(edge.sourceHandle)) back.add(index)
+    else if (ids.includes(edge.source) && ids.includes(edge.target)) candidates.push(index)
+  })
+  if (candidates.length === 0) return back
+
+  const nextOf = new Map<string, string[]>(ids.map((id) => [id, []]))
+  for (const index of candidates) {
+    const edge = edges[index]!
+    nextOf.get(edge.source)!.push(edge.target)
+  }
+  const component = stronglyConnected(ids, nextOf)
+
+  // A component's entry is the node the flow arrives from: it has an incoming
+  // edge from another component. Components with no outside feed (a detached
+  // retry pair) fall back to their smallest id so the answer stays stable.
+  const externalEntry = new Map<number, string>()
+  for (const index of candidates) {
+    const edge = edges[index]!
+    const targetComponent = component.get(edge.target)!
+    if (component.get(edge.source) === targetComponent) continue
+    const current = externalEntry.get(targetComponent)
+    if (current === undefined || edge.target < current)
+      externalEntry.set(targetComponent, edge.target)
+  }
+
+  // Depth inside a component, walking forward from its entry.
+  const depth = new Map<string, number>()
+  const members = new Map<number, string[]>()
+  for (const id of [...ids].sort()) {
+    const comp = component.get(id)!
+    const list = members.get(comp)
+    if (list) list.push(id)
+    else members.set(comp, [id])
+  }
+  for (const [comp, nodes] of members) {
+    if (nodes.length === 1 && !nextOf.get(nodes[0]!)!.includes(nodes[0]!)) {
+      depth.set(nodes[0]!, 0)
+      continue
+    }
+    const inside = new Set(nodes)
+    const entry = externalEntry.get(comp) ?? nodes[0]!
+    const queue = [entry]
+    depth.set(entry, 0)
+    for (let head = 0; head < queue.length; head++) {
+      const current = queue[head]!
+      for (const next of nextOf.get(current) ?? []) {
+        if (!inside.has(next) || depth.has(next)) continue
+        depth.set(next, depth.get(current)! + 1)
+        queue.push(next)
+      }
+    }
+    for (const id of nodes) if (!depth.has(id)) depth.set(id, 0)
+  }
+
+  for (const index of candidates) {
+    const edge = edges[index]!
+    const sourceDepth = depth.get(edge.source) ?? 0
+    const targetDepth = depth.get(edge.target) ?? 0
+    // Only edges inside a cycle can point backwards; across components the
+    // condensation is already a DAG.
+    if (component.get(edge.source) !== component.get(edge.target)) continue
+    if (targetDepth <= sourceDepth) back.add(index)
+  }
+  return back
+}
+
+/** Component id per node, via Kosaraju's two passes (iterative, no recursion). */
+function stronglyConnected(
+  ids: readonly string[],
+  nextOf: Map<string, string[]>,
+): Map<string, number> {
+  const previousOf = new Map<string, string[]>(ids.map((id) => [id, []]))
+  for (const [source, targets] of nextOf) {
+    for (const target of targets) previousOf.get(target)?.push(source)
+  }
+
+  const finished: string[] = []
+  const seen = new Set<string>()
+  for (const root of [...ids].sort()) {
+    if (seen.has(root)) continue
+    const stack: { id: string; index: number }[] = [{ id: root, index: 0 }]
+    seen.add(root)
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1]!
+      const next = nextOf.get(frame.id) ?? []
+      if (frame.index >= next.length) {
+        finished.push(frame.id)
+        stack.pop()
+        continue
+      }
+      const target = next[frame.index++]!
+      if (seen.has(target)) continue
+      seen.add(target)
+      stack.push({ id: target, index: 0 })
+    }
+  }
+
+  const component = new Map<string, number>()
+  let nextComponent = 0
+  for (const root of finished.reverse()) {
+    if (component.has(root)) continue
+    const stack = [root]
+    component.set(root, nextComponent)
+    while (stack.length > 0) {
+      const current = stack.pop()!
+      for (const source of previousOf.get(current) ?? []) {
+        if (component.has(source)) continue
+        component.set(source, nextComponent)
+        stack.push(source)
+      }
+    }
+    nextComponent++
+  }
+  return component
+}
+
 export function autoLayout(
-  nodes: LayoutInputNode[],
-  edges: LayoutInputEdge[],
+  nodes: readonly LayoutInputNode[],
+  edges: readonly LayoutInputEdge[],
   opts: AutoLayoutOptions = {},
 ): Map<string, LayoutPoint> {
   const { nodeWidth, nodeHeight, hGap, vGap, maxRowWidth, rowGap } = { ...DEFAULTS, ...opts }
@@ -71,15 +217,25 @@ export function autoLayout(
     dims.set(n.id, { w, h })
   }
 
+  // One canvas, one answer: the layout is a function of the GRAPH, not of the
+  // order the nodes happen to sit in the file. That array order changes on
+  // import, generation and every re-save, and sorting by id keeps the result
+  // identical for the same graph. (Node ids are stable per node.)
   const ids = nodes.map((n) => n.id)
+  const order = [...ids].sort()
+  const backEdges = backEdgeIndexes(order, edges)
   const preds = new Map<string, Set<string>>()
   const succs = new Map<string, Set<string>>()
   ids.forEach((id) => {
     preds.set(id, new Set())
     succs.set(id, new Set())
   })
-  for (const e of edges) {
+  const forwardEdges = edges.filter((_edge, index) => !backEdges.has(index))
+  forwardEdges.sort((a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target))
+  for (const e of forwardEdges) {
     if (!dims.has(e.source) || !dims.has(e.target) || e.source === e.target) continue
+    // A retry/fallback/loop-back edge is not an ordering constraint: counting it
+    // would put the node it points at AFTER its own successors.
     succs.get(e.source)!.add(e.target)
     preds.get(e.target)!.add(e.source)
   }
@@ -88,7 +244,7 @@ export function autoLayout(
   // Kahn topological order; any nodes left over (cycle) are appended so they
   // still get a position.
   const indeg = new Map<string, number>(ids.map((id) => [id, preds.get(id)!.size]))
-  const queue = ids.filter((id) => (indeg.get(id) ?? 0) === 0)
+  const queue = order.filter((id) => (indeg.get(id) ?? 0) === 0)
   const topo: string[] = []
   const head = { i: 0 }
   while (head.i < queue.length) {
@@ -101,7 +257,7 @@ export function autoLayout(
       if (d === 0) queue.push(s)
     }
   }
-  for (const id of ids) if (!topo.includes(id)) topo.push(id)
+  for (const id of order) if (!topo.includes(id)) topo.push(id)
 
   const layer = new Map<string, number>()
   ids.forEach((id) => layer.set(id, 0))
@@ -136,19 +292,23 @@ export function autoLayout(
   }
   for (let sweep = 0; sweep < 4; sweep++) {
     const down = sweep % 2 === 0
-    const order = down ? layerKeys : [...layerKeys].reverse()
-    for (const l of order) {
+    const sweepOrder = down ? layerKeys : [...layerKeys].reverse()
+    for (const l of sweepOrder) {
       const arr = layers.get(l)!
       const keys = new Map(arr.map((id) => [id, bary(id, l, down)]))
-      arr.sort((a, b) => keys.get(a)! - keys.get(b)!)
+      // Ties fall back to the id so the ordering never depends on input order.
+      arr.sort((a, b) => keys.get(a)! - keys.get(b)! || a.localeCompare(b))
     }
   }
 
-  // --- Z-shaped row packing -------------------------------------------------
+  // --- Stepped row packing --------------------------------------------------
   // Pack whole layers into rows no wider than `maxRowWidth` (a layer is never
   // split — its nodes share an x column). When a row fills up, the next layers
-  // continue on the row below; the connector from the last layer of one row to
-  // the first layer of the next draws the Z's return stroke.
+  // continue on the row below, STARTING TO THE RIGHT of the row just filled.
+  // Wrapping used to restart each row at x=0, which drew the first connector of
+  // a new row backwards (Z shape): users read a leftward edge as "I wired it
+  // wrong". The graph now grows rightward the whole way — wider canvas, no
+  // backwards arrows.
   const layerW = (l: number): number =>
     Math.max(...layers.get(l)!.map((id) => dims.get(id)!.w), nodeWidth)
   const layerH = (l: number): number => {
@@ -180,16 +340,17 @@ export function autoLayout(
   if (current.layers.length > 0) rows.push(current)
 
   // --- Position assignment --------------------------------------------------
-  // Every row starts at the layout's left edge and grows rightward, rows
-  // stacked top→bottom with `rowGap` between them. Nodes keep the standard
-  // left-input / right-output orientation in every row.
+  // Rows stack top→bottom with `rowGap` between them, and each row continues
+  // where the previous one ended: x only ever grows, so every forward edge
+  // points right. Nodes keep the standard left-input / right-output orientation.
   const totalHeight = rows.reduce((sum, r) => sum + r.height, 0) + rowGap * (rows.length - 1)
 
   const positions = new Map<string, LayoutPoint>()
   // Center the whole block on the canvas origin (fit-view re-centers anyway).
   let rowTop = -totalHeight / 2
+  let rowStartX = 0
   for (const row of rows) {
-    let cursor = 0
+    let cursor = rowStartX
     for (const l of row.layers) {
       const arr = layers.get(l)!
       const colY = rowTop + (row.height - layerH(l)) / 2
@@ -200,6 +361,8 @@ export function autoLayout(
       }
       cursor += layerW(l) + hGap
     }
+    // `cursor` already carries the trailing gap; the next row starts there.
+    rowStartX = cursor
     rowTop += row.height + rowGap
   }
 
