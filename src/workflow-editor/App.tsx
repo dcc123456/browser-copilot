@@ -79,7 +79,11 @@ import { autoReconnectStorage } from '../lib/fs-reconnect'
 import { getSettings } from '../lib/storage'
 import { newId } from '../lib/storage'
 
-import { nodeTypes as blockNodeTypes, type BlockNodeData } from './flow/BlockNode'
+import {
+  nodeTypes as blockNodeTypes,
+  UNKNOWN_NODE_TYPE,
+  type BlockNodeData,
+} from './flow/BlockNode'
 import { GroupNode, type GroupNodeActions } from './flow/GroupNode'
 import {
   GROUP_BLOCK_ID,
@@ -94,7 +98,7 @@ import {
   type GroupPackFailure,
   type WorkflowGroupChild,
 } from '../lib/workflow/group'
-import { blockEntryOf, canvasFieldsOf } from '../lib/workflow/node-shape'
+import { blockEntryOf, canvasFieldsOf, storedNodeOf } from '../lib/workflow/node-shape'
 import { withCurrentLayout } from '../lib/workflow/workflow-versions'
 import { edgeTypes } from './flow/CustomEdge'
 import {
@@ -178,13 +182,13 @@ function toFlowNode(n: WorkflowNode): FlowNode {
   // cannot resolve must survive a save (see lib/workflow/node-shape), and a
   // stripped `blockId` used to make the next save write `unknown`.
   const fields = canvasFieldsOf(n)
-  // Fall back to the FULL catalog (cloud blocks included): a miss here makes
-  // BlockNode render `null` (an invisible node with no handles, silently
-  // dropping its edges).
+  // Fall back to the FULL catalog (cloud blocks included). A miss here is not a
+  // reason to hide the node: BlockNode renders `null` for it, and an invisible
+  // node is a 0×0 shell whose edges React Flow silently drops.
   const block = blockEntryOf(fields.blockId) ?? CATALOG_BY_ID.get(fields.blockId)
   return {
     id: n.id,
-    type: flowTypeOf(block, fields.blockId),
+    type: block ? flowTypeOf(block, fields.blockId) : UNKNOWN_NODE_TYPE,
     position: n.position,
     data: {
       block: block as BlockCatalogEntry,
@@ -209,21 +213,13 @@ function newFlowNode(block: BlockCatalogEntry, position: { x: number; y: number 
 
 /** A canvas node in the shape the workflow file (and the run gate) uses. */
 function toWorkflowNode(n: FlowNode): WorkflowNode {
-  const entry = n.data.block
-  const blockId = n.data.blockId ?? entry?.id ?? 'unknown'
-  const label = entry?.name ?? n.data.label ?? blockId
-  return {
-    id: n.id,
-    label,
-    position: n.position,
-    // A block this build cannot resolve must keep its ORIGINAL id: rewriting it
-    // to `unknown` silently mangles the graph on save (and the next load shows a
-    // different operator than the one the user placed).
-    data: {
-      ...n.data.blockData,
-      blockId: n.data.blockId ?? n.data.block?.id ?? 'unknown',
-    },
-  }
+  // One implementation for both directions of the round-trip: a block this
+  // build cannot resolve must keep its ORIGINAL id and label, never `unknown`.
+  return storedNodeOf(n.id, n.position, {
+    blockId: n.data.blockId ?? n.data.block?.id ?? 'unknown',
+    label: n.data.label ?? '',
+    blockData: n.data.blockData ?? {},
+  })
 }
 
 /**

@@ -176,6 +176,13 @@ export const EDITOR_STRINGS = {
     nodeBreakpoint: 'Toggle breakpoint',
     nodeRunFromHere: 'Run workflow from here',
     nodeGoal: 'Goal',
+    // A block id this build does not resolve still gets a visible card: an
+    // invisible one made "the workflow looks broken" indistinguishable from
+    // "the data was lost".
+    nodeUnknownBlock: 'Unknown operator: {blockId}',
+    nodeUnknownBlockHint:
+      'This build does not support this operator. Its data is kept and saving this workflow will not change it.',
+    nodeUnknownBlockLabel: 'Original name: {label}',
     nodeGoalSection: 'Goal & success criteria',
     nodeInspectorGoal: 'Goal',
     nodeInspectorSuccessCriteria: 'Success criteria',
@@ -665,6 +672,9 @@ export const EDITOR_STRINGS = {
     nodeBreakpoint: '切换断点',
     nodeRunFromHere: '从此处运行',
     nodeGoal: '目标',
+    nodeUnknownBlock: '未知算子：{blockId}',
+    nodeUnknownBlockHint: '当前版本不支持这个算子。数据已保留，保存这个工作流不会改动它。',
+    nodeUnknownBlockLabel: '原名称：{label}',
     nodeGoalSection: '目标与成功条件',
     nodeInspectorGoal: '目标',
     nodeInspectorSuccessCriteria: '成功条件',

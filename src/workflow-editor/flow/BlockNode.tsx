@@ -86,6 +86,7 @@ export function NodeToolbar({
   breakpoint,
   actions,
   extra,
+  editable = true,
 }: {
   id: string
   disabled: boolean
@@ -94,6 +95,12 @@ export function NodeToolbar({
   actions?: BlockNodeActions
   /** Node-specific action shown after the standard ones. */
   extra?: ReactNode
+  /**
+   * False for a node whose block this build cannot resolve: there is nothing to
+   * edit, toggle or run from it, so it keeps only delete/duplicate instead of
+   * offering buttons that open an empty panel.
+   */
+  editable?: boolean
 }) {
   const { t } = useEditorLocale()
   if (!actions) return null
@@ -110,34 +117,38 @@ export function NodeToolbar({
       <button type="button" title={t('nodeDuplicate')} onClick={stop(actions.onDuplicate)}>
         <Copy size={14} />
       </button>
-      <button type="button" title={t('nodeSettings')} onClick={stop(actions.onSettings)}>
-        <Settings size={14} />
-      </button>
-      <button
-        type="button"
-        title={disabled ? t('nodeEnable') : t('nodeDisable')}
-        onClick={stop(actions.onToggleDisable)}
-      >
-        {disabled ? <ToggleLeft size={14} /> : <ToggleRight size={14} />}
-      </button>
-      <button
-        type="button"
-        title={t('nodeBreakpoint')}
-        aria-pressed={breakpoint === true}
-        onClick={stop(actions.onToggleBreakpoint)}
-      >
-        <Circle
-          size={14}
-          fill={breakpoint ? 'currentColor' : 'none'}
-          className={breakpoint ? 'text-err' : undefined}
-        />
-      </button>
-      <button type="button" title={t('nodeRunFromHere')} onClick={stop(actions.onRunFromHere)}>
-        <Play size={14} />
-      </button>
-      <button type="button" title={t('nodeEdit')} onClick={stop(actions.onEdit)}>
-        <Pencil size={14} />
-      </button>
+      {editable && (
+        <>
+          <button type="button" title={t('nodeSettings')} onClick={stop(actions.onSettings)}>
+            <Settings size={14} />
+          </button>
+          <button
+            type="button"
+            title={disabled ? t('nodeEnable') : t('nodeDisable')}
+            onClick={stop(actions.onToggleDisable)}
+          >
+            {disabled ? <ToggleLeft size={14} /> : <ToggleRight size={14} />}
+          </button>
+          <button
+            type="button"
+            title={t('nodeBreakpoint')}
+            aria-pressed={breakpoint === true}
+            onClick={stop(actions.onToggleBreakpoint)}
+          >
+            <Circle
+              size={14}
+              fill={breakpoint ? 'currentColor' : 'none'}
+              className={breakpoint ? 'text-err' : undefined}
+            />
+          </button>
+          <button type="button" title={t('nodeRunFromHere')} onClick={stop(actions.onRunFromHere)}>
+            <Play size={14} />
+          </button>
+          <button type="button" title={t('nodeEdit')} onClick={stop(actions.onEdit)}>
+            <Pencil size={14} />
+          </button>
+        </>
+      )}
       {extra}
     </div>
   )
@@ -331,8 +342,60 @@ function NoteNodeComponent({ id, data }: NodeProps) {
 }
 export const NoteNode = memo(NoteNodeComponent)
 
+/** Node type the canvas uses for a block id this build cannot resolve. */
+export const UNKNOWN_NODE_TYPE = 'UnknownBlockNode'
+
+/**
+ * Placeholder for a block this build does not know (a newer or removed
+ * operator). It MUST render a card with both handles: rendering `null` made the
+ * block a 0×0 shell — invisible, unclickable, and React Flow silently dropped
+ * every edge that pointed at it, so the graph looked corrupted while the stored
+ * data was intact. The stored id/label are shown as-is; saving leaves them
+ * untouched (see lib/workflow/node-shape).
+ */
+function UnknownBlockNodeComponent({ id, data, selected }: NodeProps) {
+  const { t } = useEditorLocale()
+  const node = data as unknown as BlockNodeData
+  const blockId = node.blockId ?? 'unknown'
+  const originalLabel = node.label && node.label !== blockId ? node.label : ''
+  return (
+    <div className={`wf-node ${selected ? 'wf-node-selected' : ''}`}>
+      <NodeToolbar id={id} disabled={false} actions={node.actions} editable={false} />
+      <Handle
+        id={`${blockId}-input-1`}
+        type="target"
+        position={Position.Left}
+        className="wf-handle"
+      />
+      <div className="wf-node-body">
+        <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-warn-surface text-warn">
+          <TriangleAlert size={16} />
+        </span>
+        <div className="wf-node-text">
+          <p className="wf-node-name">{t('nodeUnknownBlock').replace('{blockId}', blockId)}</p>
+          <p className="wf-node-desc">{t('nodeUnknownBlockHint')}</p>
+          {originalLabel !== '' && (
+            <p className="wf-node-desc">
+              {t('nodeUnknownBlockLabel').replace('{label}', originalLabel)}
+            </p>
+          )}
+        </div>
+      </div>
+      <Handle
+        id={`${blockId}-output-1`}
+        type="source"
+        position={Position.Right}
+        className="wf-handle"
+      />
+    </div>
+  )
+}
+
+export const UnknownBlockNode = memo(UnknownBlockNodeComponent)
+
 /** Node type map for React Flow. */
 export const nodeTypes = {
   BlockNode,
   NoteNode,
+  UnknownBlockNode,
 }

@@ -64,7 +64,23 @@ export function healEdgeHandles(nodes: Node[], edges: Edge[]): Edge[] {
   const known = new Map<string, NodeHandleInfo>()
   for (const node of nodes) {
     const block = node.data?.block as { id: string; inputs?: number; outputs?: number } | undefined
-    if (!block) continue
+    if (!block) {
+      // A block this build cannot resolve still draws one input and one output
+      // (see UnknownBlockNode). Without an entry here every edge touching it
+      // was left with a handle that names nothing, so it disappeared on load.
+      const unknownId =
+        typeof node.data?.blockId === 'string' && node.data.blockId !== ''
+          ? node.data.blockId
+          : String(node.id)
+      const primary = `${unknownId}-output-1`
+      known.set(node.id, {
+        blockId: unknownId,
+        sources: new Set([primary]),
+        firstSource: primary,
+        hasTarget: true,
+      })
+      continue
+    }
     // One derivation of the drawn ports for the whole editor: a branch block's
     // are per-path (conditions), every other block keeps the primary one. The
     // primary is also where an unresolvable handle lands, so a legacy
