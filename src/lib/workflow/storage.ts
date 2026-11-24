@@ -32,7 +32,7 @@ import {
   appendVersion,
   canDeleteVersion,
   nextVersionNumber,
-  oversizedNodeOf,
+  prepareSnapshot,
   rollbackEntryOf,
   snapshotBytesOf,
   workflowFingerprint,
@@ -300,13 +300,16 @@ export async function saveWorkflowVersionSnapshot(
   evicted: number[]
   refused?: VersionRefusal
 }> {
-  const oversized = oversizedNodeOf(workflow)
-  if (oversized) {
+  // Same preparation as the stored copy (migrated, bulk data URLs shed): a
+  // snapshot must hold what the user would get back, and the fingerprint must
+  // describe THAT form or the same graph hashes two ways.
+  const canonical = migrateWorkflow(workflow)
+  const prepared = prepareSnapshot(canonical)
+  if ('refused' in prepared) {
     const index = await loadWorkflowVersionIndex(workflow.id)
     return { saved: false, index, evicted: [], refused: 'node-payload' }
   }
-  const bytes = snapshotBytesOf(workflow)
-  const fingerprint = workflowFingerprint(workflow)
+  const { workflow: snapshot, bytes, fingerprint } = prepared
   return withKeyLock(versionIndexKey(workflow.id), async () => {
     const index = await loadWorkflowVersionIndex(workflow.id)
     const latest = index.entries[index.entries.length - 1]
@@ -319,9 +322,9 @@ export async function saveWorkflowVersionSnapshot(
       at: options.now ?? Date.now(),
       source: options.source ?? 'save',
       fingerprint,
-      revision: currentRevisionOf(workflow),
-      nodes: workflow.drawflow.nodes.length,
-      edges: workflow.drawflow.edges.length,
+      revision: currentRevisionOf(snapshot),
+      nodes: snapshot.drawflow.nodes.length,
+      edges: snapshot.drawflow.edges.length,
       bytes,
     }
     const plan = appendVersion(index, entry, {
@@ -331,7 +334,7 @@ export async function saveWorkflowVersionSnapshot(
     })
     if (plan.refused) return { saved: false, index, evicted: [], refused: plan.refused }
     await area.set({
-      [versionSnapshotKey(workflow.id, entry.version)]: { workflow, entry },
+      [versionSnapshotKey(snapshot.id, entry.version)]: { workflow: snapshot, entry },
     })
     await area.set({ [versionIndexKey(workflow.id)]: plan.index })
     if (plan.evicted.length > 0) {
@@ -351,16 +354,17 @@ export async function recordWorkflowRollback(
   fromVersion: number,
   now = Date.now(),
 ): Promise<WorkflowVersionIndex> {
-  const fingerprint = workflowFingerprint(workflow)
+  const prepared = shedBulkDataUrls(workflow) as Workflow
+  const fingerprint = workflowFingerprint(prepared)
   return withKeyLock(versionIndexKey(workflow.id), async () => {
     const index = await loadWorkflowVersionIndex(workflow.id)
     const entry = rollbackEntryOf(index, fromVersion, {
       at: now,
       revision: currentRevisionOf(workflow),
       fingerprint,
-      nodes: workflow.drawflow.nodes.length,
-      edges: workflow.drawflow.edges.length,
-      bytes: snapshotBytesOf(workflow),
+      nodes: prepared.drawflow.nodes.length,
+      edges: prepared.drawflow.edges.length,
+      bytes: snapshotBytesOf(prepared),
     })
     const plan = appendVersion(index, entry, { now })
     await area.set({ [versionIndexKey(workflow.id)]: plan.index })

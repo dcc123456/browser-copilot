@@ -6,6 +6,7 @@ import {
   currentVersionOf,
   nextVersionNumber,
   oversizedNodeOf,
+  prepareSnapshot,
   rollbackEntryOf,
   rollbackSourceDeleted,
   WORKFLOW_VERSION_LIMIT,
@@ -174,6 +175,47 @@ describe('rollback entries', () => {
       entries: withRollback.entries.filter((e) => e.version !== 1),
     }
     expect(rollbackSourceDeleted(sourceGone, rollback)).toBe(true)
+  })
+})
+
+describe('preparing a snapshot', () => {
+  it('sheds a bulk data URL BEFORE fingerprinting, so the stored copy and the snapshot agree', () => {
+    const raw = workflow()
+    const payload = `data:image/png;base64,${'A'.repeat(400 * 1024)}`
+    raw.drawflow.nodes[1]!.data = { blockId: 'open-url', screenshot: payload }
+    const prepared = prepareSnapshot(raw)
+    expect('refused' in prepared).toBe(false)
+    if ('refused' in prepared) return
+    // The data URL is gone; the placeholder is what gets hashed and written.
+    expect(JSON.stringify(prepared.workflow)).not.toContain('base64')
+    expect(JSON.stringify(prepared.workflow)).toContain('[data URL dropped:')
+    expect(prepared.bytes).toBeLessThan(8 * 1024)
+
+    // Same graph, same fingerprint as one that already carries the placeholder:
+    // one content, one hash — otherwise de-duplication silently stops working.
+    const withMarker = workflow()
+    withMarker.drawflow.nodes[1]!.data = {
+      blockId: 'open-url',
+      screenshot: `[data URL dropped: ${payload.length} chars]`,
+    }
+    const markerPrepared = prepareSnapshot(withMarker)
+    if ('refused' in markerPrepared) throw new Error('unexpected refusal')
+    expect(markerPrepared.fingerprint).toBe(prepared.fingerprint)
+  })
+
+  it('still refuses a large NON-data string: shedding only knows data URLs', () => {
+    const heavy = workflow()
+    heavy.drawflow.nodes[1]!.data = { blockId: 'javascript-code', code: 'x'.repeat(300 * 1024) }
+    expect(prepareSnapshot(heavy)).toEqual({ refused: 'node-payload' })
+  })
+
+  it('leaves a small data URL alone — shedding has its own threshold', () => {
+    const small = workflow()
+    const tiny = 'data:image/png;base64,AAAA'
+    small.drawflow.nodes[1]!.data = { blockId: 'open-url', screenshot: tiny }
+    const prepared = prepareSnapshot(small)
+    if ('refused' in prepared) throw new Error('unexpected refusal')
+    expect(JSON.stringify(prepared.workflow)).toContain(tiny)
   })
 })
 

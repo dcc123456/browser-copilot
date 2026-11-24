@@ -13,6 +13,7 @@
  * @module lib/workflow/workflow-versions
  */
 
+import { shedBulkDataUrls } from '../persist-budget'
 import type { Workflow } from './types'
 
 /** How many versions one workflow keeps. */
@@ -114,6 +115,27 @@ function dataBytesOf(data: unknown): number {
     return JSON.stringify(data)?.length ?? 0
   } catch {
     return 0
+  }
+}
+
+/**
+ * The exact form a snapshot is written from.
+ *
+ * Shedding runs BEFORE the fingerprint and BEFORE the byte count, for two
+ * reasons: `saveWorkflow` stores the shed copy, so a snapshot of the unshed
+ * graph would apply a megabyte the stored workflow never had; and a fingerprint
+ * over the unshed form would hash two different values for the same graph, which
+ * silently disables de-duplication.
+ */
+export function prepareSnapshot(
+  workflow: Workflow,
+): { workflow: Workflow; fingerprint: string; bytes: number } | { refused: 'node-payload' } {
+  const prepared = shedBulkDataUrls(workflow) as Workflow
+  if (oversizedNodeOf(prepared)) return { refused: 'node-payload' }
+  return {
+    workflow: prepared,
+    fingerprint: workflowFingerprint(prepared),
+    bytes: snapshotBytesOf(prepared),
   }
 }
 
