@@ -101,12 +101,22 @@ export function workflowFingerprint(workflow: Workflow): string {
   // the editor's canvas record does not carry them, so including them made the
   // panel's fingerprint differ from the stored one whenever a workflow had any —
   // and "current version" silently never lit up.
+  //
+  // Node POSITIONS are excluded for the same reason: dragging a card or running
+  // auto-layout is a view operation, not a content change, so it must not create
+  // a version. Two graphs that differ only by where the cards sit are the same
+  // version.
   const content = {
     name: workflow.name,
     description: workflow.description ?? '',
     settings: workflow.settings,
-    // Viewport is deliberately absent: panning/zooming is not an edit.
-    drawflow: { nodes: workflow.drawflow.nodes, edges: workflow.drawflow.edges },
+    drawflow: {
+      // `label` is the block's DISPLAY name (derived from blockId, localised), and
+      // a build that does not know a block rewrites it — presentation must not
+      // become a content change.
+      nodes: workflow.drawflow.nodes.map((node) => ({ id: node.id, data: node.data })),
+      edges: workflow.drawflow.edges,
+    },
   }
   return hashText(canonicalJson(content))
 }
@@ -266,6 +276,28 @@ export function rollbackEntryOf(
     bytes: input.bytes,
     fromVersion,
     note: `回滚自 v${fromVersion}`,
+  }
+}
+
+/**
+ * A version snapshot with the CURRENT canvas layout laid over it.
+ *
+ * Applying an old version restores its CONTENT; the cards stay where the user
+ * arranged them (positions belong to the viewport, not to the version). Nodes
+ * that the snapshot introduces keep the position recorded with it, because the
+ * current canvas has no opinion about them.
+ */
+export function withCurrentLayout(snapshot: Workflow, current: Workflow): Workflow {
+  const positions = new Map(current.drawflow.nodes.map((node) => [node.id, node.position] as const))
+  return {
+    ...snapshot,
+    drawflow: {
+      ...snapshot.drawflow,
+      nodes: snapshot.drawflow.nodes.map((node) => ({
+        ...node,
+        position: positions.get(node.id) ?? node.position,
+      })),
+    },
   }
 }
 

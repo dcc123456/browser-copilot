@@ -9,6 +9,7 @@ import {
   prepareSnapshot,
   rollbackEntryOf,
   rollbackSourceDeleted,
+  withCurrentLayout,
   WORKFLOW_VERSION_LIMIT,
   workflowFingerprint,
   type WorkflowVersionEntry,
@@ -88,6 +89,52 @@ describe('content fingerprint', () => {
     const rewired = workflow()
     rewired.drawflow.edges = []
     expect(workflowFingerprint(rewired)).not.toBe(workflowFingerprint(first))
+  })
+})
+
+describe('layout is not content', () => {
+  it('moves do not change the fingerprint', () => {
+    const first = workflow()
+    const moved = workflow()
+    moved.drawflow.nodes = moved.drawflow.nodes.map((node, index) => ({
+      ...node,
+      position: { x: 900 * (index + 1), y: 40 },
+    }))
+    expect(workflowFingerprint(moved)).toBe(workflowFingerprint(first))
+  })
+
+  it('a label (display name) is not content either', () => {
+    const first = workflow()
+    const relabelled = workflow()
+    relabelled.drawflow.nodes = relabelled.drawflow.nodes.map((node) => ({
+      ...node,
+      label: 'Localised display name',
+    }))
+    expect(workflowFingerprint(relabelled)).toBe(workflowFingerprint(first))
+  })
+
+  it('applying a version keeps the layout the user arranged', () => {
+    const current = workflow()
+    current.drawflow.nodes = current.drawflow.nodes.map((node, index) => ({
+      ...node,
+      position: { x: 500, y: 100 * index },
+    }))
+    const snapshot = workflow()
+    snapshot.drawflow.nodes = snapshot.drawflow.nodes.map((node) => ({
+      ...node,
+      position: { x: 1, y: 2 },
+    }))
+    // A node the snapshot adds has no place on the current canvas.
+    snapshot.drawflow.nodes.push({
+      id: 'new',
+      label: 'New step',
+      position: { x: 7, y: 8 },
+      data: { blockId: 'notification' },
+    })
+
+    const laid = withCurrentLayout(snapshot, current)
+    expect(laid.drawflow.nodes.find((n) => n.id === 'a')?.position).toEqual({ x: 500, y: 0 })
+    expect(laid.drawflow.nodes.find((n) => n.id === 'new')?.position).toEqual({ x: 7, y: 8 })
   })
 })
 

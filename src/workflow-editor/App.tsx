@@ -94,6 +94,7 @@ import {
   type GroupPackFailure,
   type WorkflowGroupChild,
 } from '../lib/workflow/group'
+import { withCurrentLayout } from '../lib/workflow/workflow-versions'
 import { edgeTypes } from './flow/CustomEdge'
 import {
   applyConnection,
@@ -208,7 +209,17 @@ function toWorkflowNode(n: FlowNode): WorkflowNode {
     id: n.id,
     label: n.data.block?.name ?? n.id,
     position: n.position,
-    data: { ...n.data.blockData, blockId: n.data.block?.id ?? 'unknown' },
+    // A block this build cannot resolve must keep its ORIGINAL id: rewriting it
+    // to `unknown` silently mangles the graph on save (and the next load shows a
+    // different operator than the one the user placed).
+    data: {
+      ...n.data.blockData,
+      blockId:
+        n.data.block?.id ??
+        (typeof n.data.blockData['blockId'] === 'string'
+          ? String(n.data.blockData['blockId'])
+          : 'unknown'),
+    },
   }
 }
 
@@ -1721,19 +1732,23 @@ export default function EditorApp() {
    */
   const applyVersionSnapshot = useCallback(
     async (snapshot: Workflow, fromVersion: number) => {
+      // Content comes back; the LAYOUT does not. Dragging a card or running
+      // auto-layout is a view operation, so a version never moves the cards the
+      // user arranged — only what is IN them.
+      const laid = withCurrentLayout(snapshot, versionCurrent)
       pushHistory()
-      setNodes(snapshot.drawflow.nodes.map(toFlowNode))
-      applyEdgeList(snapshot.drawflow.edges)
+      setNodes(laid.drawflow.nodes.map(toFlowNode))
+      applyEdgeList(laid.drawflow.edges)
       setMeta((m) => ({
         ...m,
-        name: snapshot.name,
-        description: snapshot.description ?? '',
-        settings: snapshot.settings,
+        name: laid.name,
+        description: laid.description ?? '',
+        settings: laid.settings,
       }))
       setDirty(true)
-      await sendCommand({ type: 'workflows.versions.rollback', workflow: snapshot, fromVersion })
+      await sendCommand({ type: 'workflows.versions.rollback', workflow: laid, fromVersion })
     },
-    [applyEdgeList, pushHistory, setDirty],
+    [applyEdgeList, pushHistory, setDirty, versionCurrent],
   )
 
   // Picking a credential secures its `get-secret` producer here; the pure patcher
