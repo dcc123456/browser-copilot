@@ -96,13 +96,15 @@ function hashText(text: string): string {
  * the record at all, so panning/zooming cannot create a version.
  */
 export function workflowFingerprint(workflow: Workflow): string {
+  // Only what applying a version puts back on the canvas. Filing (`folderId`),
+  // the goal text (`plan`) and the data-store reference (`table`) are metadata:
+  // the editor's canvas record does not carry them, so including them made the
+  // panel's fingerprint differ from the stored one whenever a workflow had any —
+  // and "current version" silently never lit up.
   const content = {
     name: workflow.name,
     description: workflow.description ?? '',
-    folderId: workflow.folderId ?? '',
     settings: workflow.settings,
-    table: workflow.table ?? null,
-    plan: workflow.plan ?? null,
     // Viewport is deliberately absent: panning/zooming is not an edit.
     drawflow: { nodes: workflow.drawflow.nodes, edges: workflow.drawflow.edges },
   }

@@ -226,6 +226,68 @@ describe('preparing a snapshot', () => {
   })
 })
 
+describe('the canvas ↔ snapshot fingerprint contract', () => {
+  /**
+   * "Current version" is ONE equality: the fingerprint the panel computes from
+   * the canvas must equal the fingerprint stored with the last snapshot. It
+   * silently breaks the day `toWorkflowNode` or the save path changes a field,
+   * and QA already mis-reported it twice as a product bug — so it gets its own
+   * assertion, in both directions.
+   */
+  const editorShaped = () => {
+    // What the editor actually builds: display labels, positions, settings,
+    // createdAt — not a hand-made fixture with blockId labels.
+    const wf = workflow()
+    wf.settings = { ...wf.settings, saveLog: true }
+    wf.drawflow.nodes = [
+      {
+        id: 'a',
+        label: 'Trigger',
+        position: { x: 120, y: 160 },
+        data: { blockId: 'trigger', type: 'manual' },
+      },
+      {
+        id: 'b',
+        label: 'JavaScript code',
+        position: { x: 120, y: 260 },
+        data: { blockId: 'javascript-code', code: 'return 1', outputVariables: ['x'] },
+      },
+    ] as Workflow['drawflow']['nodes']
+    return wf
+  }
+
+  it('saving does not change the fingerprint the canvas reports', () => {
+    const canvas = editorShaped()
+    const stored = prepareSnapshot(canvas)
+    if ('refused' in stored) throw new Error('unexpected refusal')
+    // The panel hashes the canvas workflow; the entry carries the stored form's
+    // hash. They MUST be the same value for "current" to ever light up.
+    expect(workflowFingerprint(canvas)).toBe(stored.fingerprint)
+  })
+
+  it('ignores filing, the goal text and the data-store reference', () => {
+    // The editor's canvas record never carries these; the stored one can. They
+    // must not make the canvas look "not current" after every save.
+    const canvas = editorShaped()
+    const stored = workflow({
+      folderId: 'folder-1',
+      plan: 'watch the price, then report',
+      table: { id: 'sheet-1' },
+    } as Partial<Workflow>)
+    stored.drawflow = canvas.drawflow
+    stored.settings = canvas.settings
+    expect(workflowFingerprint(stored)).toBe(workflowFingerprint(canvas))
+  })
+
+  it('editing a node without saving makes the two disagree', () => {
+    const saved = prepareSnapshot(editorShaped())
+    if ('refused' in saved) throw new Error('unexpected refusal')
+    const edited = editorShaped()
+    edited.drawflow.nodes[1]!.data = { blockId: 'javascript-code', code: 'return 2' }
+    expect(workflowFingerprint(edited)).not.toBe(saved.fingerprint)
+  })
+})
+
 describe('payload guard', () => {
   it('refuses a node whose data is bigger than the per-node limit', () => {
     const heavy = workflow()
