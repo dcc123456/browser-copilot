@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { sendCommand } from '../../lib/messages'
 import type { Workflow } from '../../lib/workflow/types'
 import {
+  currentVersionOf,
   workflowFingerprint,
   rollbackSourceDeleted,
   type WorkflowVersionEntry,
@@ -49,6 +50,7 @@ export default function VersionHistoryPanel({
   if (!open) return null
 
   const fingerprint = workflowFingerprint(current)
+  const currentVersion = index ? currentVersionOf(index, fingerprint)?.version : undefined
   const entries = [...(index?.entries ?? [])].reverse()
 
   const apply = async (entry: WorkflowVersionEntry) => {
@@ -115,7 +117,7 @@ export default function VersionHistoryPanel({
           ) : (
             <ul className="flex flex-col gap-2">
               {entries.map((entry) => {
-                const isCurrent = entry.fingerprint === fingerprint
+                const isCurrent = entry.version === currentVersion
                 const sourceGone = index ? rollbackSourceDeleted(index, entry) : false
                 return (
                   <li

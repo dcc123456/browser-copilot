@@ -226,6 +226,10 @@ export function currentVersionOf(
 ): WorkflowVersionEntry | undefined {
   for (let position = index.entries.length - 1; position >= 0; position -= 1) {
     const entry = index.entries[position]!
+    // A rollback line carries the fingerprint of the version it re-applied, so
+    // it would mark BOTH rows "current" — and the source version would then be
+    // undeletable while the canvas equals it. Only real snapshots pin "current".
+    if (entry.source === 'rollback') continue
     if (entry.fingerprint === fingerprint) return entry
   }
   return undefined

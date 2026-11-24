@@ -180,6 +180,22 @@ describe('current version and deletion', () => {
     expect(currentVersionOf(index, 'nope')).toBeUndefined()
   })
 
+  it('a rollback line never pins "current", even with the same fingerprint', () => {
+    const rollback = rollbackEntryOf(index, 1, {
+      at: 6000,
+      revision: 9,
+      fingerprint: 'a',
+      nodes: 2,
+      edges: 1,
+      bytes: 120,
+    })
+    const withRollback = { ...index, entries: [...index.entries, rollback] }
+    // v1 is the version the canvas equals; the trace must not also claim it, or
+    // two rows would be undeletable at once.
+    expect(currentVersionOf(withRollback, 'a')?.version).toBe(1)
+    expect(canDeleteVersion(withRollback, 3, 'a')).toEqual({ ok: true })
+  })
+
   it('refuses to delete the version the canvas is on', () => {
     expect(canDeleteVersion(index, 2, 'b')).toEqual({ ok: false, reason: 'current' })
     expect(canDeleteVersion(index, 1, 'b')).toEqual({ ok: true })
