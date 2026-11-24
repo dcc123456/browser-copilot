@@ -10,6 +10,7 @@ import {
   LEGACY_ID_TO_AUTOMA,
 } from '../src/lib/workflow/migrate'
 import type { Workflow } from '../src/lib/workflow/types'
+import { CATALOG_BY_ID } from '../src/lib/workflow/blocks/palette'
 
 describe('migrateNodeData', () => {
   it('maps legacy block ids to Automa ids', () => {
@@ -167,5 +168,53 @@ describe('legacy id mapping completeness', () => {
       // catalog lookup through migrateNodeData should not throw and should keep id
       expect(migrateNodeData(target, {}).blockId).toBe(target)
     }
+  })
+})
+
+describe('migrateWorkflow labels', () => {
+  const base = {
+    id: 'w-label',
+    name: 'Labels',
+    createdAt: 1,
+    updatedAt: 1,
+    settings: { saveLog: false, debugMode: false, notification: false, reuseLastState: false },
+  }
+  /** `values` is the legacy wrapper: its presence forces the rebuild path. */
+  const workflowWith = (blockId: string, label: string, description: string): Workflow => ({
+    ...base,
+    drawflow: {
+      nodes: [
+        {
+          id: 'n1',
+          label,
+          position: { x: 0, y: 0 },
+          data: { blockId, description, values: {} },
+        },
+      ],
+      edges: [],
+    },
+  })
+
+  it('keeps the stored label of a block this build does not know', () => {
+    // Saving used to rewrite it to the id (or the description), which erased the
+    // only clue to what the operator was — and the unknown-block card's
+    // "original name" line could never show on a real save path.
+    const out = migrateWorkflow(workflowWith('some-removed-block', 'Old operator', ''))
+    expect(out.drawflow.nodes[0]!.label).toBe('Old operator')
+  })
+
+  it('does not let an unknown block description hijack its label', () => {
+    const out = migrateWorkflow(workflowWith('some-removed-block', 'Old operator', 'extracts rows'))
+    expect(out.drawflow.nodes[0]!.label).toBe('Old operator')
+    expect(out.drawflow.nodes[0]!.data['description']).toBe('extracts rows')
+  })
+
+  it('still lets a known block take its label from the description, else the catalog', () => {
+    expect(
+      migrateWorkflow(workflowWith('delay', 'whatever', 'Wait a while')).drawflow.nodes[0]!.label,
+    ).toBe('Wait a while')
+    expect(migrateWorkflow(workflowWith('delay', 'whatever', '')).drawflow.nodes[0]!.label).toBe(
+      CATALOG_BY_ID.get('delay')!.name,
+    )
   })
 })

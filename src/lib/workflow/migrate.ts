@@ -405,10 +405,18 @@ export function migrateWorkflow(wf: Workflow): Workflow {
     if (blockId !== rawBlockId || !isRecord(node.data) || node.data.values !== undefined) {
       changed = true
     }
-    const label =
-      typeof data.description === 'string' && data.description
+    // A KNOWN block takes its label from the catalog (or the description the
+    // user typed). A block this build does not know has no catalog name, and
+    // rewriting its label to the id/description would destroy the only thing
+    // that says which operator it was — keep what the file had.
+    const catalogName = CATALOG_BY_ID.get(blockId)?.name
+    const label = catalogName
+      ? typeof data.description === 'string' && data.description
         ? data.description
-        : (CATALOG_BY_ID.get(blockId)?.name ?? blockId)
+        : catalogName
+      : typeof node.label === 'string' && node.label.trim() !== ''
+        ? node.label
+        : blockId
     return { ...node, label, data: { ...data, blockId } }
   })
 
