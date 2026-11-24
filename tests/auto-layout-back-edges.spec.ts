@@ -16,7 +16,7 @@ import {
 
 const WIDTH = 200
 const HEIGHT = 64
-const H_GAP = 70
+const H_GAP = 20
 const V_GAP = 36
 
 /** trigger → conditions → (click → extract | js) → save, and extract retries conditions. */
@@ -213,26 +213,17 @@ describe('readable overview wrapping', () => {
     expect(overlappingPairs(placed)).toEqual([])
   })
 
-  it('never turns a forward edge back across more than one row', () => {
-    // n2 → n6 skips four ranks. With three ranks per row it would go from the
-    // right end of row 0 to the left edge of row 2 — exactly the long sweep the
-    // product rule forbids. Ordinary adjacent-row wrap lines are still allowed.
+  it('keeps a fork and its merge on one axis instead of wrapping between them', () => {
+    // n2 has two forward paths to n6: the direct edge and n3 → n4 → n5 → n6.
+    // They form one branch unit, even though the unit is wider than a row.
     const edges = [...chain, { source: 'n2', target: 'n6' }]
     const placed = autoLayout(
       chainIds.map((id) => ({ id })),
       edges,
       { maxRowWidth: 740 },
     )
-    const rowValues = [...new Set([...placed.values()].map((point) => point.y))].sort(
-      (a, b) => a - b,
-    )
-    const rowOf = (id: string): number => rowValues.indexOf(placed.get(id)!.y)
-    expect(rowOf('n6') - rowOf('n2')).toBeGreaterThan(1)
+    expect(placed.get('n6')!.y).toBe(placed.get('n2')!.y)
     expect(placed.get('n6')!.x).toBeGreaterThan(placed.get('n2')!.x)
-    for (const edge of backwardForwardEdges(placed, edges, [])) {
-      const [source, target] = edge.split('->')
-      expect(rowOf(target!) - rowOf(source!)).toBeLessThanOrEqual(1)
-    }
   })
 })
 

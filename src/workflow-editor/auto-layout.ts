@@ -2,11 +2,12 @@
  * One-click graph beautify — a dependency-free layered (Sugiyama-style)
  * auto-layout for the workflow canvas.
  *
- * Each rank is a vertical column and ranks advance left→right. A typical graph
- * stays on one horizontal axis; a graph too wide to read is split into
- * left-aligned rows so fit-view can show the whole flow without shrinking the
- * cards to illegibility. Wrap connectors may turn back between ADJACENT rows,
- * but never sweep back across several rows.
+ * Each rank is a vertical column and ranks advance left→right. A condition,
+ * its alternative paths and their nearest common merge form an ATOMIC branch
+ * group. Typical graphs stay on one horizontal axis; a graph too wide to read
+ * is split only between complete groups so a merge can never fall behind its
+ * branches. Long chains use compact, left-aligned rows to keep fit-view text
+ * readable.
  *
  * Edges that would close a cycle — a fallback that retries an earlier block, a
  * loop that runs back to its head — are EXCLUDED from layer assignment. They
@@ -55,7 +56,7 @@ export interface AutoLayoutOptions {
 const DEFAULTS = {
   nodeWidth: 200,
   nodeHeight: 64,
-  hGap: 70,
+  hGap: 20,
   vGap: 36,
   maxRowWidth: 1600,
   rowGap: 90,
@@ -294,95 +295,129 @@ export function autoLayout(
     }
   }
 
+  // --- Atomic branch groups -------------------------------------------------
+  // A condition, its alternative paths and their nearest common merge form one
+  // layout unit. A row break may happen BEFORE or AFTER this unit, never inside
+  // it: splitting the paths from their merge is what made the main chain look
+  // upside-down in the previous layout.
+  const reachableFrom = (root: string): Set<string> => {
+    const reached = new Set<string>([root])
+    const queue = [root]
+    for (let head = 0; head < queue.length; head++) {
+      for (const next of succs.get(queue[head]!) ?? []) {
+        if (reached.has(next)) continue
+        reached.add(next)
+        queue.push(next)
+      }
+    }
+    return reached
+  }
+  interface LayerRange {
+    startIndex: number
+    endIndex: number
+  }
+  const branchRanges: LayerRange[] = []
+  for (const [layerKey, layerNodes] of layers) {
+    for (const id of layerNodes) {
+      const branches = [...succs.get(id)!].sort()
+      if (branches.length < 2) continue
+      const reachable = branches.map(reachableFrom)
+      const shared = [...reachable[0]!]
+        .filter((candidate) => reachable.every((paths) => paths.has(candidate)))
+        .sort((a, b) => layer.get(a)! - layer.get(b)! || a.localeCompare(b))
+      const endLayer = shared[0]
+        ? layer.get(shared[0])!
+        : Math.max(...reachable.flatMap((paths) => [...paths].map((path) => layer.get(path)!)))
+      branchRanges.push({
+        startIndex: layerKeys.indexOf(layerKey),
+        endIndex: layerKeys.indexOf(endLayer),
+      })
+    }
+  }
+  branchRanges.sort((a, b) => a.startIndex - b.startIndex || a.endIndex - b.endIndex)
+  const atomicRanges: LayerRange[] = []
+  for (const range of branchRanges) {
+    const previous = atomicRanges[atomicRanges.length - 1]
+    if (previous && range.startIndex <= previous.endIndex) {
+      previous.endIndex = Math.max(previous.endIndex, range.endIndex)
+    } else {
+      atomicRanges.push({ ...range })
+    }
+  }
+
   // --- Readable row packing -------------------------------------------------
-  // A layer is never split: its nodes share an x column. Small graphs keep one
-  // horizontal axis. Long graphs use several compact rows instead of the old
-  // right-and-down staircase, which made fit-view text unreadably small.
-  const layerW = (l: number): number =>
-    Math.max(...layers.get(l)!.map((id) => dims.get(id)!.w), nodeWidth)
+  // `dims` already contains the fallback for an unmeasured node. Applying
+  // nodeWidth again as a minimum here widened every measured 180px card to a
+  // 200px column and pushed an otherwise readable graph below the font floor.
+  const layerW = (l: number): number => Math.max(...layers.get(l)!.map((id) => dims.get(id)!.w))
   const layerH = (l: number): number => {
     const arr = layers.get(l)!
     return arr.reduce((sum, id) => sum + dims.get(id)!.h, 0) + vGap * (arr.length - 1)
   }
-
-  interface Row {
-    layers: number[]
-    /** Sum of layer widths + inter-layer gaps (no trailing gap). */
+  interface LayoutUnit extends LayerRange {
     width: number
-    /** Tallest layer in the row. */
+    height: number
+  }
+  const units: LayoutUnit[] = []
+  for (let index = 0; index < layerKeys.length;) {
+    const range = atomicRanges.find((candidate) => candidate.startIndex === index)
+    const endIndex = range?.endIndex ?? index
+    const unitLayers = layerKeys.slice(index, endIndex + 1)
+    units.push({
+      startIndex: index,
+      endIndex,
+      width: unitLayers.reduce((sum, key) => sum + layerW(key), 0) + hGap * (unitLayers.length - 1),
+      height: Math.max(...unitLayers.map(layerH)),
+    })
+    index = endIndex + 1
+  }
+  interface Row {
+    units: LayoutUnit[]
+    width: number
     height: number
   }
 
   const maxWidth = Math.max(maxRowWidth, nodeWidth + hGap)
-  const unwrappedWidth = layerKeys.reduce(
-    (width, layerKey, index) => width + layerW(layerKey) + (index > 0 ? hGap : 0),
+  const unwrappedWidth = units.reduce(
+    (width, unit, index) => width + unit.width + (index > 0 ? hGap : 0),
     0,
   )
-  // Fit-view still has to leave the 13px node title readable. The slight
-  // overflow allowed here is what keeps a typical graph on one horizontal axis.
-  const MIN_READABLE_OVERVIEW_ZOOM = 0.8
+  const MIN_READABLE_OVERVIEW_ZOOM = 0.65
   const rowWidthLimit =
     unwrappedWidth <= maxWidth / MIN_READABLE_OVERVIEW_ZOOM ? unwrappedWidth : maxWidth
   const rows: Row[] = []
-  let current: Row = { layers: [], width: 0, height: 0 }
-  for (const l of layerKeys) {
-    const lw = layerW(l)
-    if (current.layers.length > 0 && current.width + hGap + lw > rowWidthLimit) {
+  let current: Row = { units: [], width: 0, height: 0 }
+  for (const unit of units) {
+    if (current.units.length > 0 && current.width + hGap + unit.width > rowWidthLimit) {
       rows.push(current)
-      current = { layers: [], width: 0, height: 0 }
+      current = { units: [], width: 0, height: 0 }
     }
-    current.layers.push(l)
-    current.width = current.layers.length === 1 ? lw : current.width + hGap + lw
-    current.height = Math.max(current.height, layerH(l))
+    current.units.push(unit)
+    current.width = current.units.length === 1 ? unit.width : current.width + hGap + unit.width
+    current.height = Math.max(current.height, unit.height)
   }
-  if (current.layers.length > 0) rows.push(current)
+  if (current.units.length > 0) rows.push(current)
 
   // --- Position assignment --------------------------------------------------
-  const rowOfLayer = new Map<number, number>()
-  const layerOffsets = rows.map((row, rowIndex) => {
-    const offsets = new Map<number, number>()
-    let x = 0
-    for (const layerKey of row.layers) {
-      rowOfLayer.set(layerKey, rowIndex)
-      offsets.set(layerKey, x)
-      x += layerW(layerKey) + hGap
-    }
-    return offsets
-  })
-  const rowStarts = rows.map(() => 0)
-
-  // Ordinary wrap connectors turn back only into the next row. A forward jump
-  // over several rows must not also shoot all the way back to the left edge:
-  // shift just its destination row enough to keep that edge local/readable.
-  // Rows without such a jump stay left-aligned; this is not the old staircase.
-  for (let targetRow = 1; targetRow < rows.length; targetRow++) {
-    for (const edge of forwardEdges) {
-      if (!dims.has(edge.source) || !dims.has(edge.target)) continue
-      const sourceLayer = layer.get(edge.source)!
-      const targetLayer = layer.get(edge.target)!
-      const sourceRow = rowOfLayer.get(sourceLayer)!
-      if (rowOfLayer.get(targetLayer) !== targetRow || targetRow - sourceRow <= 1) continue
-      const sourceX = rowStarts[sourceRow]! + layerOffsets[sourceRow]!.get(sourceLayer)!
-      const targetOffset = layerOffsets[targetRow]!.get(targetLayer)!
-      const requiredStart = sourceX + dims.get(edge.source)!.w + hGap - targetOffset
-      rowStarts[targetRow] = Math.max(rowStarts[targetRow]!, requiredStart)
-    }
-  }
-
+  // Units stay intact. Inside a branch unit the condition is on the left, its
+  // alternatives share the next column, and the merge remains to their right.
   const totalHeight = rows.reduce((sum, r) => sum + r.height, 0) + rowGap * (rows.length - 1)
   const positions = new Map<string, LayoutPoint>()
   let rowTop = -totalHeight / 2
-  for (const [rowIndex, row] of rows.entries()) {
-    let cursor = rowStarts[rowIndex]!
-    for (const l of row.layers) {
-      const arr = layers.get(l)!
-      const colY = rowTop + (row.height - layerH(l)) / 2
-      let y = colY
-      for (const id of arr) {
-        positions.set(id, { x: cursor, y })
-        y += dims.get(id)!.h + vGap
+  for (const row of rows) {
+    let cursor = 0
+    for (const unit of row.units) {
+      for (let index = unit.startIndex; index <= unit.endIndex; index++) {
+        const layerKey = layerKeys[index]!
+        const column = layers.get(layerKey)!
+        const colY = rowTop + (row.height - layerH(layerKey)) / 2
+        let y = colY
+        for (const id of column) {
+          positions.set(id, { x: cursor, y })
+          y += dims.get(id)!.h + vGap
+        }
+        cursor += layerW(layerKey) + hGap
       }
-      cursor += layerW(l) + hGap
     }
     rowTop += row.height + rowGap
   }

@@ -71,7 +71,7 @@ describe('autoLayout', () => {
       source: `n${i}`,
       target: `n${i + 1}`,
     }))
-    // Default columns are 200 wide + 70 gap → three columns fill 740; the
+    // Default columns are 200 wide + 20 gap → three columns fit 740; the
     // fourth wraps, so this lays out as two rows of three.
     const pos = autoLayout(nodes, edges, { maxRowWidth: 740 })
     expect(pos.get('n0')!.x).toBeLessThan(pos.get('n1')!.x)
@@ -103,6 +103,53 @@ describe('autoLayout', () => {
     expect(pos.get('merge')!.y).toBe(pos.get('start')!.y)
     expect(pos.get('a')!.x).toBe(pos.get('b')!.x)
     expect(pos.get('merge')!.x).toBeGreaterThan(pos.get('a')!.x)
+  })
+
+  describe('atomic condition branch groups', () => {
+    const branchNodes = ['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8'].map((id) => ({
+      id,
+      width: 180,
+      height: 52,
+    }))
+    const branchEdges = [
+      { source: 't1', target: 't2' },
+      { source: 't2', target: 't3' },
+      { source: 't3', target: 't4' },
+      { source: 't4', target: 't5' },
+      { source: 't4', target: 't6' },
+      { source: 't5', target: 't7' },
+      { source: 't6', target: 't7' },
+      { source: 't7', target: 't8' },
+    ]
+
+    it('keeps condition, both branches and merge together when narrow rows wrap', () => {
+      const placed = autoLayout(branchNodes, branchEdges, { maxRowWidth: 500 })
+      expect(new Set([...placed.values()].map((point) => point.y)).size).toBeGreaterThan(2)
+      // The condition and merge are centered on one group axis; alternatives
+      // are above/below it, and the merge remains on their right.
+      expect(placed.get('t7')!.y).toBe(placed.get('t4')!.y)
+      expect((placed.get('t5')!.y + placed.get('t6')!.y) / 2).toBe(placed.get('t4')!.y)
+      expect(placed.get('t5')!.x).toBe(placed.get('t6')!.x)
+      expect(placed.get('t5')!.x).toBeGreaterThan(placed.get('t4')!.x)
+      expect(placed.get('t7')!.x).toBeGreaterThan(placed.get('t5')!.x)
+    })
+
+    it('keeps the whole typical graph on one axis at the real viewport width', () => {
+      const placed = autoLayout(branchNodes, branchEdges, { maxRowWidth: 1032 })
+      expect(placed.get('t1')!.y).toBe(placed.get('t4')!.y)
+      expect(placed.get('t7')!.y).toBe(placed.get('t4')!.y)
+      expect(placed.get('t8')!.y).toBe(placed.get('t4')!.y)
+      expect(placed.get('t8')!.x).toBeGreaterThan(placed.get('t7')!.x)
+      expect(placed.get('t5')!.x).toBe(placed.get('t6')!.x)
+    })
+
+    it('keeps the atomic layout deterministic when node order is reversed', () => {
+      const forward = autoLayout(branchNodes, branchEdges, { maxRowWidth: 500 })
+      const reversed = autoLayout([...branchNodes].reverse(), branchEdges, { maxRowWidth: 500 })
+      const serialize = (placed: typeof forward): [string, { x: number; y: number }][] =>
+        [...placed].sort(([a], [b]) => a.localeCompare(b))
+      expect(serialize(reversed)).toEqual(serialize(forward))
+    })
   })
 
   it('never splits a layer across rows and positions every node', () => {
