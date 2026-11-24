@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { autoLayout, viewportForBounds } from '../src/workflow-editor/auto-layout'
+import {
+  autoLayout,
+  viewportForBounds,
+  type LayoutPackingInfo,
+} from '../src/workflow-editor/auto-layout'
 
 describe('autoLayout', () => {
   it('places a linear chain in increasing-x layers', () => {
@@ -162,8 +166,7 @@ describe('autoLayout', () => {
       { source: 'a', target: 'merge' },
       { source: 'b', target: 'merge' },
     ]
-    const reported: { columnsPerRow: number; rows: number; fitZoom: number; repacked: boolean }[] =
-      []
+    const reported: LayoutPackingInfo[] = []
     const baseline = autoLayout(nodes, edges, { maxRowWidth: 1032 })
     const withReport = autoLayout(nodes, edges, {
       maxRowWidth: 1032,
@@ -183,8 +186,7 @@ describe('autoLayout', () => {
       source: `n${i}`,
       target: `n${i + 1}`,
     }))
-    const reported: { columnsPerRow: number; rows: number; fitZoom: number; repacked: boolean }[] =
-      []
+    const reported: LayoutPackingInfo[] = []
     const placed = autoLayout(nodes, edges, {
       maxRowWidth: 1032,
       maxRowHeight: 804,
@@ -193,9 +195,10 @@ describe('autoLayout', () => {
     const packing = reported[0]!
     // The whole reason for the search: filling the width would be too tall to read.
     expect(packing.repacked).toBe(true)
-    expect(packing.fitZoom).toBeGreaterThan(0.55)
     expect(packing.columnsPerRow).toBeGreaterThan(5)
     expect(packing.rows).toBeGreaterThan(1)
+    // The packing is short enough that a 804px-tall viewport can zoom in.
+    expect(packing.contentHeight).toBeLessThan(1400)
     // Still one card per layer position: nothing overlaps in the same column.
     expect([...placed.keys()]).toHaveLength(60)
   })

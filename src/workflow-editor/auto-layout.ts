@@ -45,8 +45,9 @@ export interface LayoutPackingInfo {
   columnsPerRow: number
   /** Rows the graph was split into. */
   rows: number
-  /** Estimated fit-view zoom for the chosen packing. */
-  fitZoom: number
+  /** Bounding box of the chosen packing, in canvas units. */
+  contentWidth: number
+  contentHeight: number
   /**
    * True when the approved "fill the width" packing was replaced because it read
    * below the legibility floor. A false value means the graph kept its usual shape.
@@ -461,6 +462,10 @@ export function autoLayout(
       }
     }
   }
+  // Report the packing FACTS, not a zoom estimate: the real zoom also depends on
+  // the side-panel inset and padding, so a log-only zoom reads ~5% optimistic and
+  // must never be used to judge whether the text is big enough. Measure the
+  // on-screen font when that matters.
   onPacking?.({
     columnsPerRow: Math.max(
       ...rows.map((row) =>
@@ -468,7 +473,10 @@ export function autoLayout(
       ),
     ),
     rows: rows.length,
-    fitZoom: Number(fitZoomOf(rows).toFixed(3)),
+    contentWidth: Math.round(Math.max(...rows.map((row) => row.width))),
+    contentHeight: Math.round(
+      rows.reduce((sum, row) => sum + row.height, 0) + rowGap * (rows.length - 1),
+    ),
     repacked,
   })
 
