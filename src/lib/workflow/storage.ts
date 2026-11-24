@@ -358,9 +358,13 @@ export async function recordWorkflowRollback(
   const fingerprint = workflowFingerprint(prepared)
   return withKeyLock(versionIndexKey(workflow.id), async () => {
     const index = await loadWorkflowVersionIndex(workflow.id)
+    // The caller sends the SNAPSHOT it applied, whose revision is the number that
+    // version was saved at. Using it made the list run backwards ("version 4 ·
+    // save #1"); the save sequence the canvas is on comes from the stored record.
+    const stored = await getWorkflow(workflow.id)
     const entry = rollbackEntryOf(index, fromVersion, {
       at: now,
-      revision: currentRevisionOf(workflow),
+      revision: currentRevisionOf(stored ?? workflow),
       fingerprint,
       nodes: prepared.drawflow.nodes.length,
       edges: prepared.drawflow.edges.length,
