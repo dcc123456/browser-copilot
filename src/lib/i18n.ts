@@ -691,6 +691,15 @@ export interface Messages {
    * an abnormal exit (the stored state still claimed a running turn).
    */
   chatTurnInterrupted: string
+  /** Stop pressed before the turn reached the model: nothing was sent. */
+  chatTurnCancelled: string
+  /**
+   * A pre-flight step (local storage read/write, page read) outlived its
+   * budget. `step` names it, for support; the user-facing advice is the same.
+   */
+  chatPreparingTimedOut: (params: { step: string }) => string
+  /** The turn's final transcript write outlived its budget. */
+  chatSaveTimedOut: string
   /**
    * Status line while a dropped stream is being retried. `retry`/`retries`
    * count attempts after the failure; `seconds` is the wait before the next;
@@ -2554,6 +2563,11 @@ const en: Messages = {
     'The connection dropped mid-reply. Any answer was saved to this conversation — send another message to continue.',
   chatTurnInterrupted:
     'The previous turn was interrupted (the extension crashed or exited before it finished). Everything saved so far is shown above — send another message to continue.',
+  chatTurnCancelled: 'Stopped before the message reached the model.',
+  chatPreparingTimedOut: ({ step }) =>
+    `Starting this turn timed out (${step}), so nothing was sent to the model. Check that the data folder under Settings → Storage location is reachable, then try again.`,
+  chatSaveTimedOut:
+    'Saving this conversation timed out — the latest messages may not be stored. Check the data folder under Settings → Storage location.',
   chatReconnecting: ({ retry, retries, seconds, continuing }) =>
     continuing
       ? `Connection lost. Reconnecting in ${seconds}s (${retry}/${retries}) — continuing the reply where it stopped…`
@@ -4344,6 +4358,11 @@ const zhCN: Messages = {
   chatConnectionDropped: '回复过程中连接中断。已生成的内容已保存到本次对话——再发一条消息即可继续。',
   chatTurnInterrupted:
     '上一轮任务被中断（扩展在完成前崩溃或异常退出），上方是已经保存的内容——再发一条消息即可继续。',
+  chatTurnCancelled: '已停止，消息没有发送给模型。',
+  chatPreparingTimedOut: ({ step }) =>
+    `本次消息启动超时（${step}），没有发送给模型。请检查「设置 → 存储位置」里的数据目录是否可访问，然后重试。`,
+  chatSaveTimedOut:
+    '保存本次对话超时——最新消息可能没有写入。请检查「设置 → 存储位置」里的数据目录。',
   chatReconnecting: ({ retry, retries, seconds, continuing }) =>
     continuing
       ? `连接中断，${seconds}s 后自动重连（第 ${retry}/${retries} 次）——从已输出的内容继续…`

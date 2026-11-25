@@ -191,6 +191,7 @@ import {
 } from '../lib/storage'
 import { compactConversationOnRequest, runAgentTurn } from './agent'
 import { createProgressCheckpoint } from '../lib/progress-checkpoint'
+import { DeadlineExceededError, withDeadline } from '../lib/deadline'
 import {
   clearDraft,
   composeWorkflowFromDraft,
@@ -390,6 +391,22 @@ const AUDIT_TIMEOUT_MS = 8 * 60_000
  * the session falls back to the old no-error standard.
  */
 const GOAL_CHECK_TIMEOUT_MS = 3 * 60_000
+
+/**
+ * Budget for a turn's whole pre-flight (transcript read, conversation-index
+ * write, page read). These steps only touch local state and normally take
+ * milliseconds; the budget exists because a data folder that stopped
+ * responding leaves them pending forever, and the turn would then sit on
+ * "preparing" with no way to fail or be cancelled.
+ */
+const PREFLIGHT_DEADLINE_MS = 20_000
+
+/**
+ * Budget for each await in the turn's final save. A hung store must not keep
+ * the turn (and its channel, i.e. the next message) alive after the panel has
+ * already been told the turn ended.
+ */
+const FINALIZE_DEADLINE_MS = 5_000
 
 // Persist every finished run (with its steps) so the run log survives a worker
 // eviction/restart. finishRun calls this synchronously; recordFinishedRun is
@@ -1479,6 +1496,11 @@ function newDebugSessionId(): string {
   return typeof crypto?.randomUUID === 'function'
     ? crypto.randomUUID()
     : `dbg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/** Whether `error` is a cancelled wait (`AbortController.abort`). */
+function isAbortError(error: unknown): boolean {
+  return (error as Error | undefined)?.name === 'AbortError'
 }
 
 /**
@@ -3999,15 +4021,30 @@ chrome.runtime.onConnect.addListener((port) => {
       let failure: string | undefined
       try {
         sendWithTracking({ type: 'phase', phase: 'preparing' })
+        // Everything below until the model request only awaits local state, and
+        // none of those calls can be cancelled. The deadline turns a data folder
+        // that stopped responding into a reported failure instead of a
+        // "preparing" line that never moves; the signal is what lets Stop end
+        // the wait before the model is ever asked anything.
+        const preflightDeadline = Date.now() + PREFLIGHT_DEADLINE_MS
+        const awaitPreflight = <T>(work: T | PromiseLike<T>, step: string): Promise<T> =>
+          withDeadline(work, {
+            ms: Math.max(0, preflightDeadline - Date.now()),
+            signal: turnController.signal,
+            label: step,
+          })
         // Workflow generation mode: persist the name the user confirmed at
         // task start BEFORE the turn runs, so `prepare_workflow_goal` adopts
         // it as the authoritative contract name (survives worker recycling).
         const confirmedWorkflowName =
           typeof message.workflowName === 'string' ? message.workflowName.trim() : ''
         if (confirmedWorkflowName) {
-          await saveConfirmedWorkflowName(conversationId, confirmedWorkflowName)
+          await awaitPreflight(
+            saveConfirmedWorkflowName(conversationId, confirmedWorkflowName),
+            'save workflow name',
+          )
         }
-        history = await loadConversation(conversationId)
+        history = await awaitPreflight(loadConversation(conversationId), 'load conversation')
         // Register the live transcript on the channel so a panel that
         // reconnects mid-turn (minimize/expand, crash, worker recycle) resumes
         // the CURRENT state, not the last persisted snapshot. Cleared with the
@@ -4018,7 +4055,7 @@ chrome.runtime.onConnect.addListener((port) => {
         // front: selection reading, /run workflows and every agent tool call
         // share it. A window that died before the turn started (or an unknown
         // one) degrades to undefined = legacy global resolution.
-        const scope = await normalScopeFromWindowId(panelWindowId)
+        const scope = await awaitPreflight(normalScopeFromWindowId(panelWindowId), 'resolve window')
 
         let text = message.text
         /** Skill pinned for this turn, recorded so the panel can show its tag. */
@@ -4028,7 +4065,7 @@ chrome.runtime.onConnect.addListener((port) => {
           try {
             // Scoped: read the selection in the PANEL's window — the focused
             // window may be another one the user is browsing by hand.
-            const page = await readActiveSelection(scope)
+            const page = await awaitPreflight(readActiveSelection(scope), 'read selection')
             if (page.selection.trim().length > 0) {
               text =
                 `Content selected on the page I am viewing:\n` +
@@ -4042,6 +4079,8 @@ chrome.runtime.onConnect.addListener((port) => {
               })
             }
           } catch (error) {
+            // A cut wait is the turn ending, not an unreadable selection.
+            if (error instanceof DeadlineExceededError || isAbortError(error)) throw error
             sendWithTracking({
               type: 'status',
               text: `Could not read the selection: ${
@@ -4056,7 +4095,7 @@ chrome.runtime.onConnect.addListener((port) => {
         // but an imperative wrapper next to the user's own text makes the model
         // far less likely to ignore or refuse the skill.
         if (message.skillId) {
-          const pinned = await getSkill(message.skillId)
+          const pinned = await awaitPreflight(getSkill(message.skillId), 'load skill')
           if (pinned) {
             text = wrapSkillDirective(pinned, text)
             pinnedSkillName = pinned.name
@@ -4084,7 +4123,10 @@ chrome.runtime.onConnect.addListener((port) => {
         })
         // Persist metadata so the conversation appears in the history list;
         // fall back to an attachment-derived label for files-only messages.
-        await touchConversation(conversationId, message.text || attachmentLabel)
+        await awaitPreflight(
+          touchConversation(conversationId, message.text || attachmentLabel),
+          'save conversation index',
+        )
         // The user's own message becomes durable before the model is asked
         // anything: the first write is immediate, later ones are throttled.
         progress.schedule(history)
@@ -4171,34 +4213,60 @@ chrome.runtime.onConnect.addListener((port) => {
         })
         sendWithTracking({ type: 'done', ...(turnUsage ? { usage: turnUsage } : {}) })
       } catch (error) {
-        failure = (await localizeLlmFailure(error)).message
-        sendWithTracking({ type: 'error', message: failure })
+        if (isAbortError(error)) {
+          // Stop pressed before the model was asked anything: end the turn the
+          // way a cancelled streaming turn ends, so the panel unlocks and the
+          // composer is usable again immediately.
+          sendWithTracking({ type: 'status', text: (await workerMessages()).chatTurnCancelled })
+          sendWithTracking({ type: 'done' })
+        } else if (error instanceof DeadlineExceededError) {
+          failure = (await workerMessages()).chatPreparingTimedOut({ step: error.label })
+          sendWithTracking({ type: 'error', message: failure })
+        } else {
+          failure = (await localizeLlmFailure(error)).message
+          sendWithTracking({ type: 'error', message: failure })
+        }
       } finally {
         // Cancel a pending checkpoint and wait for one already in flight, so
-        // the authoritative save below is the last write for this key.
-        await progress.flush()
+        // the authoritative save below is the last write for this key. Both
+        // awaits are capped: by the time this runs the panel has already been
+        // told the turn ended, and a hung store must not keep the turn — and
+        // with it the one-turn-per-conversation lock — alive indefinitely.
+        await withDeadline(progress.flush(), {
+          ms: FINALIZE_DEADLINE_MS,
+          label: 'flush checkpoint',
+        }).catch(() => undefined)
         // Persist whatever was accumulated, including partial tool exchanges, so
         // an interrupted turn does not lose the conversation. A failed save is
         // surfaced rather than silently swallowed: losing a transcript the user
         // just watched being written is worth one status line.
         if (history.length > 0) {
           try {
-            await saveConversation(conversationId, history)
+            await withDeadline(saveConversation(conversationId, history), {
+              ms: FINALIZE_DEADLINE_MS,
+              label: 'save conversation',
+            })
           } catch (saveError) {
             sendWithTracking({
               type: 'status',
-              text: `Could not save this conversation: ${
-                saveError instanceof Error ? saveError.message : String(saveError)
-              }`,
+              text:
+                saveError instanceof DeadlineExceededError
+                  ? (await workerMessages()).chatSaveTimedOut
+                  : `Could not save this conversation: ${
+                      saveError instanceof Error ? saveError.message : String(saveError)
+                    }`,
             })
           }
         }
-        await setTurnState({
-          conversationId,
-          running: false,
-          at: Date.now(),
-          ...(failure ? { error: failure } : {}),
-        }).catch(() => {})
+        await withDeadline(
+          setTurnState({
+            conversationId,
+            running: false,
+            at: Date.now(),
+            ...(failure ? { error: failure } : {}),
+          }),
+          { ms: FINALIZE_DEADLINE_MS, label: 'turn state' },
+        ).catch(() => undefined)
         closeTurnChannel(conversationId)
         // The turn's stream now follows whichever panel is watching, so a panel
         // that stayed open already saw `done`. This broadcast still lands the
