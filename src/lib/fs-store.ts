@@ -886,6 +886,18 @@ export class StorageFolderPickRetryError extends Error {
   }
 }
 
+export interface PickStorageDirectoryOptions {
+  /**
+   * Switch even when the departing folder cannot be read (moved, deleted, or
+   * a permission Chrome will not re-grant). Its data is NOT carried — the files
+   * stay where they are — which is why the caller has to spell that out to the
+   * user. Without this escape an unreachable folder is a dead end: the picker
+   * that would supply a fresh handle is the very call being refused, and
+   * re-picking the same folder is often the only way to regain access.
+   */
+  allowUnreadableDeparting?: boolean
+}
+
 /**
  * Shows the directory picker (window + user gesture required), remembers the
  * handle, and carries the departing folder's data into the picked one before
@@ -901,17 +913,22 @@ export class StorageFolderPickRetryError extends Error {
  * picker needs, so the picker may reject; the caller is then told to click
  * again ({@link StorageFolderPickRetryError}) — the folder stays connected.
  */
-export async function pickStorageDirectory(): Promise<StorageMode> {
+export async function pickStorageDirectory(
+  options: PickStorageDirectoryOptions = {},
+): Promise<StorageMode> {
   if (typeof window === 'undefined' || typeof window.showDirectoryPicker !== 'function') {
     throw new Error('File System Access API is not available in this browser.')
   }
-  // Never open the picker over an unreachable departing folder: the data has
-  // to be readable before it can follow the user to the new folder.
-  let wasDisconnected = false
+  // Never open the picker over an unreachable departing folder unless the
+  // caller accepted losing the carry: the data has to be readable before it
+  // can follow the user to the new folder. Skipping the re-grant attempt is
+  // deliberate — the prompt would consume the click the picker needs.
+  let regranted = false
   if (await isStorageDirectoryConfigured()) {
-    wasDisconnected = (await getStorageMode()) !== 'file'
-    if (wasDisconnected && (await ensureFileAccess()) !== 'file') {
-      throw new StorageFolderUnreachableError()
+    const wasDisconnected = (await getStorageMode()) !== 'file'
+    if (wasDisconnected && !options.allowUnreadableDeparting) {
+      if ((await ensureFileAccess()) !== 'file') throw new StorageFolderUnreachableError()
+      regranted = true
     }
   }
   let handle: FileSystemDirectoryHandle
@@ -920,7 +937,7 @@ export async function pickStorageDirectory(): Promise<StorageMode> {
   } catch (error) {
     // The re-grant prompt consumed the activation the picker needs. The folder
     // is connected now, so the next click reaches the picker directly.
-    if (wasDisconnected) throw new StorageFolderPickRetryError()
+    if (regranted) throw new StorageFolderPickRetryError()
     throw error
   }
   // Read the departing folder while it is still the configured one: after the

@@ -1424,6 +1424,12 @@ export interface Messages {
   settingsStoragePendingWrites: (params: { count: number }) => string
   settingsStorageReconnectFirst: string
   settingsStoragePickAgain: string
+  /** Reconnecting stayed impossible: the folder is gone or cannot be re-granted. */
+  settingsStorageReconnectFailed: string
+  /** Explains that a folder which cannot be read keeps its files in place. */
+  settingsStorageUnreachableHint: string
+  /** Button: switch folders even though the old one cannot be read or carried. */
+  settingsStoragePickIgnoringOld: string
 
   // Settings · download directory
   settingsDownloadDir: string
@@ -3203,6 +3209,11 @@ const en: Messages = {
     'The current storage folder is not connected, so its data cannot be moved yet. Reconnect it first, then change folders.',
   settingsStoragePickAgain:
     'The current folder is reconnected. Click "Change folder" again to pick the new one.',
+  settingsStorageReconnectFailed:
+    'Could not reconnect that folder — it may have been moved or deleted, or Chrome will not ask again. Pick the folder again (choosing the same one brings its data back), or pick another folder without migrating.',
+  settingsStorageUnreachableHint:
+    'The old folder cannot be read, so its data cannot be moved. The files stay where they are — choosing that same folder again brings everything back.',
+  settingsStoragePickIgnoringOld: 'Pick a folder without migrating',
 
   settingsDownloadDir: 'Download folder',
   settingsDownloadDirIntro:
@@ -4926,6 +4937,11 @@ const zhCN: Messages = {
   settingsStorageReconnectFirst:
     '当前存储目录尚未连接，原目录里的数据暂时无法迁移。请先重新连接，再更换目录。',
   settingsStoragePickAgain: '当前目录已重新连接，请再次点击「更换文件夹」选择新目录。',
+  settingsStorageReconnectFailed:
+    '重新连接失败——原目录可能已被移动或删除，或 Chrome 不再弹出授权。可以重新选择该文件夹（选回同一个目录即可恢复数据），或换一个目录但不迁移旧数据。',
+  settingsStorageUnreachableHint:
+    '原目录当前读不出来，无法把里面的数据搬过去。文件仍留在原目录——选回同一个文件夹即可恢复。',
+  settingsStoragePickIgnoringOld: '不迁移，直接选择新目录',
 
   settingsDownloadDir: '下载目录',
   settingsDownloadDirIntro:

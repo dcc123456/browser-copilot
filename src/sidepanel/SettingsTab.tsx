@@ -383,15 +383,17 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     }
   }, [refreshStorage])
 
-  const chooseFolder = async (): Promise<void> => {
+  const chooseFolder = async (allowUnreadableDeparting = false): Promise<void> => {
     setStorageBusy(true)
     setStorageNotice(null)
     try {
       // Picking a folder carries the departing folder's data over (see
       // `pickStorageDirectory`) and ends where a reconnect ends, so it
       // announces the same event: every mounted tab re-reads, from the new
-      // folder this time.
-      await pickStorageDirectory()
+      // folder this time. `allowUnreadableDeparting` is the escape from a
+      // folder that can no longer be read: the carry is skipped (its files
+      // stay where they are) instead of refusing the picker outright.
+      await pickStorageDirectory({ allowUnreadableDeparting })
       const name = (await getStorageDirectoryName()) ?? ''
       setStorageMode('file')
       setStorageDirName(name)
@@ -430,6 +432,10 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         // announces it the same way: every mounted tab reloads its data from
         // the reconnected folder through this one event.
         window.dispatchEvent(new Event(STORAGE_RECONNECTED_EVENT))
+      } else {
+        // Saying nothing here reads as "the button is broken": the row simply
+        // stayed on "needs reconnect" with no explanation and no way forward.
+        setStorageNotice({ kind: 'error', text: t.settingsStorageReconnectFailed })
       }
     } catch (error) {
       setStorageNotice({ kind: 'error', text: (error as Error).message })
@@ -1366,12 +1372,24 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         {pendingWrites > 0 && (
           <p className="hint">{t.settingsStoragePendingWrites({ count: pendingWrites })}</p>
         )}
+        {storageDirName && storageMode !== 'file' && (
+          <p className="hint">{t.settingsStorageUnreachableHint}</p>
+        )}
         <div className="actions">
           {storageDirName ? (
             <>
               <button disabled={storageBusy} onClick={() => void reconnectFolder()} type="button">
                 {t.settingsReconnectFolder}
               </button>
+              {storageMode !== 'file' && (
+                <button
+                  disabled={storageBusy}
+                  onClick={() => void chooseFolder(true)}
+                  type="button"
+                >
+                  {t.settingsStoragePickIgnoringOld}
+                </button>
+              )}
               <button disabled={storageBusy} onClick={() => void chooseFolder()} type="button">
                 {t.settingsChangeFolder}
               </button>

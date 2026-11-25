@@ -1164,6 +1164,32 @@ describe('changing the storage directory', () => {
     expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({ type: STORAGE_DIRECTORY_CHANGED })
   })
 
+  it('switches anyway when the caller accepted an unreadable departing folder', async () => {
+    // Re-picking the folder is often the only way back (the stored handle can be
+    // permanently denied, or its directory moved), so the escape has to open
+    // the picker and swap the handle — while carrying nothing and deleting
+    // nothing: the unreachable folder's files stay where they are.
+    const departing = makeFakeRoot()
+    const departingFs = new FsDirectory(departing.handle as FileSystemDirectoryHandle)
+    await departingFs.writeText(['workflows.json'], JSON.stringify([{ id: 'w1', updatedAt: 1 }]))
+    stubPendingDirectory(departing.handle as FakeDir)
+
+    const picked = makeFakeRoot()
+    const pickedFs = new FsDirectory(picked.handle as FileSystemDirectoryHandle)
+    await pickedFs.writeText(['workflows.json'], JSON.stringify([{ id: 'w1', updatedAt: 1 }]))
+    stubDirectoryPicker(picked.handle as FakeDir)
+
+    expect(await pickStorageDirectory({ allowUnreadableDeparting: true })).toBe('file')
+
+    // The picked folder's own file is untouched by the skipped carry.
+    const dir = dataDir(picked.node)
+    expect(JSON.parse((dir.children.get('workflows.json') as FileNode).content)).toEqual([
+      { id: 'w1', updatedAt: 1 },
+    ])
+    // Every other context is told, or the worker keeps writing to the old folder.
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: STORAGE_DIRECTORY_CHANGED })
+  })
+
   it('tells every other context that the configured folder changed', async () => {
     const departing = makeFakeRoot()
     stubGrantedDirectory(departing.handle as FakeDir)
