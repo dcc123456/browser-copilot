@@ -4,7 +4,57 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.22] - 2026-11-22
+## [0.6.21] - 2026-11-25
+
+### Added — Workflow save versions you can switch back to
+
+Every save that actually changes the graph now leaves a snapshot (up to 20 per
+workflow), browsable from the **Versions** tab beside the data table. The list
+marks the version the canvas equals as _current_ and refuses to delete it, and
+it stores nothing inside the workflow JSON: one index key plus one key per
+snapshot, de-duplicated by a content fingerprint that ignores saves with no
+change, viewport pans/zooms, card positions, the revision counter and filing
+metadata. Snapshots are taken from the exact form written to disk (migrated,
+bulk data URLs shed), and a node whose data exceeds 256KB refuses the snapshot
+with a visible note instead of silently doing nothing.
+
+### Changed — Applying a version switches to it; it does not create a rollback line
+
+Clicking **Apply** used to append a `rolled back from vN` history row and left
+the canvas unsaved. Apply now switches the workflow to that version — content
+written, applied row marked current — without adding a version; the list only
+grows when edited content is saved again, and a save that just writes back the
+applied content adds nothing. The rollback trace line is retired (legacy rows
+are dropped when the index is read), and applying preserves filing, parameter
+values, provenance, the revision sequence, card positions and viewport.
+
+### Added — Test one operator without replaying the workflow
+
+An operator node's hover toolbar has a **run this block only** button: it saves
+the workflow, runs that one node and stops there, using the same interpolation,
+retry, readiness, pre-flight and run-log path as a real replay. It is a partial
+run, so it skips the goal gate, certification and the first-run health metric;
+locator self-heal write-back is kept. Trigger, loop, sub-workflow, group and
+loop-breakpoint nodes, and placeholder executors, do not show the button.
+
+### Fixed — An unknown operator no longer vanishes from an older or newer workflow
+
+A block this build does not recognise renders as a visible placeholder card
+with working handles, and its original `blockId` and label survive save and
+migration instead of being rewritten to `unknown` — an invisible node used to
+drop every edge that pointed at it.
+
+### Fixed — Auto-layout keeps branch pairs together and large graphs readable
+
+Condition branches stay adjacent, fallback/retry edges no longer take part in
+the beautify pass, large graphs pick a column count for a readable zoom before
+shrinking, and the zoom actually applied is what the plan reports. Pure chains
+may end with a short row; only graphs with branch groups force full rows.
+
+### Fixed — Retry count and interval share one row
+
+With retry enabled in a block's On error settings, Times and Interval render on
+a single row (wrapping only on a narrow dialog) instead of two indented rows.
 
 ### Added — The editor's AI assistant edits any step, not just the selected one
 
@@ -51,8 +101,6 @@ after the loop would never run", naming the reference or breakpoint involved.
 Each step in the digest now lists the variables reachable at its position
 (upstream outputs, plus `loopItem`/`loopIndex` only inside a loop body), so a
 prompt cannot place a loop-scoped reference where it does not exist.
-
-## [0.6.21] - 2026-11-22
 
 ### Added — Explicit task budgets: pause, report, renew, finish
 

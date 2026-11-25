@@ -55,12 +55,14 @@ watch or stay hands-off.
   canvas from 56 block types — clicking, filling, loops, condition branches,
   even an AI-agent step — then launch it by hand, on a schedule, at startup,
   with a keyboard shortcut, from a context menu, or when a matching page is
-  opened.
+  opened. Every save that changes the graph becomes a version (up to 20), and
+  the editor can switch back to any of them in one click.
 - 🧾 **The runs you launch stay manageable.** The editor's AI assistant keeps chat history
   per workflow, the Run button turns into **Stop run** while a run is live, and run logs
   delete one at a time or in bulk and copy out as text. A workflow that declares parameters
   asks for them in a **Parameters required** dialog before it runs — or you store the values
   on the workflow itself, so neither scheduled nor manual runs get interrupted.
+  Hovering any operator offers a one-step test that runs just that node.
 - 🛍️ **Share workflows through a marketplace.** Publish any workflow to the
   public marketplace or a private team repository as a pull request; browse,
   search and sort what others published; apply a listing with its triggers
@@ -591,7 +593,13 @@ auto-lays-out the graph; `Ctrl+S` saves, `Ctrl+Enter` runs from the editor.
 **Working in the editor.** The Save button is marked while the graph differs
 from what is on disk, a bottom bar offers undo / redo / auto-layout, and a
 **Data table** tab lists every run-scoped variable's writers and readers with
-jump-to-node links. The canvas also has an AI assistant that writes operators
+jump-to-node links. The **Versions** tab beside it lists the last 20 snapshots —
+one per save that actually changed the graph — and applies one by switching the
+workflow to it; applying adds no version of its own, so the list only grows when
+edited content is saved again. An operator the build does not recognise still
+renders as a visible card with working handles and keeps its original id and
+label through a save, instead of disappearing from an older or newer workflow.
+The canvas also has an AI assistant that writes operators
 from a prompt and shows its reasoning — it reads the whole graph, so it can
 insert a step before or after any named step, edit one in place, move it, or
 delete it and reconnect its neighbours, all without you selecting anything
