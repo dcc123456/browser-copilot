@@ -20,13 +20,12 @@ import {
 } from '../lib/workflow/operator-categories'
 import { blockDisplayName, categoryDisplayName } from '../workflow-editor/block-i18n'
 import {
+  adoptStorageDirectory,
   clearStorageDirectory,
   ensureFileAccess,
   getStorageDirectoryName,
   getStorageMode,
-  pickStorageDirectory,
   STORAGE_DISCONNECTED_EVENT,
-  StorageFolderPickRetryError,
   StorageFolderUnreachableError,
   type StorageMode,
 } from '../lib/fs-store'
@@ -384,16 +383,47 @@ export default function SettingsTab({ onLocaleChange }: Props) {
   }, [refreshStorage])
 
   const chooseFolder = async (allowUnreadableDeparting = false): Promise<void> => {
+    if (storageBusy) return
+    // Firefox has no File System Access API: say so plainly instead of letting
+    // the missing function surface as a generic failure.
+    if (typeof window.showDirectoryPicker !== 'function') {
+      setStorageNotice({ kind: 'error', text: t.settingsStorageUnsupported })
+      return
+    }
+    // Refuse a switch that would strand the departing folder's data. This uses
+    // the state already on screen so it costs no await before the picker; the
+    // storage layer re-checks the same rule on the picked handle.
+    if (storageDirName && storageMode !== 'file' && !allowUnreadableDeparting) {
+      setStorageNotice({ kind: 'error', text: t.settingsStorageReconnectFirst })
+      return
+    }
+    // Open the picker STRAIGHT from the click: an await before it can lose the
+    // activation and the dialog then never appears. The chosen folder is handed
+    // to the storage layer only afterwards.
+    let picked: FileSystemDirectoryHandle
+    try {
+      picked = await window.showDirectoryPicker({ mode: 'readwrite' })
+    } catch (error) {
+      // Backing out of the native dialog is not a failure.
+      if ((error as DOMException | undefined)?.name === 'AbortError') return
+      console.warn('[storage] folder picker failed:', error)
+      setStorageNotice({
+        kind: 'error',
+        text: t.settingsStoragePickFailed({
+          detail: (error as Error | undefined)?.message ?? String(error),
+        }),
+      })
+      return
+    }
     setStorageBusy(true)
     setStorageNotice(null)
     try {
-      // Picking a folder carries the departing folder's data over (see
-      // `pickStorageDirectory`) and ends where a reconnect ends, so it
-      // announces the same event: every mounted tab re-reads, from the new
-      // folder this time. `allowUnreadableDeparting` is the escape from a
-      // folder that can no longer be read: the carry is skipped (its files
-      // stay where they are) instead of refusing the picker outright.
-      await pickStorageDirectory({ allowUnreadableDeparting })
+      // Adopting carries the departing folder's data over and ends where a
+      // reconnect ends, so it announces the same event: every mounted tab
+      // re-reads, from the new folder this time. `allowUnreadableDeparting` is
+      // the escape from a folder that can no longer be read: the carry is
+      // skipped (its files stay where they are) instead of refusing outright.
+      await adoptStorageDirectory(picked, { allowUnreadableDeparting })
       const name = (await getStorageDirectoryName()) ?? ''
       setStorageMode('file')
       setStorageDirName(name)
@@ -402,12 +432,9 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     } catch (error) {
       // A folder switch is refused while the departing folder is unreachable
       // (its data could not be carried). Guide the user instead of showing the
-      // sentinel's developer message; after the reconnect the next click can
-      // go straight to the picker.
+      // sentinel's developer message.
       if (error instanceof StorageFolderUnreachableError) {
         setStorageNotice({ kind: 'error', text: t.settingsStorageReconnectFirst })
-      } else if (error instanceof StorageFolderPickRetryError) {
-        setStorageNotice({ kind: 'ok', text: t.settingsStoragePickAgain })
       } else {
         setStorageNotice({ kind: 'error', text: (error as Error).message })
       }

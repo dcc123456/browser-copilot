@@ -1423,13 +1423,14 @@ export interface Messages {
   settingsStorageNeedReconnect: (params: { name: string }) => string
   settingsStoragePendingWrites: (params: { count: number }) => string
   settingsStorageReconnectFirst: string
-  settingsStoragePickAgain: string
   /** Reconnecting stayed impossible: the folder is gone or cannot be re-granted. */
   settingsStorageReconnectFailed: string
   /** Explains that a folder which cannot be read keeps its files in place. */
   settingsStorageUnreachableHint: string
   /** Button: switch folders even though the old one cannot be read or carried. */
   settingsStoragePickIgnoringOld: string
+  /** The native folder picker itself failed; `detail` is the browser's own reason. */
+  settingsStoragePickFailed: (params: { detail: string }) => string
 
   // Settings · download directory
   settingsDownloadDir: string
@@ -3207,13 +3208,13 @@ const en: Messages = {
     `${count} change${count === 1 ? '' : 's'} waiting to be written to the folder — they flush automatically once it is reconnected.`,
   settingsStorageReconnectFirst:
     'The current storage folder is not connected, so its data cannot be moved yet. Reconnect it first, then change folders.',
-  settingsStoragePickAgain:
-    'The current folder is reconnected. Click "Change folder" again to pick the new one.',
   settingsStorageReconnectFailed:
     'Could not reconnect that folder — it may have been moved or deleted, or Chrome will not ask again. Pick the folder again (choosing the same one brings its data back), or pick another folder without migrating.',
   settingsStorageUnreachableHint:
     'The old folder cannot be read, so its data cannot be moved. The files stay where they are — choosing that same folder again brings everything back.',
   settingsStoragePickIgnoringOld: 'Pick a folder without migrating',
+  settingsStoragePickFailed: ({ detail }) =>
+    `The folder picker did not open (${detail}). If it never opens, switch to browser storage and back, or reload the extension and try again.`,
 
   settingsDownloadDir: 'Download folder',
   settingsDownloadDirIntro:
@@ -4936,12 +4937,13 @@ const zhCN: Messages = {
     `${count} 条变更待写入文件夹——重新连接后会自动写入。`,
   settingsStorageReconnectFirst:
     '当前存储目录尚未连接，原目录里的数据暂时无法迁移。请先重新连接，再更换目录。',
-  settingsStoragePickAgain: '当前目录已重新连接，请再次点击「更换文件夹」选择新目录。',
   settingsStorageReconnectFailed:
     '重新连接失败——原目录可能已被移动或删除，或 Chrome 不再弹出授权。可以重新选择该文件夹（选回同一个目录即可恢复数据），或换一个目录但不迁移旧数据。',
   settingsStorageUnreachableHint:
     '原目录当前读不出来，无法把里面的数据搬过去。文件仍留在原目录——选回同一个文件夹即可恢复。',
   settingsStoragePickIgnoringOld: '不迁移，直接选择新目录',
+  settingsStoragePickFailed: ({ detail }) =>
+    `文件夹选择器没有打开（${detail}）。如果一直打不开，可以先切换到浏览器存储再切回来，或重载扩展后重试。`,
 
   settingsDownloadDir: '下载目录',
   settingsDownloadDirIntro:

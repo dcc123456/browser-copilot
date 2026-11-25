@@ -1158,8 +1158,9 @@ describe('changing the storage directory', () => {
     stubDirectoryPicker(picked.handle as FakeDir)
 
     await expect(pickStorageDirectory()).rejects.toBeInstanceOf(StorageFolderUnreachableError)
-    // The picker was not even opened, the handle was not swapped, and the
-    // adopted folder was left untouched.
+    // The picker is opened first (an await before it would lose the click's
+    // activation), but the switch is still refused: the handle was not swapped
+    // and the adopted folder was left untouched.
     expect(picked.node.children.has('browser-copilot')).toBe(false)
     expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith({ type: STORAGE_DIRECTORY_CHANGED })
   })

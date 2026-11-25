@@ -874,18 +874,6 @@ export class StorageFolderUnreachableError extends Error {
   }
 }
 
-/**
- * Thrown when the departing folder was just re-granted (which consumes the
- * click's transient activation before Chrome's picker opens). The folder is
- * connected now, so a second click goes straight to the picker.
- */
-export class StorageFolderPickRetryError extends Error {
-  constructor() {
-    super('The storage folder was reconnected; open the picker again.')
-    this.name = 'StorageFolderPickRetryError'
-  }
-}
-
 export interface PickStorageDirectoryOptions {
   /**
    * Switch even when the departing folder cannot be read (moved, deleted, or
@@ -899,19 +887,15 @@ export interface PickStorageDirectoryOptions {
 }
 
 /**
- * Shows the directory picker (window + user gesture required), remembers the
- * handle, and carries the departing folder's data into the picked one before
- * it becomes current. Throws when the picker is unavailable or the user
- * cancels.
+ * Shows the directory picker (window + user gesture required) and adopts the
+ * result. Throws when the picker is unavailable or the user cancels.
  *
- * The carry is what keeps a folder change non-destructive: in file mode the
- * departing folder's files are the only copy of the content, and switching
- * must not strand them. A departing folder whose permission is pending (the
- * post-update state) is re-granted first, in this same click; if that fails
- * the switch is refused ({@link StorageFolderUnreachableError}) instead of
- * silently dropping the data. Re-granting consumes the activation Chrome's
- * picker needs, so the picker may reject; the caller is then told to click
- * again ({@link StorageFolderPickRetryError}) — the folder stays connected.
+ * The picker is the FIRST thing this does on purpose: an `await` before
+ * `showDirectoryPicker` can lose the click's activation and the dialog then
+ * never opens (the download/install pickers follow the same rule). Everything
+ * that could refuse the switch runs on the picked handle instead —
+ * {@link adoptStorageDirectory}. A caller whose state is already known (the
+ * settings row) may open the picker itself and call that directly.
  */
 export async function pickStorageDirectory(
   options: PickStorageDirectoryOptions = {},
@@ -919,26 +903,31 @@ export async function pickStorageDirectory(
   if (typeof window === 'undefined' || typeof window.showDirectoryPicker !== 'function') {
     throw new Error('File System Access API is not available in this browser.')
   }
-  // Never open the picker over an unreachable departing folder unless the
-  // caller accepted losing the carry: the data has to be readable before it
-  // can follow the user to the new folder. Skipping the re-grant attempt is
-  // deliberate — the prompt would consume the click the picker needs.
-  let regranted = false
-  if (await isStorageDirectoryConfigured()) {
-    const wasDisconnected = (await getStorageMode()) !== 'file'
-    if (wasDisconnected && !options.allowUnreadableDeparting) {
-      if ((await ensureFileAccess()) !== 'file') throw new StorageFolderUnreachableError()
-      regranted = true
-    }
-  }
-  let handle: FileSystemDirectoryHandle
-  try {
-    handle = await window.showDirectoryPicker({ mode: 'readwrite' })
-  } catch (error) {
-    // The re-grant prompt consumed the activation the picker needs. The folder
-    // is connected now, so the next click reaches the picker directly.
-    if (regranted) throw new StorageFolderPickRetryError()
-    throw error
+  const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
+  return adoptStorageDirectory(handle, options)
+}
+
+/**
+ * Makes an already-picked folder the storage directory: carries the departing
+ * folder's data into it, swaps the handle, and announces the change.
+ *
+ * The carry is what keeps a folder change non-destructive: in file mode the
+ * departing folder's files are the only copy of the content, and switching
+ * must not strand them. A departing folder that cannot be read is refused
+ * ({@link StorageFolderUnreachableError}) unless the caller explicitly accepted
+ * losing the carry ({@link PickStorageDirectoryOptions}), because its data
+ * cannot follow and would be silently left behind.
+ */
+export async function adoptStorageDirectory(
+  handle: FileSystemDirectoryHandle,
+  options: PickStorageDirectoryOptions = {},
+): Promise<StorageMode> {
+  if (
+    !options.allowUnreadableDeparting &&
+    (await isStorageDirectoryConfigured()) &&
+    (await getStorageMode()) !== 'file'
+  ) {
+    throw new StorageFolderUnreachableError()
   }
   // Read the departing folder while it is still the configured one: after the
   // swap below, `resolveHandle` points at the new folder.
