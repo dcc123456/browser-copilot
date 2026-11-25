@@ -120,6 +120,7 @@ Run-level behavior:
 - A failed run keeps its log. Select a log row to locate the block on the canvas.
 - **Debug mode** pauses before blocks marked with a breakpoint, shows the variables captured at that point, and can resume, step, or stop.
 - **Run workflow from here** starts a run at the selected node instead of the trigger, using the current page state.
+- **Run this block only** executes just the selected node and stops there, for checking one step against the current page without replaying the rest of the workflow. It does not change certification or the first-run health metric.
 - **Resume** on a failed workflow card re-runs from the step after the last clean checkpoint, so an already-completed login or submit is not repeated.
 - **Save execution logs** keeps run transcripts in history; **Notify when finished** posts a notification when a run settles.
 

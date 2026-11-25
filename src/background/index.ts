@@ -2232,6 +2232,24 @@ async function handleCommand(
       // added rule must not be able to break them.
       const gate = validateWorkflowForRun(workflow)
       const startAt = (command as { startAt?: string }).startAt
+      // "Run this block only": a deliberate partial run of one operator. It
+      // needs a target — running the whole graph is not what that button asks
+      // for — and only that node's gate findings matter, because the other
+      // nodes are not part of this test.
+      const onlyNode = command.onlyNode === true && typeof startAt === 'string' && startAt !== ''
+      if (command.onlyNode === true && !onlyNode) {
+        throw new Error('onlyNode requires a startAt node id.')
+      }
+      if (
+        onlyNode &&
+        startAt !== undefined &&
+        !workflow.drawflow.nodes.some((node) => node.id === startAt)
+      ) {
+        throw new Error('Node not found.')
+      }
+      const preflight = onlyNode
+        ? gate.issues.filter((issue) => issue.nodeId === startAt)
+        : gate.issues
       // "Continue from a run log row": the display snapshot in `variables` is
       // bounded, so prefer the FULL bag the engine checkpointed for this node.
       // Resolve on the background where the checkpoint store lives; fall back
@@ -2250,8 +2268,9 @@ async function handleCommand(
         source: 'manual',
         // The gate's findings ride ON THE RUN: they land in the run log and
         // stop the engine at the first node that cannot work.
-        preflight: gate.issues,
+        preflight,
         startAt,
+        ...(onlyNode ? { onlyNode: true } : {}),
         ...(seedVariables ? { variables: seedVariables } : {}),
         debug: workflow.settings?.debugMode === true,
         ...(command.testing ? { testing: true } : {}),
@@ -2265,8 +2284,12 @@ async function handleCommand(
       // A failed plain run stays failed. Repair is always an explicit user
       // action — from the failure center, the editor or the MCP tools — so
       // `workflows.run` settles with the real run result and never rewrites the
-      // graph behind the panel's back.
-      if (r.outcome === 'failed' && r.trace) rememberFailedRun(workflow.id, r.runId, r.trace)
+      // graph behind the panel's back. A single-node test is not a workflow
+      // run: remembering it as the last failure would point the repair flow at
+      // a graph the user never ran end to end.
+      if (!onlyNode && r.outcome === 'failed' && r.trace) {
+        rememberFailedRun(workflow.id, r.runId, r.trace)
+      }
 
       const runOk = r.outcome === 'ok'
       // SELF-HEAL write-back: a step that had to fall down the locator ladder
@@ -2297,8 +2320,18 @@ async function handleCommand(
       // L1/L2/L3 verification and persist the certification status. L3 must
       // pass for the workflow to be marked Certified; a successful run whose
       // goal conditions fail stays unverified.
+      //
+      // A single-node test proves nothing about the workflow goal and must not
+      // rewrite the badge: one operator cannot certify (or unsign) the whole
+      // graph. Its self-heal write-back is still persisted below.
       let certification: VerificationReport | undefined
-      if (runOk && healed.settings?.goalSpec) {
+      if (onlyNode) {
+        if (healed !== workflow) {
+          await saveWorkflow(healed).catch((error) => {
+            console.warn('[workflows.run] post-run save failed', error)
+          })
+        }
+      } else if (runOk && healed.settings?.goalSpec) {
         try {
           const scopeWindow =
             scopeWindowId === undefined
@@ -2351,20 +2384,28 @@ async function handleCommand(
       // the repair loop, so it is always the honest `false`. The field still
       // carries meaning for records written before it was retired, and the
       // health view reads those.
-      observeFirstRunOfRevision(workflow, {
-        outcome: r.outcome,
-        error: r.error,
-        summary: r.summary,
-        trace: r.trace,
-        degradations: r.degradations,
-      })
+      //
+      // A single-node test is not the graph's first full run; recording it
+      // would measure a partial attempt as the workflow's health.
+      if (!onlyNode) {
+        observeFirstRunOfRevision(workflow, {
+          outcome: r.outcome,
+          error: r.error,
+          summary: r.summary,
+          trace: r.trace,
+          degradations: r.degradations,
+        })
+      }
       return {
         type: 'workflows.run',
         outcome: {
           ok: runOk,
           skipped: false,
           summary: r.summary ?? '',
-          error: runOk ? undefined : r.summary,
+          // The editor's failure toast shows this. `summary` is the goal note or
+          // a cancellation line; an executor failure lives on `error` and used
+          // to be dropped here, leaving the toast with no reason at all.
+          error: runOk ? undefined : (r.error ?? r.summary),
           runId: r.runId,
           ...(certification ? { certification } : {}),
         },

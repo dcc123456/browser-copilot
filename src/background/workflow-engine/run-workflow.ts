@@ -181,6 +181,13 @@ export interface ExecuteWorkflowOptions {
   /** Node id to start execution from ("run workflow from here"); defaults to the trigger/first node. */
   startAt?: string
   /**
+   * Run `startAt` only — the editor's "run this block only" test. The node
+   * runs through the ordinary per-node path and the walk stops when it settles;
+   * the out-edges are never followed. A partial run: the goal gate, the
+   * certification write-back and the first-run metric are skipped.
+   */
+  onlyNode?: boolean
+  /**
    * Node id to stop in FRONT of: reaching it is a clean finish, executing it is
    * not allowed. The pre-save trial replay uses it to run everything the page
    * can undo and none of what it cannot (a second login, a second submit).
@@ -868,8 +875,14 @@ export async function executeWorkflow(
     // Captured once: the hook outlives this object and must keep the token the
     // run was STARTED with, even if the caller mutates its options later.
     const promptToken = opts.promptToken
+    // "Run this block only" is a deliberate partial run; say so in the log so
+    // a stored log is not mistaken for a whole-workflow replay.
+    if (opts.onlyNode) {
+      addStep(runId, 'status', '仅运行当前节点（运行测试）：不执行后续节点，也不校验工作流目标。')
+    }
     const result = await runWorkflow(effective, {
       startAt,
+      ...(opts.onlyNode ? { onlyNode: true } : {}),
       variables,
       signal: runSignal,
       ...(opts.stopBefore ? { stopBefore: opts.stopBefore } : {}),
@@ -1053,8 +1066,9 @@ export async function executeWorkflow(
     let goalNote: string | undefined
     let outcome: ExecuteWorkflowResult['outcome'] = runSignal.aborted ? 'cancelled' : result.outcome
     // A run that stopped at a trial cutoff never reached the goal by design:
-    // gating it would call a safe partial trial a failure.
-    if (outcome === 'ok' && !result.stoppedBefore) {
+    // gating it would call a safe partial trial a failure. The same holds for a
+    // single-node test: one step cannot satisfy a whole-workflow goal.
+    if (outcome === 'ok' && !result.stoppedBefore && !opts.onlyNode) {
       const goal = goalSpecOf(effective)
       if (goal) {
         const verification = await verifyGoalSpec(

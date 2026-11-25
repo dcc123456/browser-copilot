@@ -116,6 +116,17 @@ export interface WorkflowRunOptions {
   /** Node id to start from. Defaults to the first trigger or, failing that, the first node. */
   startAt?: string
   /**
+   * Run only `startAt` (or, without it, the resolved start node) and stop as
+   * soon as it settles. This is the editor's "run this block only" test: the
+   * node runs through the ordinary per-node path (interpolation, retry policy,
+   * readiness, preflight, run log) but its out-edges are never followed.
+   *
+   * Only the top-level walk is cut short. Loop / sub-workflow bodies call the
+   * same walk with their own entry node, so a loop that is itself the start
+   * node still runs its body normally.
+   */
+  onlyNode?: boolean
+  /**
    * Stop the run BEFORE executing this node — the graph is still walked from
    * the start, and reaching the cutoff is a SUCCESS (`outcome: 'ok'`), not a
    * failure. Used by the pre-save trial replay, which proves the steps a
@@ -625,6 +636,7 @@ async function runCore(
   const {
     startAt,
     stopBefore,
+    onlyNode,
     variables = {},
     signal,
     scope,
@@ -1454,11 +1466,18 @@ async function runCore(
   /**
    * Walk from `startId`, dispatching nodes, until the flow ends (null) or — when
    * a `stopAt` is given (the enclosing loop node) — the flow routes back to it.
+   * `singleStep` is the top-level "run this block only" test: settle the entry
+   * node and stop without following its out-edge.
    */
-  async function runSegment(startId: string, stopAt?: string): Promise<string | null> {
+  async function runSegment(
+    startId: string,
+    stopAt?: string,
+    singleStep = false,
+  ): Promise<string | null> {
     let currentId: string | null = startId
     while (currentId) {
       const next = await runNode(currentId)
+      if (singleStep) return null
       if (next === null) return null
       if (stopAt !== undefined && next === stopAt) return LOOP_EXIT
       currentId = next
@@ -2020,7 +2039,7 @@ async function runCore(
     let startId = startAt
     if (!startId) startId = nodes.find((n) => TRIGGER_BLOCK_IDS.has(blockIdOf(n)))?.id
     if (!startId) startId = nodes[0]?.id
-    if (startId) await runSegment(startId)
+    if (startId) await runSegment(startId, undefined, onlyNode === true)
   } catch (e) {
     if (e instanceof LoopBreakpointError) {
       // A loop-breakpoint fired outside any loop (or its loopId matched

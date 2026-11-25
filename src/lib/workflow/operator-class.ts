@@ -204,3 +204,17 @@ export function operatorExecClass(blockId: string): OperatorExecClass {
 export function recordOnlyReason(blockId: string): string {
   return RECORD_ONLY_REASONS[blockId] ?? `${blockId} is recorded without running`
 }
+
+/**
+ * Whether the block can be exercised on its own, as the editor's "run this
+ * block only" test.
+ *
+ * Engine-interpreted blocks (trigger, loops, sub-workflows, groups, loop
+ * breakpoints) only mean something in the graph walk, so a single-node call
+ * cannot express them. Placeholder executors prove nothing when run, so they
+ * are excluded too — a green result there would be a lie. Everything else is a
+ * real operator whose executor can be driven against the live page.
+ */
+export function isSingleNodeRunnable(blockId: string): boolean {
+  return !ENGINE_INTERPRETED_BLOCK_IDS.has(blockId) && !PLACEHOLDER_BLOCK_IDS.has(blockId)
+}

@@ -265,6 +265,8 @@ export default function EditorApp() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
+  /** Node id under a "run this block only" test, for the node's running ring. */
+  const [runningNodeId, setRunningNodeId] = useState<string | null>(null)
   /** The run this editor started, once seen on the running board — the Stop
    *  button cancels it through the same `tasks.cancel` the panel uses. */
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
@@ -985,8 +987,13 @@ export default function EditorApp() {
     async (
       startNodeId?: string,
       continuation?: { sourceRunId: string; variables?: Record<string, unknown> },
+      options?: { onlyNode?: boolean },
     ) => {
       if (!workflowId) return
+      // One run at a time: the toolbar's Run button becomes Stop while a run is
+      // in flight, but the node toolbars stay clickable.
+      if (running) return
+      const onlyNode = options?.onlyNode === true
       // Automa refuses a second testing run: two paused runs would compete for
       // one debug bar, and only one of them could be driven.
       if (testingMode) {
@@ -1000,6 +1007,7 @@ export default function EditorApp() {
       // running on unsaved data would step a graph nobody can see.
       if (!(await handleSave())) return
       setRunning(true)
+      setRunningNodeId(onlyNode ? (startNodeId ?? null) : null)
       setActiveRunId(null)
       stopRequestedRef.current = false
       const testing = testingMode
@@ -1038,6 +1046,7 @@ export default function EditorApp() {
           type: 'workflows.run',
           id: workflowId,
           startAt: startNodeId,
+          ...(onlyNode ? { onlyNode: true } : {}),
           ...(continuation
             ? {
                 sourceRunId: continuation.sourceRunId,
@@ -1053,14 +1062,22 @@ export default function EditorApp() {
           if (cert) setCertReport(cert)
           if (r.outcome.ok)
             toast.show(
-              continuation
-                ? t('continueFromHereFinished')
-                : startNodeId
-                  ? t('runFromHereFinished')
-                  : t('runFinished'),
+              onlyNode
+                ? t('runNodeFinished')
+                : continuation
+                  ? t('continueFromHereFinished')
+                  : startNodeId
+                    ? t('runFromHereFinished')
+                    : t('runFinished'),
               'ok',
             )
-          else if (Object.keys(blockedNodes).length > 0) {
+          else if (onlyNode) {
+            // A single-block test has no "other blocked nodes" story: the run
+            // stopped on THIS block, so its own error is the message.
+            const msg = r.outcome.error ?? r.outcome.summary
+            setError(msg)
+            toast.show(`${t('runNodeFailed')}: ${msg}`, 'error')
+          } else if (Object.keys(blockedNodes).length > 0) {
             // The run stopped in front of a block that cannot work. Which block
             // is on the run log (one row per node) and red on the canvas — the
             // wall of contract prose this used to paste into a toast named no
@@ -1084,19 +1101,20 @@ export default function EditorApp() {
         if (stopRequestedRef.current) toast.show(t('runStopped'), 'ok')
         else {
           setError(msg)
-          toast.show(`${t('runFailed')}: ${msg}`, 'error')
+          toast.show(`${onlyNode ? t('runNodeFailed') : t('runFailed')}: ${msg}`, 'error')
         }
       } finally {
         observing = false
         endRunInputSession(promptToken)
         setRunning(false)
+        setRunningNodeId(null)
         setStoppingRun(false)
         setActiveRunId(null)
         stopRequestedRef.current = false
         if (testing) setTestingRunActive(false)
       }
     },
-    [workflowId, handleSave, blockedNodes, toast, t, testingMode],
+    [workflowId, running, handleSave, blockedNodes, toast, t, testingMode],
   )
 
   // The Stop button aborts this editor's run through the same running board
@@ -1226,6 +1244,7 @@ export default function EditorApp() {
       onEdit: openNodeEditor,
       onToggleDisable: toggleNodeDisabled,
       onToggleBreakpoint: toggleNodeBreakpoint,
+      onRunNode: (id: string) => void handleRun(id, undefined, { onlyNode: true }),
       onRunFromHere: (id: string) => void handleRun(id),
     }),
     [
@@ -1365,13 +1384,14 @@ export default function EditorApp() {
             // callbacks — every other node's data keeps its identity per render.
             ...(n.data.block?.id === GROUP_BLOCK_ID ? { groupActions } : {}),
             ...(reason === undefined ? {} : { runState: 'error' as const, blockedReason: reason }),
-            // A paused testing run highlights its node with the same ring a
-            // running node uses.
-            ...(debugPause?.nodeId === n.id ? { running: true } : {}),
+            // A paused testing run — or the node a "run this block only" test
+            // is driving — highlights its node with the same ring a running
+            // node uses.
+            ...(debugPause?.nodeId === n.id || runningNodeId === n.id ? { running: true } : {}),
           },
         }
       }),
-    [nodes, nodeActions, groupActions, blockedNodes, debugPause?.nodeId],
+    [nodes, nodeActions, groupActions, blockedNodes, debugPause?.nodeId, runningNodeId],
   )
 
   const toggleRecording = useCallback(async () => {

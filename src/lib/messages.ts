@@ -344,6 +344,13 @@ export type Command =
       id: string
       /** Run the graph starting at this node id ("run from here"). */ startAt?: string
       /**
+       * Run the node at `startAt` ONLY — the "run this block only" testing
+       * button. The run starts and settles at that node without following its
+       * out-edges, and is a partial run: no goal gate, no certification, no
+       * first-run metric.
+       */
+      onlyNode?: boolean
+      /**
        * Seed variables for a "continue from a run log row" run. Passed through
        * to the engine as the initial variable bag; declared trigger inputs are
        * still layered underneath. A checkpoint snapshot (see `sourceRunId`)

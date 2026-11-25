@@ -14,6 +14,7 @@
 
 import {
   Circle,
+  CirclePlay,
   Copy,
   Info,
   Pencil,
@@ -29,6 +30,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { BlockIcon } from '../../lib/workflow/blocks/icons'
 import { Target } from 'lucide-react'
 import { nodeAddedByAi, nodeGoalContractOf } from '../../lib/workflow/node-goal-contract'
+import { isSingleNodeRunnable } from '../../lib/workflow/operator-class'
 import { branchHandlesFor, errorFallbackDrawn } from '../../lib/workflow/block-ports'
 import { conditionPathsOf } from '../../lib/workflow/condition-tree'
 import { OCR_SUPPORTED } from '../../lib/ocr-support'
@@ -44,6 +46,8 @@ export interface BlockNodeActions extends Record<string, unknown> {
   onToggleDisable: (id: string) => void
   /** Toggles `data.$breakpoint` — pauses a testing run before this block. */
   onToggleBreakpoint: (id: string) => void
+  /** Runs this node and nothing after it — the single-block test. */
+  onRunNode: (id: string) => void
   onRunFromHere: (id: string) => void
 }
 
@@ -86,6 +90,7 @@ export function NodeToolbar({
   breakpoint,
   actions,
   extra,
+  runnable = false,
   editable = true,
 }: {
   id: string
@@ -95,6 +100,12 @@ export function NodeToolbar({
   actions?: BlockNodeActions
   /** Node-specific action shown after the standard ones. */
   extra?: ReactNode
+  /**
+   * Whether this block can be exercised on its own ("run this block only").
+   * False for engine-interpreted / placeholder blocks, which have no meaningful
+   * single-node execution.
+   */
+  runnable?: boolean
   /**
    * False for a node whose block this build cannot resolve: there is nothing to
    * edit, toggle or run from it, so it keeps only delete/duplicate instead of
@@ -141,6 +152,11 @@ export function NodeToolbar({
               className={breakpoint ? 'text-err' : undefined}
             />
           </button>
+          {runnable && (
+            <button type="button" title={t('nodeRunOnly')} onClick={stop(actions.onRunNode)}>
+              <CirclePlay size={14} />
+            </button>
+          )}
           <button type="button" title={t('nodeRunFromHere')} onClick={stop(actions.onRunFromHere)}>
             <Play size={14} />
           </button>
@@ -179,6 +195,9 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
     ''
   const hasError = node.runState === 'error'
   const branchHandles = branchHandlesFor(block, bd)
+  // Trigger / loops / sub-workflows / groups are interpreted across nodes;
+  // placeholder executors prove nothing. Neither gets a single-block test.
+  const runnable = isSingleNodeRunnable(block.id)
 
   return (
     <div
@@ -196,6 +215,7 @@ function BlockNodeComponent({ id, data, selected }: NodeProps) {
         disabled={disabled}
         breakpoint={bd['$breakpoint'] === true}
         actions={node.actions}
+        runnable={runnable}
       />
       {block.inputs > 0 && (
         <Handle
