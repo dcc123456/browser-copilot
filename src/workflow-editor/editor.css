@@ -1928,13 +1928,7 @@
 .wf-onerror-retry-switch {
   margin-top: 14px;
 }
-.wf-onerror-retry {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-/* Inline "Times ⓘ [80px]" / "Interval ⓘ [80px] seconds" rows */
+/* Inline "Times ⓘ [80px]" / "Interval ⓘ [80px] seconds" fields */
 .wf-inline-field {
   display: inline-flex;
   align-items: center;
@@ -1946,9 +1940,6 @@
   color: var(--we-text-faint);
   font-size: 15px;
   cursor: help;
-}
-.wf-inline-field-indent {
-  margin-left: 44px;
 }
 .wf-inline-input {
   width: 80px; /* Automa w-20 */

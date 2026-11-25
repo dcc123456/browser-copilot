@@ -166,7 +166,11 @@ export function OnErrorFields({ data, onChange }: EditFormProps) {
           </div>
 
           {onError.retry && (
-            <div className="wf-onerror-retry">
+            // Times and Interval share ONE row (Automa stacks them; the dialog
+            // is wide enough for both and the stacked form read as two
+            // unrelated settings). `flex-wrap` keeps them usable on a narrow
+            // viewport instead of overflowing the modal.
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
               {/* Automa: inline "Times ⓘ [input]" row. */}
               <div
                 className="wf-inline-field"
@@ -183,11 +187,8 @@ export function OnErrorFields({ data, onChange }: EditFormProps) {
                   />
                 </div>
               </div>
-              {/* Automa: indented "Interval ⓘ [input] seconds" row. */}
-              <div
-                className="wf-inline-field wf-inline-field-indent"
-                title={bt('Seconds to wait between each try')}
-              >
+              {/* Automa: "Interval ⓘ [input] seconds" next to it. */}
+              <div className="wf-inline-field" title={bt('Seconds to wait between each try')}>
                 <span>{t('interval')}</span>
                 <Info size={14} />
                 <div className="wf-inline-input">
