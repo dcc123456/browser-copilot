@@ -11,8 +11,19 @@
  * through Node's type stripping, no build step of its own.
  */
 
-/** Release version — single source for both variant manifests. */
-export const VERSION = '0.6.19'
+import { readFileSync } from 'node:fs'
+
+/**
+ * Release version — read from the root `package.json`, the single authority
+ * (AGENTS §4). A restated copy here silently drifted (the built manifest said
+ * 0.6.19 while `package.json` was 0.6.21), so the version is derived, never
+ * copied: a bump in `package.json` reaches both manifests on the next build.
+ */
+export const VERSION = (
+  JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+    version: string
+  }
+).version
 
 export const NAME = 'Browser Copilot'
 export const SHORT_NAME = 'BCopilot'
