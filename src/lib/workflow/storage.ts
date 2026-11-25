@@ -31,11 +31,9 @@ import type {
 import {
   appendVersion,
   canDeleteVersion,
+  isDuplicateFingerprint,
   nextVersionNumber,
   prepareSnapshot,
-  rollbackEntryOf,
-  snapshotBytesOf,
-  workflowFingerprint,
   type VersionRefusal,
   type WorkflowVersionEntry,
   type WorkflowVersionIndex,
@@ -289,10 +287,15 @@ export async function loadWorkflowVersionIndex(workflowId: string): Promise<Work
 export async function saveWorkflowVersionSnapshot(
   workflow: Workflow,
   options: {
-    source?: 'save' | 'rollback'
     now?: number
     limit?: number
     budgetBytes?: number
+    /**
+     * Fingerprint of the content already on disk before this save. Writing it
+     * back unchanged creates no version — this is what keeps a re-save right
+     * after applying an old version from manufacturing a duplicate snapshot.
+     */
+    baselineFingerprint?: string
   } = {},
 ): Promise<{
   saved: boolean
@@ -312,15 +315,13 @@ export async function saveWorkflowVersionSnapshot(
   const { workflow: snapshot, bytes, fingerprint } = prepared
   return withKeyLock(versionIndexKey(workflow.id), async () => {
     const index = await loadWorkflowVersionIndex(workflow.id)
-    const latest = index.entries[index.entries.length - 1]
     // No change, no version — the whole point of the fingerprint.
-    if (latest && latest.fingerprint === fingerprint) {
+    if (isDuplicateFingerprint(index, fingerprint, options.baselineFingerprint)) {
       return { saved: false, index, evicted: [] as number[] }
     }
     const entry: WorkflowVersionEntry = {
       version: nextVersionNumber(index),
       at: options.now ?? Date.now(),
-      source: options.source ?? 'save',
       fingerprint,
       revision: currentRevisionOf(snapshot),
       nodes: snapshot.drawflow.nodes.length,
@@ -341,41 +342,6 @@ export async function saveWorkflowVersionSnapshot(
       await area.remove(plan.evicted.map((version) => versionSnapshotKey(workflow.id, version)))
     }
     return { saved: true, index: plan.index, evicted: plan.evicted }
-  })
-}
-
-/**
- * Records that the user re-applied an older version. The entry has NO snapshot
- * of its own — it carries the applied content's fingerprint and the version it
- * came from, so twenty slots are never spent on the same bytes.
- */
-export async function recordWorkflowRollback(
-  workflow: Workflow,
-  fromVersion: number,
-  now = Date.now(),
-): Promise<WorkflowVersionIndex> {
-  const prepared = shedBulkDataUrls(workflow) as Workflow
-  const fingerprint = workflowFingerprint(prepared)
-  return withKeyLock(versionIndexKey(workflow.id), async () => {
-    const index = await loadWorkflowVersionIndex(workflow.id)
-    // The caller sends the SNAPSHOT it applied, whose revision is the number that
-    // version was saved at. Using it made the list run backwards ("version 4 ·
-    // save #1"); the save sequence the canvas is on comes from the stored record.
-    const stored = await getWorkflow(workflow.id)
-    const entry = rollbackEntryOf(index, fromVersion, {
-      at: now,
-      revision: currentRevisionOf(stored ?? workflow),
-      fingerprint,
-      nodes: prepared.drawflow.nodes.length,
-      edges: prepared.drawflow.edges.length,
-      bytes: snapshotBytesOf(prepared),
-    })
-    const plan = appendVersion(index, entry, { now })
-    await area.set({ [versionIndexKey(workflow.id)]: plan.index })
-    if (plan.evicted.length > 0) {
-      await area.remove(plan.evicted.map((version) => versionSnapshotKey(workflow.id, version)))
-    }
-    return plan.index
   })
 }
 
@@ -426,19 +392,19 @@ function coerceVersionIndex(value: unknown, workflowId: string): WorkflowVersion
     if (!raw || typeof raw !== 'object') continue
     const entry = raw as Record<string, unknown>
     if (typeof entry['version'] !== 'number' || !Number.isFinite(entry['version'])) continue
+    // Rollback trace lines were retired (2026-11-25): applying a version now
+    // switches to it instead of appending a trace line. Old rows owned no
+    // snapshot and cannot be applied, so they are dropped on read instead of
+    // being shown as dead entries.
+    if (entry['source'] === 'rollback') continue
     entries.push({
       version: Math.floor(entry['version']),
       at: typeof entry['at'] === 'number' ? entry['at'] : 0,
-      source: entry['source'] === 'rollback' ? 'rollback' : 'save',
       fingerprint: typeof entry['fingerprint'] === 'string' ? entry['fingerprint'] : '',
       revision: typeof entry['revision'] === 'number' ? Math.floor(entry['revision']) : 0,
       nodes: typeof entry['nodes'] === 'number' ? entry['nodes'] : 0,
       edges: typeof entry['edges'] === 'number' ? entry['edges'] : 0,
       bytes: typeof entry['bytes'] === 'number' ? entry['bytes'] : 0,
-      ...(typeof entry['fromVersion'] === 'number'
-        ? { fromVersion: Math.floor(entry['fromVersion']) }
-        : {}),
-      ...(typeof entry['note'] === 'string' ? { note: entry['note'] } : {}),
     })
   }
   return {

@@ -1760,29 +1760,66 @@ export default function EditorApp() {
   }, [workflowId, nodes, edges, meta])
 
   /**
-   * Puts a stored version on the canvas as ONE undoable step, then records the
-   * rollback: without that record the list could not say the canvas is back on
-   * an older version, and Ctrl+Z would silently undo a change nobody can find.
+   * Switches the workflow to a stored version as ONE undoable step.
+   *
+   * "Apply" is a SWITCH, not a new version: the content already exists in the
+   * history, so the background stores it as the workflow's current content
+   * without appending a line. A version is added only by a later save whose
+   * content actually differs.
    */
   const applyVersionSnapshot = useCallback(
-    async (snapshot: Workflow, fromVersion: number) => {
+    async (snapshot: Workflow) => {
       // Content comes back; the LAYOUT does not. Dragging a card or running
       // auto-layout is a view operation, so a version never moves the cards the
       // user arranged — only what is IN them.
       const laid = withCurrentLayout(snapshot, versionCurrent)
-      pushHistory()
-      setNodes(laid.drawflow.nodes.map(toFlowNode))
-      applyEdgeList(laid.drawflow.edges)
-      setMeta((m) => ({
-        ...m,
+      const flowNodes = laid.drawflow.nodes.map(toFlowNode)
+      // Edge styling (label / animation / color) belongs to the version's
+      // content, so it is restored too; only the card positions stay current.
+      const canvasEdges: Edge[] = laid.drawflow.edges.map((edge) => ({ ...edge, type: 'custom' }))
+      // The trigger node is the source of truth; `laid.trigger` is the stored
+      // denormalized copy and the meta value is the last-resort fallback.
+      const trigger = triggerFromNodes(laid.drawflow.nodes) ?? laid.trigger ?? meta.trigger
+      const nextMeta = {
+        ...meta,
         name: laid.name,
         description: laid.description ?? '',
-        settings: laid.settings,
-      }))
+        settings: laid.settings ?? meta.settings,
+        trigger,
+      }
+      pushHistory()
+      setNodes(flowNodes)
+      setEdges(canvasEdges)
+      setMeta(nextMeta)
       setDirty(true)
-      await sendCommand({ type: 'workflows.versions.rollback', workflow: laid, fromVersion })
+      try {
+        await sendCommand({
+          type: 'workflows.versions.apply',
+          workflow: {
+            ...laid,
+            name: nextMeta.name,
+            description: nextMeta.description,
+            settings: nextMeta.settings,
+            trigger,
+          },
+        })
+        // Storage now holds exactly what the canvas shows: move the edit
+        // baseline so the dirty dot stays off until the user actually edits.
+        savedSignatureRef.current = JSON.stringify({
+          nodes: flowNodes.map(toWorkflowNode),
+          edges: canvasEdges.map(workflowEdgeOf),
+          meta: nextMeta,
+        })
+        setDirty(false)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        // The canvas shows the old version but storage still holds the newer
+        // content; leave it marked unsaved so Save can finish the switch.
+        toast.show(`${t('versionsApplyFailed')}: ${msg}`, 'error')
+        setDirty(true)
+      }
     },
-    [applyEdgeList, pushHistory, setDirty, versionCurrent],
+    [meta, pushHistory, setDirty, toast, t, versionCurrent],
   )
 
   // Picking a credential secures its `get-secret` producer here; the pure patcher

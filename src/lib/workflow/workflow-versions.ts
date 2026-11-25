@@ -31,9 +31,7 @@ export const WORKFLOW_VERSION_NODE_PAYLOAD_LIMIT = 256 * 1024
 export interface WorkflowVersionEntry {
   version: number
   at: number
-  /** A save of new content, or a rollback that re-applied an older version. */
-  source: 'save' | 'rollback'
-  /** Content hash of the snapshot (or, for a rollback, of what it applied). */
+  /** Content hash of the snapshot. */
   fingerprint: string
   /** The revision counter at that moment — a different number on purpose. */
   revision: number
@@ -41,10 +39,6 @@ export interface WorkflowVersionEntry {
   edges: number
   /** Snapshot size in bytes; used for the budget. */
   bytes: number
-  /** Rollback only: the version it re-applied. */
-  fromVersion?: number
-  /** Human note recorded with the action ("回滚自 v3"). */
-  note?: string
 }
 
 export interface WorkflowVersionIndex {
@@ -226,10 +220,6 @@ export function currentVersionOf(
 ): WorkflowVersionEntry | undefined {
   for (let position = index.entries.length - 1; position >= 0; position -= 1) {
     const entry = index.entries[position]!
-    // A rollback line carries the fingerprint of the version it re-applied, so
-    // it would mark BOTH rows "current" — and the source version would then be
-    // undeletable while the canvas equals it. Only real snapshots pin "current".
-    if (entry.source === 'rollback') continue
     if (entry.fingerprint === fingerprint) return entry
   }
   return undefined
@@ -253,33 +243,48 @@ export function canDeleteVersion(
 }
 
 /**
- * A rollback line: it names the version it re-applied and carries that
- * version's content hash, but NO snapshot of its own — twenty slots must not be
- * spent on the same bytes, and it is a trace, not an applicable version.
+ * Whether a save would repeat content the history (or the stored record) already
+ * holds.
+ *
+ * Comparing only with the newest line is not enough: applying an old version
+ * switches the stored content to it WITHOUT adding a line, so the next save of
+ * that same content would otherwise look like a change (newer lines exist) and
+ * manufacture a duplicate snapshot. `baselineFingerprint` is the content on disk
+ * BEFORE this save — a save that writes it back unchanged creates no version.
  */
-export function rollbackEntryOf(
+export function isDuplicateFingerprint(
   index: WorkflowVersionIndex,
-  fromVersion: number,
-  input: {
-    at: number
-    revision: number
-    fingerprint: string
-    nodes: number
-    edges: number
-    bytes: number
-  },
-): WorkflowVersionEntry {
+  fingerprint: string,
+  baselineFingerprint?: string,
+): boolean {
+  if (baselineFingerprint !== undefined && baselineFingerprint === fingerprint) return true
+  const latest = index.entries[index.entries.length - 1]
+  return latest?.fingerprint === fingerprint
+}
+
+/**
+ * The workflow record produced by applying a stored version.
+ *
+ * Only what a version owns changes: name, description, trigger, settings and
+ * the graph. Filing (`folderId`), parameter values, the marketplace provenance
+ * and the revision line describe the WORKFLOW, not the version — restoring an
+ * old graph must not un-file it, wipe its parameter values or roll its save
+ * sequence backwards. The viewport stays too: panning/zooming is not content.
+ */
+export function applyVersionToStored(stored: Workflow, snapshot: Workflow): Workflow {
   return {
-    version: nextVersionNumber(index),
-    at: input.at,
-    source: 'rollback',
-    fingerprint: input.fingerprint,
-    revision: input.revision,
-    nodes: input.nodes,
-    edges: input.edges,
-    bytes: input.bytes,
-    fromVersion,
-    note: `回滚自 v${fromVersion}`,
+    ...stored,
+    name: snapshot.name,
+    description: snapshot.description,
+    // A stored snapshot always carries these; the fallbacks only guard a
+    // hand-written record and keep the workflow usable.
+    trigger: snapshot.trigger ?? stored.trigger,
+    settings: snapshot.settings ?? stored.settings,
+    drawflow: {
+      ...snapshot.drawflow,
+      position: stored.drawflow.position,
+      zoom: stored.drawflow.zoom,
+    },
   }
 }
 
@@ -303,13 +308,4 @@ export function withCurrentLayout(snapshot: Workflow, current: Workflow): Workfl
       })),
     },
   }
-}
-
-/** Whether a rollback entry's source version no longer exists. */
-export function rollbackSourceDeleted(
-  index: WorkflowVersionIndex,
-  entry: WorkflowVersionEntry,
-): boolean {
-  if (entry.source !== 'rollback' || entry.fromVersion === undefined) return false
-  return !index.entries.some((candidate) => candidate.version === entry.fromVersion)
 }

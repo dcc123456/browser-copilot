@@ -229,9 +229,9 @@ import {
   saveWorkflowVersionSnapshot,
   loadWorkflowVersionIndex,
   readWorkflowVersionSnapshot,
-  recordWorkflowRollback,
   deleteWorkflowVersion,
 } from '../lib/workflow/storage'
+import { applyVersionToStored, prepareSnapshot } from '../lib/workflow/workflow-versions'
 import {
   deleteOperatorChatSession,
   listOperatorChatSessions,
@@ -1496,6 +1496,16 @@ async function localizeLlmFailure(error: unknown): Promise<Error> {
   return new Error(t.settingsThinkingUnsupportedError({ detail: error.message }))
 }
 
+/**
+ * Content identity of the record already on disk, in the same canonical form
+ * snapshots fingerprint (migrated, bulk data URLs shed). Used as the save
+ * baseline: a save that writes this content back unchanged creates no version.
+ */
+function storedFingerprintOf(workflow: Workflow): string | undefined {
+  const prepared = prepareSnapshot(workflow)
+  return 'refused' in prepared ? undefined : prepared.fingerprint
+}
+
 async function handleCommand(
   command: Command,
   sender?: chrome.runtime.MessageSender,
@@ -1940,6 +1950,10 @@ async function handleCommand(
           revisionHistory: nextSave.revisionHistory,
         }
       }
+      // What is on disk BEFORE this save, in the same form snapshots fingerprint.
+      // A save that writes it back unchanged (e.g. right after applying an old
+      // version) must not add a version line for content the history already has.
+      const baselineFingerprint = stored ? storedFingerprintOf(stored) : undefined
       // The STORED form (normalised settings included) is what a version must
       // describe: fingerprinting the caller's shape produced a "ghost" version
       // whenever the two differed by a default field.
@@ -1949,7 +1963,10 @@ async function handleCommand(
       let versions:
         { saved: boolean; refused?: 'node-payload' | 'too-large'; evicted: number } | undefined
       try {
-        const versionResult = await saveWorkflowVersionSnapshot(storedWorkflow)
+        const versionResult = await saveWorkflowVersionSnapshot(
+          storedWorkflow,
+          baselineFingerprint ? { baselineFingerprint } : {},
+        )
         versions = {
           saved: versionResult.saved,
           ...(versionResult.refused ? { refused: versionResult.refused } : {}),
@@ -1992,11 +2009,26 @@ async function handleCommand(
         workflow: await readWorkflowVersionSnapshot(command.workflowId, command.version),
       }
 
-    case 'workflows.versions.rollback':
-      return {
-        type: 'workflows.versions.rollback',
-        index: await recordWorkflowRollback(command.workflow, command.fromVersion),
-      }
+    case 'workflows.versions.apply': {
+      // Applying a version switches the CURRENT workflow to old content. It is
+      // deliberately NOT a new version: that content already exists in the
+      // history. Filing, parameter values, provenance and the revision line stay
+      // on the workflow; only the graph-owned fields come from the snapshot.
+      const stored = await getWorkflow(command.workflow.id)
+      if (!stored) throw new Error('Workflow not found.')
+      const applied = applyVersionToStored(stored, command.workflow)
+      // A content commit must move the revision sequence so a repair proposed
+      // against the newer content cannot be applied on top of the old one.
+      const next = commitWorkflowRevision(applied, { source: 'manual-edit' })
+      await saveWorkflow({
+        ...applied,
+        revision: next.revision,
+        revisionHistory: next.revisionHistory,
+      })
+      // The trigger node may come from the applied version, so listeners follow it.
+      await rescheduleAllWorkflowTriggers()
+      return { type: 'workflows.versions.apply' }
+    }
 
     case 'workflows.versions.delete': {
       const result = await deleteWorkflowVersion(

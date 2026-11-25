@@ -250,11 +250,14 @@ export type Command =
   /** The graph an old version holds, so it can be previewed before applying. */
   | { type: 'workflows.versions.read'; workflowId: string; version: number }
   /**
-   * Records that the user re-applied an old version. The editor sends the graph
-   * it just put on the canvas: the entry carries its fingerprint, so the list
-   * can still tell which version the canvas matches.
+   * Switches the workflow to an old version ("Apply" in the version panel).
+   *
+   * The editor sends the graph it just put on the canvas. The background stores
+   * it as the workflow's current content WITHOUT adding a version line: the
+   * content already exists in the history. A later save adds a version only if
+   * the content was modified.
    */
-  | { type: 'workflows.versions.rollback'; workflow: Workflow; fromVersion: number }
+  | { type: 'workflows.versions.apply'; workflow: Workflow }
   /** Deletes one version; `currentFingerprint` protects the version in use. */
   | {
       type: 'workflows.versions.delete'
@@ -778,7 +781,7 @@ export type CommandResult =
   | { type: 'workflows.delete' }
   | { type: 'workflows.versions.list'; index: WorkflowVersionIndex }
   | { type: 'workflows.versions.read'; workflow?: Workflow }
-  | { type: 'workflows.versions.rollback'; index: WorkflowVersionIndex }
+  | { type: 'workflows.versions.apply' }
   | {
       type: 'workflows.versions.delete'
       ok: boolean

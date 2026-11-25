@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { Workflow } from '../src/lib/workflow/types'
 import {
   appendVersion,
+  applyVersionToStored,
   canDeleteVersion,
   currentVersionOf,
+  isDuplicateFingerprint,
   nextVersionNumber,
   oversizedNodeOf,
   prepareSnapshot,
-  rollbackEntryOf,
-  rollbackSourceDeleted,
   withCurrentLayout,
   WORKFLOW_VERSION_LIMIT,
   workflowFingerprint,
@@ -51,7 +51,6 @@ function entry(version: number, fingerprint: string, bytes = 100): WorkflowVersi
   return {
     version,
     at: version * 1000,
-    source: 'save',
     fingerprint,
     revision: version,
     nodes: 2,
@@ -180,22 +179,6 @@ describe('current version and deletion', () => {
     expect(currentVersionOf(index, 'nope')).toBeUndefined()
   })
 
-  it('a rollback line never pins "current", even with the same fingerprint', () => {
-    const rollback = rollbackEntryOf(index, 1, {
-      at: 6000,
-      revision: 9,
-      fingerprint: 'a',
-      nodes: 2,
-      edges: 1,
-      bytes: 120,
-    })
-    const withRollback = { ...index, entries: [...index.entries, rollback] }
-    // v1 is the version the canvas equals; the trace must not also claim it, or
-    // two rows would be undeletable at once.
-    expect(currentVersionOf(withRollback, 'a')?.version).toBe(1)
-    expect(canDeleteVersion(withRollback, 3, 'a')).toEqual({ ok: true })
-  })
-
   it('refuses to delete the version the canvas is on', () => {
     expect(canDeleteVersion(index, 2, 'b')).toEqual({ ok: false, reason: 'current' })
     expect(canDeleteVersion(index, 1, 'b')).toEqual({ ok: true })
@@ -213,38 +196,63 @@ describe('current version and deletion', () => {
   })
 })
 
-describe('rollback entries', () => {
-  const index = { ...emptyIndex(), entries: [entry(1, 'a'), entry(2, 'b')] }
-
-  it('records which version was re-applied, without a snapshot of its own', () => {
-    const rollback = rollbackEntryOf(index, 1, {
-      at: 5000,
-      revision: 9,
-      fingerprint: 'a',
-      nodes: 2,
-      edges: 1,
-      bytes: 120,
-    })
-    expect(rollback).toMatchObject({ version: 3, source: 'rollback', fromVersion: 1 })
-    expect(rollback.note).toContain('v1')
+describe('applying a version switches content without a new version', () => {
+  it('treats a save of the already-stored content as no change', () => {
+    const index = { ...emptyIndex(), entries: [entry(1, 'a'), entry(2, 'b')] }
+    // The stored record is what the save would write back (baseline): unchanged.
+    expect(isDuplicateFingerprint(index, 'a', 'a')).toBe(true)
+    // A different content is a real change even when the newest line is older.
+    expect(isDuplicateFingerprint(index, 'c', 'a')).toBe(false)
+    // The newest entry still dedupes repeated saves without a baseline.
+    expect(isDuplicateFingerprint(index, 'b')).toBe(true)
   })
 
-  it('marks the trace when the source version has been deleted', () => {
-    const rollback = rollbackEntryOf(index, 1, {
-      at: 5000,
-      revision: 9,
-      fingerprint: 'a',
-      nodes: 2,
-      edges: 1,
-      bytes: 120,
-    })
-    const withRollback = { ...index, entries: [...index.entries, rollback] }
-    expect(rollbackSourceDeleted(withRollback, rollback)).toBe(false)
-    const sourceGone = {
-      ...withRollback,
-      entries: withRollback.entries.filter((e) => e.version !== 1),
-    }
-    expect(rollbackSourceDeleted(sourceGone, rollback)).toBe(true)
+  it('takes only the graph-owned fields from the snapshot', () => {
+    const stored = workflow({
+      revision: 7,
+      folderId: 'folder-1',
+      parameterValues: { keyword: 'current value' },
+      table: { id: 'sheet-1' },
+    } as Partial<Workflow>)
+    stored.drawflow.position = { x: 40, y: 50 }
+    stored.drawflow.zoom = 0.8
+    const snapshot = workflow({
+      name: 'Old name',
+      description: 'old description',
+      revision: 2,
+      folderId: 'old-folder',
+      parameterValues: { keyword: 'old value' },
+      settings: {
+        saveLog: true,
+        debugMode: false,
+        notification: false,
+        reuseLastState: false,
+      } as Workflow['settings'],
+    } as Partial<Workflow>)
+    snapshot.drawflow.position = { x: -999, y: -999 }
+    snapshot.drawflow.zoom = 3
+
+    const applied = applyVersionToStored(stored, snapshot)
+    // Content comes from the version …
+    expect(applied.name).toBe('Old name')
+    expect(applied.description).toBe('old description')
+    expect(applied.settings.saveLog).toBe(true)
+    expect(applied.drawflow.nodes).toEqual(snapshot.drawflow.nodes)
+    // … while the workflow's own identity, inputs and view stay put.
+    expect(applied.revision).toBe(7)
+    expect(applied.folderId).toBe('folder-1')
+    expect(applied.parameterValues).toEqual({ keyword: 'current value' })
+    expect(applied.table).toEqual({ id: 'sheet-1' })
+    expect(applied.drawflow.position).toEqual({ x: 40, y: 50 })
+    expect(applied.drawflow.zoom).toBe(0.8)
+  })
+
+  it('produces content the panel will mark as that version, not a new one', () => {
+    const stored = workflow()
+    const snapshot = prepareSnapshot(workflow({ name: 'Older' } as Partial<Workflow>))
+    if ('refused' in snapshot) throw new Error('unexpected refusal')
+    const applied = applyVersionToStored(stored, snapshot.workflow)
+    expect(workflowFingerprint(applied)).toBe(snapshot.fingerprint)
   })
 })
 

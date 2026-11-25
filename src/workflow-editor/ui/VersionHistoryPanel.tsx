@@ -5,7 +5,6 @@ import type { Workflow } from '../../lib/workflow/types'
 import {
   currentVersionOf,
   workflowFingerprint,
-  rollbackSourceDeleted,
   type WorkflowVersionEntry,
   type WorkflowVersionIndex,
 } from '../../lib/workflow/workflow-versions'
@@ -17,8 +16,8 @@ interface VersionHistoryPanelProps {
   /** The canvas as it stands, so the list can mark which version is current. */
   current: Workflow
   onClose: () => void
-  /** Puts an old version on the canvas; the caller records the rollback. */
-  onApply: (snapshot: Workflow, fromVersion: number) => Promise<void>
+  /** Switches the workflow to that version; no new version is created. */
+  onApply: (snapshot: Workflow) => Promise<void>
   toast: (text: string, tone: 'ok' | 'info' | 'error') => void
   t: TranslateFn
 }
@@ -65,7 +64,7 @@ export default function VersionHistoryPanel({
         toast(t('versionsMissing'), 'error')
         return
       }
-      await onApply(result.workflow, entry.version)
+      await onApply(result.workflow)
       toast(`${t('versionsApplied')} v${entry.version}`, 'ok')
       await load()
     } finally {
@@ -118,7 +117,6 @@ export default function VersionHistoryPanel({
             <ul className="flex flex-col gap-2">
               {entries.map((entry) => {
                 const isCurrent = entry.version === currentVersion
-                const sourceGone = index ? rollbackSourceDeleted(index, entry) : false
                 return (
                   <li
                     key={entry.version}
@@ -138,26 +136,16 @@ export default function VersionHistoryPanel({
                       <span>{`${entry.nodes} ${t('versionsNodes')} · ${entry.edges} ${t('versionsEdges')}`}</span>
                       <span>{formatBytes(entry.bytes)}</span>
                       {isCurrent && <span className="text-accent">{t('versionCurrent')}</span>}
-                      {entry.note && <span className="text-warn">{entry.note}</span>}
-                      {entry.source === 'rollback' && sourceGone && (
-                        <span className="text-err">{t('versionsSourceDeleted')}</span>
-                      )}
                     </div>
                     <div className="mt-2 flex items-center gap-2">
-                      {/* A rollback line is a trace, not an applicable version: it
-                          has no snapshot of its own (see the design's choice (a)). */}
-                      {entry.source === 'rollback' ? (
-                        <span className="text-[11px] text-muted">{t('versionsTraceOnly')}</span>
-                      ) : (
-                        <button
-                          className="rounded border border-border px-2 py-1 text-ink disabled:opacity-50"
-                          disabled={busyVersion === entry.version}
-                          onClick={() => void apply(entry)}
-                          type="button"
-                        >
-                          {t('versionsApply')}
-                        </button>
-                      )}
+                      <button
+                        className="rounded border border-border px-2 py-1 text-ink disabled:opacity-50"
+                        disabled={busyVersion === entry.version}
+                        onClick={() => void apply(entry)}
+                        type="button"
+                      >
+                        {t('versionsApply')}
+                      </button>
                       <button
                         className="rounded border border-border px-2 py-1 text-muted disabled:opacity-50"
                         disabled={busyVersion === entry.version || isCurrent}
