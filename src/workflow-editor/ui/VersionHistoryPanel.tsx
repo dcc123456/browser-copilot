@@ -67,6 +67,11 @@ export default function VersionHistoryPanel({
       await onApply(result.workflow)
       toast(`${t('versionsApplied')} v${entry.version}`, 'ok')
       await load()
+    } catch (e) {
+      // The switch did not land: the editor has already put the version on the
+      // canvas and marked it unsaved, so say why instead of claiming success.
+      const msg = e instanceof Error ? e.message : String(e)
+      toast(`${t('versionsApplyFailed')}: ${msg}`, 'error')
     } finally {
       setBusyVersion(null)
     }

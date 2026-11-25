@@ -1812,14 +1812,14 @@ export default function EditorApp() {
         })
         setDirty(false)
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
         // The canvas shows the old version but storage still holds the newer
-        // content; leave it marked unsaved so Save can finish the switch.
-        toast.show(`${t('versionsApplyFailed')}: ${msg}`, 'error')
+        // content; leave it marked unsaved so Save can finish the switch. The
+        // caller (version panel) owns the user-facing error message.
         setDirty(true)
+        throw e
       }
     },
-    [meta, pushHistory, setDirty, toast, t, versionCurrent],
+    [meta, pushHistory, setDirty, versionCurrent],
   )
 
   // Picking a credential secures its `get-secret` producer here; the pure patcher
