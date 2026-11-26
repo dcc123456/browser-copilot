@@ -729,6 +729,8 @@ export interface Messages {
   goalStatusPaused: string
   goalStatusDone: string
   goalRenew: string
+  /** Reveals the goal bar's budget input; the input itself never opens on its own. */
+  goalBudgetAdjust: string
   goalSetBudget: string
   goalNewTask: string
   goalExhaustedTitle: string
@@ -1445,9 +1447,13 @@ export interface Messages {
   /** Opens the native folder dialog already anchored at the configured folder. */
   settingsDownloadDirLocate: string
   settingsDownloadDirLocateHint: string
-  /** Opens the browser's default Downloads folder in the OS file manager. */
-  settingsDownloadOpenSystem: string
   settingsDownloadOpenFailed: string
+
+  // Settings · recovery (force-restart the extension)
+  settingsRecovery: string
+  settingsRecoveryIntro: string
+  settingsReloadExtension: string
+  settingsReloadConfirm: string
 
   // Settings · installation info
   settingsInstallInfo: string
@@ -2589,6 +2595,7 @@ const en: Messages = {
   goalStatusPaused: 'Paused',
   goalStatusDone: 'Done',
   goalRenew: 'Renew',
+  goalBudgetAdjust: 'Adjust budget',
   goalSetBudget: 'Set budget',
   goalNewTask: 'End and start a new task',
   goalExhaustedTitle: 'Goal budget used up',
@@ -3230,8 +3237,13 @@ const en: Messages = {
   settingsDownloadDirLocate: 'Locate folder',
   settingsDownloadDirLocateHint:
     'Browsers do not let a page open Finder/Explorer on your behalf. This opens the native folder dialog already inside the configured folder.',
-  settingsDownloadOpenSystem: 'Open Downloads folder',
   settingsDownloadOpenFailed: 'Could not open the folder.',
+  settingsRecovery: 'Recovery',
+  settingsRecoveryIntro:
+    'Use this when the panel misbehaves: a stuck reply, a folder that will not open, or a button that does nothing. It restarts the extension.',
+  settingsReloadExtension: 'Reload extension',
+  settingsReloadConfirm:
+    'This restarts the extension right away: running tasks stop and every panel window closes. Saved data is untouched.',
 
   settingsInstallInfo: 'Installation',
   settingsInstallInfoIntro:
@@ -4389,6 +4401,7 @@ const zhCN: Messages = {
   goalStatusPaused: '已暂停',
   goalStatusDone: '已完成',
   goalRenew: '续期',
+  goalBudgetAdjust: '调整预算',
   goalSetBudget: '设定预算',
   goalNewTask: '结束并新建任务',
   goalExhaustedTitle: '目标预算已用尽',
@@ -4958,8 +4971,12 @@ const zhCN: Messages = {
   settingsDownloadDirLocate: '定位到该目录',
   settingsDownloadDirLocateHint:
     '浏览器不允许网页直接打开 Finder/资源管理器。此按钮会打开系统文件夹对话框，并直接定位到该目录。',
-  settingsDownloadOpenSystem: '打开系统下载文件夹',
   settingsDownloadOpenFailed: '无法打开文件夹。',
+  settingsRecovery: '故障恢复',
+  settingsRecoveryIntro: '界面出问题时使用：回复卡住、目录打不开、按钮点了没反应。这会重启扩展。',
+  settingsReloadExtension: '重载插件',
+  settingsReloadConfirm:
+    '这会立即重启扩展：正在运行的任务会停止，所有面板窗口会关闭。已保存的数据不受影响。',
 
   settingsInstallInfo: '安装信息',
   settingsInstallInfoIntro:

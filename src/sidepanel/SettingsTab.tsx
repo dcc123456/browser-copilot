@@ -36,6 +36,7 @@ import { getInstallType, type InstallType } from '../lib/update/state'
 import { ADAPTER_ASSET_PATH, ADAPTER_EXPORT_FILENAME, buildMcpSnippet } from '../lib/mcp-adapter'
 import NumberInput from '../ui/NumberInput'
 import FormDialog, { FormDialogCancelButton, FormDialogPrimaryButton } from '../ui/FormDialog'
+import { confirmDialog } from '../ui/confirm'
 import { Switch } from '../ui/Switch'
 import UpdateSettingsCard from './update/UpdateSettingsCard'
 import TeamSharingCard from './TeamSharingCard'
@@ -490,6 +491,24 @@ export default function SettingsTab({ onLocaleChange }: Props) {
     }
   }
 
+  // --- Recovery ----------------------------------------------------------------
+  /**
+   * Restarts the extension. A stuck turn, an unresponsive picker or a dead panel
+   * is service-worker state, and reloading the worker is the only reset a page
+   * can trigger itself — saved data lives in storage, so nothing is lost.
+   */
+  const reloadExtension = async (): Promise<void> => {
+    const ok = await confirmDialog({
+      title: t.dialogWarningTitle,
+      message: t.settingsReloadConfirm,
+      confirmText: t.dialogConfirm,
+      cancelText: t.cancel,
+      danger: true,
+    })
+    if (!ok) return
+    chrome.runtime.reload()
+  }
+
   // --- Download directory ----------------------------------------------------
   const [downloadDirName, setDownloadDirName] = useState<string | null>(null)
   // Kept in state so the locate button can hand it to `showDirectoryPicker`
@@ -566,15 +585,6 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         if (error?.name === 'AbortError') return
         setDownloadNotice({ kind: 'error', text: t.settingsDownloadOpenFailed })
       })
-  }
-
-  /** Opens the browser's default Downloads folder in Finder/Explorer. */
-  const openSystemDownloads = (): void => {
-    try {
-      chrome.downloads.showDefaultFolder()
-    } catch {
-      setDownloadNotice({ kind: 'error', text: t.settingsDownloadOpenFailed })
-    }
   }
 
   // --- Installation info -----------------------------------------------------
@@ -799,6 +809,17 @@ export default function SettingsTab({ onLocaleChange }: Props) {
         </Banner>
       )}
 
+      {/* --- Recovery --- */}
+      <div className="card">
+        <div className="card-title">{t.settingsRecovery}</div>
+        <p className="hint">{t.settingsRecoveryIntro}</p>
+        <div className="actions">
+          <button onClick={() => void reloadExtension()} type="button">
+            {t.settingsReloadExtension}
+          </button>
+        </div>
+      </div>
+
       {/* --- Download directory --- */}
       <div className="card">
         <div className="card-title">{t.settingsDownloadDir}</div>
@@ -844,9 +865,6 @@ export default function SettingsTab({ onLocaleChange }: Props) {
               {t.settingsChooseFolder}
             </button>
           )}
-          <button onClick={openSystemDownloads} type="button">
-            {t.settingsDownloadOpenSystem}
-          </button>
         </div>
         {downloadDirName && <p className="hint">{t.settingsDownloadDirLocateHint}</p>}
         <label className="checkbox">

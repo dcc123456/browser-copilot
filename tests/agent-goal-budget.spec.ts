@@ -9,6 +9,7 @@ import type { AgentServerMessage } from '../src/lib/messages'
 import { streamCompletion } from '../src/lib/llm'
 import type { StreamResult, WireMessage } from '../src/lib/llm'
 import type { TaskProgress } from '../src/lib/task-progress'
+import { beginTask, emptyTaskProgress } from '../src/lib/task-progress'
 
 vi.mock('../src/lib/llm', async (importActual) => {
   const actual = await importActual<typeof import('../src/lib/llm')>()
@@ -204,6 +205,34 @@ describe('explicit goal budget in the loop', () => {
       ),
     ).toBe(true)
     expect(stored?.goal?.status).toBe('paused')
+  })
+
+  it('shows and enforces no budget in chat mode', async () => {
+    // Spec R10 边界: chat mode is pure conversation. A goal left on record by an
+    // earlier semi-auto turn used to paint the bar AND pause the question at its
+    // exhausted budget, so a plain chat answered with a budget dialog.
+    const started = beginTask(emptyTaskProgress('goal-conv'), 'watch the price', Date.now(), 1)
+    stored = {
+      ...started,
+      goal: { ...started.goal!, roundsStarted: 1, status: 'paused' as const },
+    }
+    streamMock.mockResolvedValue({
+      content: 'an answer',
+      reasoning: '',
+      toolCalls: [],
+      finishReason: 'stop',
+      usage: null,
+    } as never)
+
+    await runAgentTurn(
+      [{ role: 'user', content: 'hi' }] as never,
+      deps({ getMode: async () => 'chat' as const }) as never,
+    )
+
+    expect(events.some((event) => event.type === 'goal.state')).toBe(false)
+    expect(events.some((event) => event.type === 'goal.budgetExhausted')).toBe(false)
+    // The turn asked the model instead of stopping at the gate.
+    expect(streamMock).toHaveBeenCalledTimes(1)
   })
 
   it('completes only on an explicit goal_complete with evidence', async () => {

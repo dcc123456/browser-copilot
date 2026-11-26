@@ -1699,6 +1699,16 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
   } | null>(null)
   /** Draft value of the goal-bar / pause-card budget input. */
   const [goalBudgetDraft, setGoalBudgetDraft] = useState('')
+  /** Whether the goal bar's budget input is shown. The bar reports the spend on
+   *  its own; editing the rounds is an explicit request, never a popup. */
+  const [budgetEditorOpen, setBudgetEditorOpen] = useState(false)
+  /** Drops the goal bar / pause card between conversations. */
+  const resetGoalUi = (): void => {
+    setGoalState(null)
+    setGoalReport(null)
+    setGoalBudgetDraft('')
+    setBudgetEditorOpen(false)
+  }
   // A budget below what the task already spent is refused instead of applied:
   // accepting 5 for a task that used 20 seconds later shows "20/5", which reads
   // as a successful edit while changing nothing.
@@ -3019,6 +3029,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
     // The save-card popup belongs to the previous conversation: close it, or it
     // floats over the newly opened chat with a card that no longer exists.
     setSaveCardModalOpen(false)
+    resetGoalUi()
     streamingRef.current = null
     thinkingRef.current = null
     resetUsage()
@@ -3051,6 +3062,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
     setWorkflowPrompt(null)
     // Close the previous conversation's save-card popup (see openConversation).
     setSaveCardModalOpen(false)
+    resetGoalUi()
     streamingRef.current = null
     thinkingRef.current = null
     resetUsage()
@@ -3116,6 +3128,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
       setAskUsers([])
       setWorkflowPrompt(null)
       setSaveCardModalOpen(false)
+      resetGoalUi()
       streamingRef.current = null
       thinkingRef.current = null
       setConversationId(DEFAULT_CONVERSATION_ID)
@@ -4580,6 +4593,15 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                   : t.goalStatusActive}
             </span>
             {goalState.status === 'active' && (
+              <button
+                className="rounded border border-border px-2 py-0.5"
+                onClick={() => setBudgetEditorOpen((open) => !open)}
+                type="button"
+              >
+                {t.goalBudgetAdjust}
+              </button>
+            )}
+            {goalState.status === 'active' && budgetEditorOpen && (
               <>
                 <input
                   aria-label={t.goalSetBudget}
@@ -4602,6 +4624,7 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                       conversationId,
                       maxRounds: value,
                     })
+                    setBudgetEditorOpen(false)
                   }}
                   type="button"
                 >

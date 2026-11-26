@@ -5825,9 +5825,13 @@ export async function runAgentTurn(
     if (note) systemPrompt = `${systemPrompt}\n\n${note}`
   }
   taskProgress = await saveProgressKeepingBudget(taskProgress)
+  // A chat-mode turn has no budget to show or enforce, even when an earlier
+  // semi-auto turn left a goal on record: without this the stale goal painted
+  // the budget bar and its exhausted gate paused a plain question.
+  const budgetApplies = initialMode !== 'chat'
   const broadcastGoal = (): void => {
     const goal = (ctx.taskProgress ?? taskProgress).goal
-    if (!goal) return
+    if (!goal || !budgetApplies) return
     deps.send({
       type: 'goal.state',
       goal: {
@@ -6095,7 +6099,7 @@ export async function runAgentTurn(
     // panel waits, so renewal continues from this exact breakpoint.
     const currentProgress = ctx.taskProgress ?? taskProgress
     const currentGoal = currentProgress.goal
-    if (currentGoal && goalBudgetExhausted(currentProgress)) {
+    if (budgetApplies && currentGoal && goalBudgetExhausted(currentProgress)) {
       taskProgress = await saveProgressKeepingBudget({
         ...currentProgress,
         goal: { ...currentGoal, status: 'paused' },
