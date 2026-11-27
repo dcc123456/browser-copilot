@@ -20,7 +20,7 @@ import {
   verifyInstallDirectory,
   type SavedInstallDirectory,
 } from '../../lib/update/directory'
-import { addUpdateBackup, markPendingReload } from '../../lib/update/state'
+import { markPendingReload } from '../../lib/update/state'
 import {
   UpdateApplyError,
   type UpdateAssetInfo,
@@ -31,7 +31,7 @@ import FormDialog from '../../ui/FormDialog'
 import { useT } from '../i18n'
 import { describeApplyError, describeApplyErrorDetail } from './error-text'
 import IconButton from './IconButton'
-import { openReleasePage } from './open-release'
+import { downloadReleaseAsset, openReleasePage } from './open-release'
 import type { UpdateSnapshot } from './use-update-snapshot'
 
 type Phase = 'idle' | 'working' | 'done' | 'error'
@@ -57,7 +57,6 @@ export default function UpdateDialog({
   const [noticeDetail, setNoticeDetail] = useState<string | null>(null)
   const [saved, setSaved] = useState<SavedInstallDirectory | null>(null)
   const [doneVersion, setDoneVersion] = useState<string | null>(null)
-  const [backupFolder, setBackupFolder] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -165,7 +164,7 @@ export default function UpdateDialog({
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      const result = await applyUpdate({
+      await applyUpdate({
         directory,
         asset,
         currentVersion: snapshot.currentVersion,
@@ -176,9 +175,7 @@ export default function UpdateDialog({
         onProgress: setProgress,
       })
       await markPendingReload(target.version)
-      await addUpdateBackup({ folder: result.backupFolder, version: target.version })
       setDoneVersion(target.version)
-      setBackupFolder(result.backupFolder)
       setPhase('done')
     } catch (error) {
       if (error instanceof UpdateApplyError && error.code === 'aborted') {
@@ -225,6 +222,9 @@ export default function UpdateDialog({
         <p className="m-0 mt-1 select-text text-[11px] leading-relaxed break-all text-muted">
           {t.updateErrorDetail({ detail: noticeDetail })}
         </p>
+      )}
+      {phase === 'error' && (
+        <p className="m-0 mt-1 text-[11px] leading-relaxed text-muted">{t.updateFailureRecovery}</p>
       )}
     </div>
   )
@@ -300,6 +300,11 @@ export default function UpdateDialog({
       <>
         <IconButton icon={X} label={t.updateClose} onClick={onClose} />
         <IconButton
+          icon={Download}
+          label={t.updateRedownload}
+          onClick={() => downloadReleaseAsset(asset?.url ?? target.htmlUrl)}
+        />
+        <IconButton
           icon={RefreshCw}
           label={t.updateTryAgain}
           onClick={() => void start()}
@@ -355,11 +360,6 @@ export default function UpdateDialog({
         <p className="m-0 text-[12.5px] leading-relaxed text-muted">
           {t.updateDoneBody({ version: doneVersion ?? target.version })}
         </p>
-        {backupFolder && (
-          <p className="m-0 text-[11.5px] leading-relaxed break-words text-muted">
-            {t.updateBackupNote({ folder: backupFolder })}
-          </p>
-        )}
       </div>
     )
   } else {
@@ -412,8 +412,6 @@ function progressLabel(t: Messages, progress: UpdateProgress | null): string {
       return t.updateProgressVerifying
     case 'extracting':
       return t.updateProgressExtracting
-    case 'backing-up':
-      return t.updateProgressBackingUp
     case 'writing':
       return t.updateProgressWriting({
         done: progress.filesWritten ?? 0,

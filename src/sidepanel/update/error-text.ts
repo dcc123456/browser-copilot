@@ -43,7 +43,6 @@ const APPLY_ERROR_TEXT: Partial<Record<UpdateApplyErrorCode, keyof Messages>> = 
   'archive-unsafe-path': 'updateErrorPath',
   'archive-duplicate-path': 'updateErrorDuplicate',
   'variant-mismatch': 'updateErrorVariant',
-  'backup-failed': 'updateErrorBackup',
   'write-failed': 'updateErrorWrite',
   aborted: 'updateErrorAborted',
 }
@@ -63,11 +62,11 @@ export function describeApplyError(t: Messages, error: unknown): string {
 
 /**
  * Technical detail for failures whose localized line cannot say what actually
- * went wrong (I/O against the install folder, where the browser error name is
+ * went wrong (writing into the install folder, where the browser error name is
  * the actionable clue). Every other code has a complete localized explanation,
  * so its detail would only repeat it.
  */
-const DETAILED_CODES: ReadonlySet<UpdateApplyErrorCode> = new Set(['backup-failed', 'write-failed'])
+const DETAILED_CODES: ReadonlySet<UpdateApplyErrorCode> = new Set(['write-failed'])
 
 export function describeApplyErrorDetail(error: unknown): string | null {
   return error instanceof UpdateApplyError && DETAILED_CODES.has(error.code) ? error.message : null

@@ -3,8 +3,12 @@
  *
  * Runs only in the side panel (it needs the directory handle and a user
  * gesture). No file is written until the GitHub digest matches and the whole
- * archive validates; the root `manifest.json` is written last, so an aborted
- * or failed write leaves the previous manifest in place.
+ * archive validates. There is deliberately no backup: files are overwritten in
+ * place, each write aborts as a whole when it fails, and the stable entry
+ * points plus the root `manifest.json` are written last. A failed update can
+ * therefore leave extra hashed assets but never a half-written entry point,
+ * and the previous version keeps loading; the dialog offers the release
+ * download again for a manual reinstall.
  *
  * @module lib/update/apply
  */
@@ -33,27 +37,18 @@ const BOOTSTRAP_LAST = new Set([
   'src/offscreen/index.html',
 ])
 
+/**
+ * One whole-file `write()` of a multi-10-MB buffer is not reliable here: the
+ * 0.6.22 OCR update failed writing a 20MB `chi_sim.traineddata.gz` in one call
+ * while every smaller file of that run was fine. Slice large files so no single
+ * call carries a huge buffer.
+ */
+const WRITE_CHUNK_BYTES = 1024 * 1024
+
 function writeOrder(files: readonly ZipEntryInfo[]): ZipEntryInfo[] {
   const isBootstrap = (file: ZipEntryInfo): boolean => BOOTSTRAP_LAST.has(file.name.toLowerCase())
   return [...files.filter((file) => !isBootstrap(file)), ...files.filter(isBootstrap)]
 }
-
-export const BACKUP_FOLDER_PREFIX = 'browser-copilot-backup-'
-
-/**
- * One whole-file `write()` of a multi-10-MB buffer is not reliable here: the
- * 0.6.22 OCR update failed to back up its 20MB `chi_sim.traineddata.gz` (the
- * backup file was left at 0 bytes) while every smaller file of that run was
- * written fine. Slice large files so no single call carries a huge buffer.
- */
-const WRITE_CHUNK_BYTES = 1024 * 1024
-
-/**
- * Deliberately not `manifest.json`: the backup folder lives inside the install
- * folder, and a valid root manifest there could be loaded as a second extension
- * by accident. Restoring is a rename away.
- */
-const BACKUP_MANIFEST = 'manifest.json.bak'
 
 export interface ApplyUpdateOptions {
   directory: FileSystemDirectoryHandle
@@ -69,8 +64,6 @@ export interface ApplyUpdateOptions {
 
 export interface ApplyUpdateResult {
   filesWritten: number
-  /** Folder inside the install directory holding the files that were replaced. */
-  backupFolder: string
 }
 
 export async function applyUpdate(options: ApplyUpdateOptions): Promise<ApplyUpdateResult> {
@@ -115,13 +108,6 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<ApplyUpd
   const files = writeOrder(plan.files)
   const filesTotal = files.length
 
-  // Back up every file this update will replace before touching any of them.
-  // A failed backup therefore costs nothing; a failed write still leaves the
-  // old version restorable from the backup folder.
-  onProgress?.({ stage: 'backing-up', loaded: 0, total: null })
-  const backupFolder = backupFolderName(options.currentVersion, Date.now())
-  await backupExistingFiles(directory, backupFolder, [...files, plan.manifest], signal)
-
   for (let index = 0; index < files.length; index += 1) {
     throwIfAborted(signal)
     const file = files[index]!
@@ -146,81 +132,7 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<ApplyUpd
   // Last: until this succeeds, Chrome keeps loading the old version.
   await writeFile(directory, ['manifest.json'], manifestBytes)
   onProgress?.({ stage: 'done', loaded: 0, total: null, filesWritten: filesTotal, filesTotal })
-  return { filesWritten: filesTotal, backupFolder }
-}
-
-function backupFolderName(currentVersion: string, now: number): string {
-  const version = currentVersion.replace(/[^0-9A-Za-z._-]/g, '-')
-  return `${BACKUP_FOLDER_PREFIX}${version}-${new Date(now).toISOString().replace(/[:.]/g, '-')}`
-}
-
-/** Removes one backup folder the update left behind. */
-export async function removeBackupFolder(
-  directory: FileSystemDirectoryHandle,
-  folder: string,
-): Promise<void> {
-  await directory.removeEntry(folder, { recursive: true })
-}
-
-async function backupExistingFiles(
-  directory: FileSystemDirectoryHandle,
-  backupFolder: string,
-  targets: readonly ZipEntryInfo[],
-  signal: AbortSignal | undefined,
-): Promise<void> {
-  let backupRoot: FileSystemDirectoryHandle
-  try {
-    backupRoot = await directory.getDirectoryHandle(backupFolder, { create: true })
-  } catch (error) {
-    throw new UpdateApplyError(
-      'backup-failed',
-      `Could not create "${backupFolder}": ${describeCause(error)}`,
-    )
-  }
-
-  for (const target of targets) {
-    throwIfAborted(signal)
-    const segments = splitInstallPath(target.name)
-    if (!segments) continue
-    const content = await readExistingFile(directory, segments)
-    if (!content) continue
-    const backupSegments =
-      segments.length === 1 && segments[0] === 'manifest.json' ? [BACKUP_MANIFEST] : segments
-    try {
-      await writeFile(backupRoot, backupSegments, content)
-    } catch (error) {
-      throw new UpdateApplyError(
-        'backup-failed',
-        `Could not back up "${target.name}": ${describeCause(error)}`,
-      )
-    }
-  }
-}
-
-/** Returns the current content, or `null` when the path does not exist. */
-async function readExistingFile(
-  directory: FileSystemDirectoryHandle,
-  segments: readonly string[],
-): Promise<Uint8Array | null> {
-  let handle: FileSystemFileHandle
-  try {
-    let parent = directory
-    for (const segment of segments.slice(0, -1)) {
-      parent = await parent.getDirectoryHandle(segment)
-    }
-    handle = await parent.getFileHandle(segments[segments.length - 1]!)
-  } catch {
-    return null
-  }
-  try {
-    const file = await handle.getFile()
-    return new Uint8Array(await file.arrayBuffer())
-  } catch (error) {
-    throw new UpdateApplyError(
-      'backup-failed',
-      `Could not read "${segments.join('/')}": ${describeCause(error)}`,
-    )
-  }
+  return { filesWritten: filesTotal }
 }
 
 async function downloadAsset(
@@ -336,9 +248,14 @@ async function writeFile(
     const writable = await handle.createWritable()
     try {
       await writeInChunks(writable, content)
-    } finally {
-      await writable.close()
+    } catch (error) {
+      // Abort, don't close: closing commits whatever was written, and a
+      // truncated service worker or entry HTML would stop the old version from
+      // loading. Aborting keeps the old file — there is no backup to restore.
+      await writable.abort().catch(() => undefined)
+      throw error
     }
+    await writable.close()
   } catch (error) {
     throw new UpdateApplyError(
       'write-failed',

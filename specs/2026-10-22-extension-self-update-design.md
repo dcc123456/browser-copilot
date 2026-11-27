@@ -8,7 +8,7 @@
 **目标**
 
 - 插件后台定时检查 `dcc123456/browser-copilot` 的 GitHub 最新 Release，并在侧边栏提示新版本。
-- Chrome unpacked 安装可由用户在插件内完成：首次选择一次安装目录 → 下载对应 ZIP → 校验 GitHub 提供的 SHA-256 → 解压、备份将被替换的旧文件、覆盖安装目录 → 用户点 “Reload now” 后生效。之后更新自动复用已保存的目录，不再询问。
+- Chrome unpacked 安装可由用户在插件内完成：首次选择一次安装目录 → 下载对应 ZIP → 校验 GitHub 提供的 SHA-256 → 解压并直接覆盖安装目录（不备份；写入失败时提供「重新下载」链接手动重装）→ 用户点 “Reload now” 后生效。之后更新自动复用已保存的目录，不再询问。
 - 不依赖任何自建服务器；不执行远端脚本；不静默更新。
 
 **非目标**
@@ -72,8 +72,7 @@ UpdateState（chrome.storage.local）
         ├─ 按构建变体选择资产（ocr / no-ocr / firefox）
         ├─ 下载（进度），校验 GitHub SHA-256
         ├─ 解压（路径安全校验）
-        ├─ 在安装目录内创建 browser-copilot-backup-<旧版本>-<时间>/，备份将被覆盖的旧文件（根 manifest 存为 manifest.json.bak）
-        ├─ 先写哈希资源，再写稳定入口（service-worker-loader.js / index.html），最后写 manifest.json
+        ├─ 直接覆盖安装目录内的文件（不备份）：先写哈希资源，再写稳定入口（service-worker-loader.js / index.html），最后写 manifest.json
         └─ 写 pendingReload 标记 → “Reload now” / 用户手动 Reload
 ```
 
@@ -148,9 +147,11 @@ interface UpdateState {
 - 先校验 ZIP 内的根 `manifest.json`：`manifest_version === 3`、`name` 一致、`version === latestVersion`、no-ocr 标记与当前构建一致。
 - ZIP 路径安全：拒绝绝对路径、`..`、反斜杠、空段、控制字符、重复条目；目录条目只用于建目录；`manifest.json` 最后写。
 - 解压上限复用通用 ZIP reader：单文件 64 MiB、总计 128 MiB、条目数上限；超过即中止。
-- 覆盖前先备份：在安装目录内创建 `browser-copilot-backup-<旧版本>-<ISO 时间>/`，把本次将被替换的现存文件按原相对路径复制进去；根 `manifest.json` 存为 `manifest.json.bak`，这样备份目录**不能被当作第二个扩展加载**（避免扩展管理里出现重复条目）。备份失败（`backup-failed`）即中止，保证“没有备份就不覆盖”。
-- 写入使用 `createWritable()`（写入 swap 文件，close 时提交）；所有内容文件成功后才写 manifest，失败时旧 manifest 仍指向旧文件。
-- 不删除旧文件；不触碰 `browser-copilot/` 数据目录。备份目录不在覆盖后立即删除：应用成功时把 `{ folder, version }` 追加到 `chrome.storage.local` 的 `update.backups`；面板每次打开时，若当前运行版本 ≥ 目标版本（即重载已经发生、新版本确实能打开），用保存的安装目录句柄 `removeEntry(folder, { recursive: true })` 删除并清除该条记录。运行版本仍更旧（未重载）或目录权限为 `prompt` 时保留；`NotFoundError`（用户已手动删除）视为完成，其他错误保留下次打开重试。
+- **不做备份，直接覆盖**（2026-11-27 决策）：仓库不再为更新保留备份目录，也不写 `update.backups` 状态；覆盖失败时通过 UI 提供的「重新下载」链接手动重装。
+- 写入使用 `createWritable()`（写入 swap 文件，close 时提交）；每一文件失败时调用 `abort()` 丢弃 swap、保留原文件（**不能 close**：close 会把写了一半的内容提交，截断的稳定入口会让旧版本无法加载）。全部内容文件成功后才写 manifest。
+- 大文件按 1 MiB 分片写入：一次性 `write()` 几十 MB 的 buffer 在 0.6.22 OCR 包的 20MB `chi_sim.traineddata.gz` 上实测失败（写入调用不返回/留下 0 字节），分片后不会把整文件压进单次调用。
+- 写入失败时旧 manifest 仍指向旧文件，稳定入口也未被截断，因此旧版本通常仍可加载；对话框在错误下方显示底层错误名，并提供「重新下载」按钮（直达本次变体的资产 URL）用于手动重装。
+- 不删除旧文件；不触碰 `browser-copilot/` 数据目录。
 - 用户必须点击 Update 并（首次）选择/授权目录；没有任何后台自动写入。
 
 ## 5. UI
@@ -160,7 +161,7 @@ interface UpdateState {
   - 已下载待重载：`Update downloaded — reload to finish` + 旋转箭头图标按钮（Reload）。
   - 横幅上的两个动作都是纯图标按钮：文案只放在 `aria-label` / `title`，不显示按钮文字。
   - 关闭只影响该版本；下一次新版本仍显示。
-- **更新对话框**（`UpdateDialog.tsx` + `FormDialog`）：当前版本 → 目标版本、Release notes（纯文本）、覆盖/备份说明、进度（下载/校验/解压/备份/写入）、错误；所有动作按钮均为图标按钮（取消/关闭/下载并安装/重试/稍后/立即重新加载/打开发布页/更换目录），无按钮文字。
+- **更新对话框**（`UpdateDialog.tsx` + `FormDialog`）：当前版本 → 目标版本、Release notes（纯文本）、覆盖说明（明确不备份）、进度（下载/校验/解压/写入）、错误（含底层错误名）；失败态除「重试/关闭」外提供「重新下载」按钮（直达当前变体资产），所有动作按钮均为图标按钮（取消/关闭/下载并安装/重新下载/重试/稍后/立即重新加载/打开发布页/更换目录），无按钮文字。
 - **安装目录行**：首次更新提示“请选择当初「加载已解压的扩展程序」时使用的目录”，之后自动复用；已保存时显示目录名 + “更换”图标按钮。浏览器没有 API 能查询扩展自身的安装目录，因此首次必须由用户选一次；路径句柄保存在 IndexedDB，后续更新直接复用，权限过期时在点击内重新授权。选错目录不会自动产生第二个扩展，但会写到 Chrome 并未运行的那份文件里——所以提示语要求选择当初加载的那个目录。
 - **Settings 卡片**（`SettingsTab.tsx` 末尾）：当前版本、`Check now`、上次检查/已是最新/有更新；有更新时提供按钮触发全局更新对话框（自定义事件 `bc:open-update`）。
 - 所有文案 en + zh-CN；颜色/间距只用 Tailwind token 类。
@@ -171,8 +172,7 @@ interface UpdateState {
 - 下载/校验/解压失败：不写任何文件；对话框给出错误 + “打开 Release 页面”。
 - 目录选择取消：静默返回，不报错。
 - 目录校验失败：提示选择含 `manifest.json` 的安装文件夹；不下载。
-- 备份失败（无法创建备份目录或写入备份文件）：不覆盖任何文件；提示检查目录权限后重试。
-- 写入中途失败：稳定入口（`service-worker-loader.js`、各 `index.html`）在全部哈希资源之后才写，`manifest.json` 最后写；因此旧版本仍可运行（或新资源已完整落盘），且被替换的文件都能从备份目录恢复，提示检查目录写权限并重试。
+- 写入失败（未设置写权限、目录只读、磁盘/系统写入错误）：每个文件 `abort()` 保留原文件，稳定入口（`service-worker-loader.js`、各 `index.html`）在全部哈希资源之后才写、`manifest.json` 最后写，因此旧版本仍可运行；对话框显示底层错误名，并给出「重新下载」按钮用于手动覆盖重装。
 - 写入成功但用户不重载：文件已更新，旧版本继续运行；banner 保留 “Reload to finish”。
 - Reload 失败/面板关闭：用户可在 `chrome://extensions` 点 Reload；文件已就位。
 - GitHub 限流：显示可读提示，保留 Release 链接；12h 后再试。
@@ -191,7 +191,7 @@ interface UpdateState {
 - Chrome unpacked 专属；Firefox / CWS / 企业安装不覆盖。
 - 浏览器没有“读取自身安装目录”的 API，首次更新必须由用户手动选一次目录；句柄保存后可复用，浏览器重启后可能需要重新授权（点击 Update 时 `requestPermission`）。
 - 安装目录在只读位置（如 `/Applications`）会写入失败。
-- 不清理旧文件；目录会随版本累积带 hash 的旧资源。每次更新的备份目录（`browser-copilot-backup-*`）在新版本重载后首次打开面板时自动删除；删除失败（权限未授予）时保留，后续打开面板重试。
-- **扩展管理出现两个同名插件的排查**：每次 “Load unpacked” 都按目录注册一个扩展。若在扩展管理看到两个同名条目，通常是同时加载了旧目录与新目录（例如 `dist/` 与解压出的另一个文件夹）；打开任一卡片的 “详情 → 来源/已加载自” 对比路径，移除多余的那个即可。更新器只覆盖用户选定的那个目录，不会注册新扩展；备份目录里的根 manifest 已改名为 `manifest.json.bak`，本身也不会被 Chrome 当作扩展加载。
+- 不清理旧文件；目录会随版本累积带 hash 的旧资源。更新不备份被覆盖的文件：写入失败后如需回退，请用对话框给出的「重新下载」链接手动覆盖安装。
+- **扩展管理出现两个同名插件的排查**：每次 “Load unpacked” 都按目录注册一个扩展。若在扩展管理看到两个同名条目，通常是同时加载了旧目录与新目录（例如 `dist/` 与解压出的另一个文件夹）；打开任一卡片的 “详情 → 来源/已加载自” 对比路径，移除多余的那个即可。更新器只覆盖用户选定的那个目录，不会注册新扩展。
 - 不解决供应链信任：GitHub 账号/Release 被攻破时，SHA-256 也只能证明“下载与 GitHub 发布的一致”。这是与手动下载 ZIP 相同的信任边界。
 - 若未来上架 CWS，必须删除此路径；CWS 的静默更新才是普通用户的正确方案。

@@ -1,10 +1,9 @@
 /**
  * Localized updater failures and the technical detail line.
  *
- * Backup/write failures are the ones where the browser's own error name is the
- * only actionable clue (the 0.6.22 OCR update left a 0-byte backup with a bare
- * "could not back up" toast); the detail must survive to the dialog, while a
- * code with a complete localized explanation must not repeat itself.
+ * Write failures are the ones where the browser's own error name is the only
+ * actionable clue; the detail must survive to the dialog, while a code with a
+ * complete localized explanation must not repeat itself.
  */
 import { describe, expect, it } from 'vitest'
 import { messagesFor } from '../src/lib/i18n'
@@ -17,11 +16,11 @@ const zh = messagesFor('zh-CN')
 describe('updater error text', () => {
   it('localizes an I/O failure and keeps the browser detail', () => {
     const detail =
-      'Could not back up "tesseract/chi_sim.traineddata.gz": NotAllowedError: the file was not written'
-    const error = new UpdateApplyError('backup-failed', detail)
+      'Could not write "tesseract/chi_sim.traineddata.gz": NotAllowedError: the file was not written'
+    const error = new UpdateApplyError('write-failed', detail)
 
-    expect(describeApplyError(en, error)).toBe(en.updateErrorBackup)
-    expect(describeApplyError(zh, error)).toBe(zh.updateErrorBackup)
+    expect(describeApplyError(en, error)).toBe(en.updateErrorWrite)
+    expect(describeApplyError(zh, error)).toBe(zh.updateErrorWrite)
     expect(describeApplyErrorDetail(error)).toBe(detail)
     expect(en.updateErrorDetail({ detail })).toContain(detail)
     expect(zh.updateErrorDetail({ detail })).toContain(detail)

@@ -1906,14 +1906,14 @@ export interface Messages {
   updateReloadNow: string
   updateReloadLater: string
   updateOpenRelease: string
+  /** Direct download of this variant's package, offered after a failed write. */
+  updateRedownload: string
   updateDoneTitle: string
   updateDoneBody: ({ version }: { version: string }) => string
-  updateBackupNote: ({ folder }: { folder: string }) => string
   updateManualHint: string
   updateProgressDownloading: ({ percent }: { percent: number }) => string
   updateProgressVerifying: string
   updateProgressExtracting: string
-  updateProgressBackingUp: string
   updateProgressWriting: ({ done, total }: { done: number; total: number }) => string
   updateProgressDone: string
   updateErrorTitle: string
@@ -1936,12 +1936,13 @@ export interface Messages {
   updateErrorPath: string
   updateErrorDuplicate: string
   updateErrorVariant: string
-  updateErrorBackup: string
   updateErrorWrite: string
   updateErrorAborted: string
   updateErrorGeneric: ({ detail }: { detail: string }) => string
-  /** Technical cause line under a backup/write failure; the message above is localized. */
+  /** Technical cause line under a write failure; the message above is localized. */
   updateErrorDetail: ({ detail }: { detail: string }) => string
+  /** Manual reinstall path shown when a write failed (the updater keeps no backup). */
+  updateFailureRecovery: string
   updateSettingsTitle: string
   updateSettingsHint: string
   updateCheckNow: string
@@ -3684,7 +3685,7 @@ Keep the whole report dense and within the message size cap.`,
   updateReleaseNotes: 'Release notes',
   updateNotesUnavailable: 'This release has no notes.',
   updateOverwriteWarning:
-    'The release files will be written directly into the install folder after its current files are backed up. Keep this panel open until it finishes; Chrome keeps running the current version until you reload.',
+    'The release files are written straight over the install folder, with no backup. Keep this panel open until it finishes; Chrome keeps running the current version until you reload. If a write fails, download the package again to reinstall manually.',
   updateInstallFolder: 'Install folder',
   updateFolderFirstTime:
     'The first update asks for the folder you originally loaded; later updates reuse it automatically.',
@@ -3697,17 +3698,15 @@ Keep the whole report dense and within the message size cap.`,
   updateReloadNow: 'Reload now',
   updateReloadLater: 'Later',
   updateOpenRelease: 'Open release page',
+  updateRedownload: 'Download again',
   updateDoneTitle: 'Update written',
   updateDoneBody: ({ version }) =>
     `Version ${version} is on disk. Reload the extension to start using it.`,
-  updateBackupNote: ({ folder }) =>
-    `The replaced files were backed up to "${folder}" inside the install folder. The backup is deleted automatically the next time the panel opens on the new version.`,
   updateManualHint:
     'This installation cannot update itself in place. Download the release from GitHub and load it manually.',
   updateProgressDownloading: ({ percent }) => `Downloading… ${percent}%`,
   updateProgressVerifying: 'Verifying the SHA-256 digest…',
   updateProgressExtracting: 'Checking the archive…',
-  updateProgressBackingUp: 'Backing up the current version…',
   updateProgressWriting: ({ done, total }) => `Writing files… ${done}/${total}`,
   updateProgressDone: 'Done',
   updateErrorTitle: 'Update failed',
@@ -3731,13 +3730,13 @@ Keep the whole report dense and within the message size cap.`,
   updateErrorPath: 'The package contains an unsafe file path.',
   updateErrorDuplicate: 'The package contains duplicate file paths.',
   updateErrorVariant: 'The package is for a different build of this extension.',
-  updateErrorBackup:
-    'The current version could not be backed up, so nothing was overwritten. Check the folder permissions and try again.',
   updateErrorWrite:
-    'Writing the release files failed. The previous version remains installed; try again.',
+    'Writing the release files failed. No backup was kept; if the extension no longer starts, download the package again and reinstall it.',
   updateErrorAborted: 'The update was canceled.',
   updateErrorGeneric: ({ detail }) => `Something went wrong: ${detail}`,
   updateErrorDetail: ({ detail }) => `Details: ${detail}`,
+  updateFailureRecovery:
+    'No backup was kept. If the extension no longer starts, download the package again and copy its files over the install folder, then reload it in chrome://extensions.',
   updateSettingsTitle: 'Updates',
   updateSettingsHint:
     'Checks GitHub Releases every 12 hours; a failed check retries automatically with backoff. An in-place update writes the release into the unpacked install folder; reload the extension to switch versions.',
@@ -5344,7 +5343,7 @@ const zhCN: Messages = {
   updateReleaseNotes: '更新说明',
   updateNotesUnavailable: '该版本没有更新说明。',
   updateOverwriteWarning:
-    '更新文件会直接写入安装目录，覆盖前会先备份当前文件。写入期间请保持面板打开；在重新加载之前，Chrome 会继续运行当前版本。',
+    '更新文件会直接覆盖安装目录，本次不备份。写入期间请保持面板打开；在重新加载之前，Chrome 会继续运行当前版本。若写入失败，可用「重新下载」得到的安装包手动重装。',
   updateInstallFolder: '安装目录',
   updateFolderFirstTime: '首次更新请选择当初「加载已解压的扩展程序」时使用的目录；之后会自动复用。',
   updateFolderSaved: ({ name }) => `安装目录：${name}，之后将直接覆盖。`,
@@ -5356,15 +5355,13 @@ const zhCN: Messages = {
   updateReloadNow: '立即重新加载',
   updateReloadLater: '稍后',
   updateOpenRelease: '打开发布页面',
+  updateRedownload: '重新下载',
   updateDoneTitle: '更新已写入',
   updateDoneBody: ({ version }) => `版本 ${version} 已写入磁盘。重新加载扩展后即可使用。`,
-  updateBackupNote: ({ folder }) =>
-    `被替换的文件已备份到安装目录内的「${folder}」，新版本重新加载后再次打开面板会自动删除该备份。`,
   updateManualHint: '当前安装方式无法直接更新。请从 GitHub 下载新版本并手动加载。',
   updateProgressDownloading: ({ percent }) => `正在下载…… ${percent}%`,
   updateProgressVerifying: '正在校验 SHA-256 摘要……',
   updateProgressExtracting: '正在检查安装包……',
-  updateProgressBackingUp: '正在备份当前版本……',
   updateProgressWriting: ({ done, total }) => `正在写入文件…… ${done}/${total}`,
   updateProgressDone: '完成',
   updateErrorTitle: '更新失败',
@@ -5386,11 +5383,12 @@ const zhCN: Messages = {
   updateErrorPath: '安装包中包含不安全的文件路径。',
   updateErrorDuplicate: '安装包中包含重复的文件路径。',
   updateErrorVariant: '安装包适用于另一种构建版本。',
-  updateErrorBackup: '无法备份当前版本，未覆盖任何文件。请检查目录权限后重试。',
-  updateErrorWrite: '写入更新文件失败。当前版本仍然可用，请重试。',
+  updateErrorWrite: '写入更新文件失败。本次没有备份；如果扩展无法启动，请重新下载安装包手动重装。',
   updateErrorAborted: '更新已取消。',
   updateErrorGeneric: ({ detail }) => `出现错误：${detail}`,
   updateErrorDetail: ({ detail }) => `详细信息：${detail}`,
+  updateFailureRecovery:
+    '本次更新没有备份。如果扩展无法启动，请用「重新下载」得到的安装包覆盖安装目录，然后在 chrome://extensions 中重新加载。',
   updateSettingsTitle: '更新',
   updateSettingsHint:
     '每 12 小时检查一次 GitHub Releases；检查失败会按退避自动重试。直接更新会把发布文件写入未打包扩展的安装目录；重新加载扩展后切换版本。',

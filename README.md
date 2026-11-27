@@ -159,17 +159,16 @@ creates a second, empty extension.
    containing `manifest.json`) and for write permission once. Later updates
    reuse it and ask nothing.
 3. It downloads the matching variant, verifies the release's SHA-256 digest,
-   backs up the files it replaces into
-   `browser-copilot-backup-<old-version>-<timestamp>/` inside the install folder
-   (the backup's manifest is `manifest.json.bak`, so the folder cannot be loaded
-   as a second extension), then writes the new build. Chrome keeps running the
-   old version until you choose **Reload now**; **Later** leaves the files in
-   place and the banner reminds you.
-4. The backup is deleted automatically the next time the panel opens on the new
-   version — that open is the proof the reload worked. (Deleting needs the
-   folder permission granted in that browser session; otherwise it stays and is
-   retried on a later open.) You can still delete the folder by hand sooner. The
-   updater keeps your variant (ocr or no-ocr) and never touches stored data.
+   then writes the new build straight over the install folder — **no backup is
+   kept**. Files are written one at a time (large ones in 1MiB slices), with the
+   stable entry points and `manifest.json` last, so a failed write leaves the
+   previous version loadable. Chrome keeps running the old version until you
+   choose **Reload now**; **Later** leaves the files in place and the banner
+   reminds you.
+4. If a write fails, the dialog shows the browser's error and offers **Download
+   again**: download the package, copy its files over the install folder, then
+   reload in `chrome://extensions`. The updater keeps your variant (ocr or
+   no-ocr) and never touches stored data.
 
 **From 0.6.7 or earlier — one manual swap, then automatic:** builds before
 0.6.8 have no updater, so replace the files in place once:

@@ -49,6 +49,9 @@ function readFileBytes(root: DirNode, path: string): Uint8Array | null {
   return file?.kind === 'file' ? file.bytes : null
 }
 
+/** Paths whose write() rejects, to exercise the abort-on-failure path. */
+const FAIL_WRITE_PATHS = new Set<string>()
+
 class FakeWritable {
   private readonly parts: Uint8Array[] = []
 
@@ -60,6 +63,9 @@ class FakeWritable {
   ) {}
 
   async write(data: FileSystemWriteChunkType): Promise<void> {
+    if (FAIL_WRITE_PATHS.has(this.path)) {
+      throw new DOMException('The file could not be written.', 'NotAllowedError')
+    }
     const bytes =
       typeof data === 'string'
         ? new TextEncoder().encode(data)
@@ -72,6 +78,11 @@ class FakeWritable {
     this.writes.push(this.path)
     this.chunks.push({ path: this.path, size: bytes.length })
     this.parts.push(bytes)
+  }
+
+  async abort(): Promise<void> {
+    // A real abort discards the swap file and leaves the old target untouched.
+    this.parts.length = 0
   }
 
   async close(): Promise<void> {
@@ -213,6 +224,7 @@ function installedFolder(version = '0.6.7'): {
 }
 
 afterEach(() => {
+  FAIL_WRITE_PATHS.clear()
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
@@ -251,21 +263,15 @@ describe('applyUpdate', () => {
     expect(readFile(root, 'background.js')).toBe('console.log("new")')
     expect(readFile(root, 'assets/app.js')).toBe('console.log("app")')
     expect(writes[writes.length - 1]).toBe('manifest.json')
-    expect(result.backupFolder).toMatch(/^browser-copilot-backup-0\.6\.7-/)
-    expect(readFile(root, `${result.backupFolder}/background.js`)).toBe('console.log("old")')
-    expect(JSON.parse(readFile(root, `${result.backupFolder}/manifest.json.bak`)!).version).toBe(
-      '0.6.7',
-    )
-    // The backup must never be loadable as a second extension.
-    expect(readFile(root, `${result.backupFolder}/manifest.json`)).toBeNull()
-    // Only replaced files are backed up, not files that the release adds.
-    expect(readFile(root, `${result.backupFolder}/assets/app.js`)).toBeNull()
+    // No backup folder is kept: the release is written straight over the old files.
+    expect(
+      [...root.children.keys()].some((name) => name.startsWith('browser-copilot-backup-')),
+    ).toBe(false)
     expect(progress.map((entry) => entry.stage)).toEqual([
       'downloading',
       'downloading',
       'verifying',
       'extracting',
-      'backing-up',
       'writing',
       'writing',
       'done',
@@ -283,49 +289,37 @@ describe('applyUpdate', () => {
     })
     stubDownload(bytes)
 
-    const result = await applyUpdate(await baseOptions(handle, await assetFor(bytes)))
+    await applyUpdate(await baseOptions(handle, await assetFor(bytes)))
 
     // An interrupted write must not leave the old manifest's bootstrap entry
     // points pointing at missing hashed assets.
-    const installWrites = writes.filter((path) => !path.startsWith(`${result.backupFolder}/`))
-    expect(installWrites).toEqual([
+    expect(writes).toEqual([
       'assets/app.js',
       'background.js',
       'service-worker-loader.js',
       'src/sidepanel/index.html',
       'manifest.json',
     ])
-    // Backups all happen before the first install write.
-    expect(writes.slice(0, writes.indexOf('assets/app.js'))).toEqual([
-      `${result.backupFolder}/background.js`,
-      `${result.backupFolder}/manifest.json.bak`,
-    ])
   })
 
   it('slices a large file write instead of sending one huge buffer', async () => {
     const MIB = 1024 * 1024
-    const oldContent = new Uint8Array(17 * MIB)
-    oldContent.fill(1)
-    const newContent = new Uint8Array(17 * MIB)
-    newContent.fill(2)
+    const content = new Uint8Array(17 * MIB)
+    content.fill(2)
 
     const { root, handle, chunks } = installedFolder()
-    addBytes(root, 'tesseract/chi_sim.traineddata.gz', oldContent)
-    const bytes = releaseZip({ extra: { 'tesseract/chi_sim.traineddata.gz': newContent } })
+    addBytes(root, 'tesseract/chi_sim.traineddata.gz', new Uint8Array(17 * MIB).fill(1))
+    const bytes = releaseZip({ extra: { 'tesseract/chi_sim.traineddata.gz': content } })
     stubDownload(bytes)
 
-    const result = await applyUpdate(await baseOptions(handle, await assetFor(bytes)))
+    await applyUpdate(await baseOptions(handle, await assetFor(bytes)))
 
-    const backupPath = `${result.backupFolder}/tesseract/chi_sim.traineddata.gz`
-    expect(readFileBytes(root, 'tesseract/chi_sim.traineddata.gz')!.length).toBe(newContent.length)
-    expect(readFileBytes(root, backupPath)!.length).toBe(oldContent.length)
+    expect(readFileBytes(root, 'tesseract/chi_sim.traineddata.gz')!.length).toBe(content.length)
 
     // A 17MB file used to go out as one write() call; the 0.6.22 OCR update
-    // showed that a single buffer that size can fail (0-byte backup).
-    const largeChunks = chunks.filter(
-      (entry) => entry.path === backupPath || entry.path === 'tesseract/chi_sim.traineddata.gz',
-    )
-    expect(largeChunks.length).toBe(Math.ceil(newContent.length / MIB) * 2)
+    // showed that a single buffer that size can fail.
+    const largeChunks = chunks.filter((entry) => entry.path === 'tesseract/chi_sim.traineddata.gz')
+    expect(largeChunks.length).toBe(Math.ceil(content.length / MIB))
     expect(largeChunks.every((entry) => entry.size <= MIB)).toBe(true)
   })
 
@@ -390,21 +384,21 @@ describe('applyUpdate', () => {
     expect(JSON.parse(readFile(root, 'manifest.json')!).version).toBe('0.6.7')
   })
 
-  it('stops before overwriting when the backup folder cannot be created', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-10-22T10:00:00.000Z'))
-    const { root, handle, writes } = installedFolder()
-    // A file where the timestamped backup folder needs to go.
-    addFile(root, 'browser-copilot-backup-0.6.7-2026-10-22T10-00-00-000Z', 'in the way')
-    const bytes = releaseZip()
+  it('aborts a failed write and leaves the old file in place', async () => {
+    const { root, handle } = installedFolder()
+    addFile(root, 'service-worker-loader.js', 'old-loader')
+    const bytes = releaseZip({ extra: { 'service-worker-loader.js': 'new-loader' } })
     stubDownload(bytes)
+    FAIL_WRITE_PATHS.add('service-worker-loader.js')
 
     await expect(
       applyUpdate(await baseOptions(handle, await assetFor(bytes))),
-    ).rejects.toMatchObject({ code: 'backup-failed' })
-    expect(writes).toEqual([])
+    ).rejects.toMatchObject({ code: 'write-failed' })
+
+    // There is no backup: aborting must keep the old bootstrap file so the
+    // installed build still loads, and the old manifest must still be there.
+    expect(readFile(root, 'service-worker-loader.js')).toBe('old-loader')
     expect(JSON.parse(readFile(root, 'manifest.json')!).version).toBe('0.6.7')
-    expect(readFile(root, 'background.js')).toBe('console.log("old")')
   })
 
   it('reports an incomplete download', async () => {
