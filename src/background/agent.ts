@@ -5799,11 +5799,6 @@ export async function runAgentTurn(
     if (note) systemPrompt = `${systemPrompt}\n\n${note}`
   }
   await saveTaskProgress(taskProgress)
-  const broadcastGoal = (): void => {
-    const goal = (ctx.taskProgress ?? taskProgress).goal
-    if (!goal) return
-    deps.send({ type: 'goal.state', goal: { summary: goal.summary, status: goal.status } })
-  }
 
   // Compaction is limited to one pass per turn (per batch in a panel turn,
   // re-armed at each checkpoint): a single pass already removes every
@@ -5877,9 +5872,6 @@ export async function runAgentTurn(
       ? { planGate: { armed: true, approved: false, split: false } satisfies PlanGate }
       : {}),
   }
-  // Paint the goal bar before the first request so the user sees the budget the
-  // turn is actually spending.
-  if (ctx.taskProgress?.goal) broadcastGoal()
 
   // Applies the supplements the user typed while this turn was running: each one
   // becomes a `role:'user'` turn (user turns are the transcript's spine — tool
@@ -6632,13 +6624,6 @@ async function runOneToolCall(
     }
     await saveTaskProgress(next)
     ctx.taskProgress = next
-    const goal = next.goal
-    if (goal) {
-      deps.send({
-        type: 'goal.state',
-        goal: { summary: goal.summary, status: goal.status },
-      })
-    }
     pushResult(
       JSON.stringify({
         ok: true,

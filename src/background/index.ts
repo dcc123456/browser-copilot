@@ -14,20 +14,6 @@ import type { WireMessage } from '../lib/llm'
 import { LlmError, listModels, testConnection } from '../lib/llm'
 import { rejectionMessage, sanitizeAttachments } from '../lib/attachments'
 import { toHistoryMessages, toRestoreMessages } from './restore'
-import { archiveGoal, completeGoal } from '../lib/task-progress'
-
-/** Push the goal state to whichever panel is watching this conversation. */
-function broadcastGoalState(conversationId: string): void {
-  void (async () => {
-    const progress = await loadTaskProgress(conversationId)
-    const goal = progress?.goal
-    if (!goal) return
-    channelFor(conversationId)?.sink({
-      type: 'goal.state',
-      goal: { summary: goal.summary, status: goal.status },
-    })
-  })()
-}
 import { workerMessages } from './worker-messages'
 import { streamModel } from './model-transport'
 import {
@@ -152,8 +138,6 @@ import {
   listProfiles,
   listSkills,
   loadConversation,
-  loadTaskProgress,
-  saveTaskProgress,
   renameConversation,
   saveAgent,
   saveConversation,
@@ -3642,35 +3626,6 @@ async function handleCommand(
         attempts: events.length,
         durationMs: 0,
         committed: false,
-      }
-    }
-
-    case 'goal.complete':
-    case 'goal.abandon': {
-      const progress = await loadTaskProgress(command.conversationId)
-      if (!progress?.goal) return { type: 'goal.update', goal: null }
-      let next = progress
-      if (command.type === 'goal.abandon') {
-        next = archiveGoal(progress, 'abandoned')
-      } else {
-        const completed = completeGoal(progress, {
-          ...(command.summary ? { summary: command.summary } : {}),
-          evidence: command.evidence,
-        })
-        if (!completed) {
-          return {
-            type: 'goal.update',
-            goal: { summary: progress.goal.summary, status: progress.goal.status },
-          }
-        }
-        next = completed
-      }
-      await saveTaskProgress(next)
-      broadcastGoalState(command.conversationId)
-      const goal = next.goal
-      return {
-        type: 'goal.update',
-        goal: goal ? { summary: goal.summary, status: goal.status } : null,
       }
     }
 

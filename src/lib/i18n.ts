@@ -723,9 +723,6 @@ export interface Messages {
    * Deliberately count-free: chat shows no step numbers.
    */
   chatStoppedToAvoidLoop: string
-  /** Current goal bar status. */
-  goalStatusActive: string
-  goalStatusDone: string
   /** Composer `/compact` command description (it replaced a toolbar button). */
   chatCompactContext: string
   /** Transient phase line while the manual compaction request runs. */
@@ -2566,8 +2563,6 @@ const en: Messages = {
   chatReplyStillTruncated:
     "The reply reached the model's output limit and may be incomplete — send “continue” to get the rest.",
   chatStoppedToAvoidLoop: 'Stopped this reply to avoid an endless loop.',
-  goalStatusActive: 'Task in progress',
-  goalStatusDone: 'Done',
   chatCompactContext: 'Compress context',
   chatCompactRunning: 'Compressing the context…',
   chatCompactDone: ({ removed }) =>
@@ -4346,8 +4341,6 @@ const zhCN: Messages = {
   chatReplyStillTruncated:
     '回复已达到模型单次输出上限，内容可能仍不完整；发送「继续」即可获取剩余部分。',
   chatStoppedToAvoidLoop: '为避免死循环，本次回复已停止。',
-  goalStatusActive: '任务进行中',
-  goalStatusDone: '已完成',
   chatCompactContext: '压缩上下文',
   chatCompactRunning: '正在压缩上下文…',
   chatCompactDone: ({ removed }) => `上下文已压缩：较早的 ${removed} 条消息已合并为一段摘要。`,

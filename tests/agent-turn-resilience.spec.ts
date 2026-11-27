@@ -173,11 +173,8 @@ describe('long tasks without a round budget', () => {
     expect(
       sent.some((message) => message.type === 'status' && /budget|rounds/i.test(message.text)),
     ).toBe(false)
-    const goalStates = sent.filter((message) => message.type === 'goal.state')
-    expect(
-      goalStates.every(
-        (message) => message.type === 'goal.state' && message.goal.status === 'active',
-      ),
-    ).toBe(true)
+    // The goal bar and its broadcast are gone: no turn state message may reach
+    // the panel, or a "task in progress" box could come back without a consumer.
+    expect(sent.map((message) => message.type)).not.toContain('goal.state')
   })
 })

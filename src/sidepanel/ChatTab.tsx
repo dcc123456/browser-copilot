@@ -1671,12 +1671,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [includeSelection, setIncludeSelection] = useState(false)
   const [busy, setBusy] = useState(false)
-  /** Current goal: the task summary and its lifecycle status. */
-  const [goalState, setGoalState] = useState<{ summary: string; status: string } | null>(null)
-  /** Drops the goal bar between conversations. */
-  const resetGoalUi = (): void => {
-    setGoalState(null)
-  }
   /** A manual context compression the worker is still running. */
   const [compacting, setCompacting] = useState(false)
   /** Every configured provider, for the composer's model picker. */
@@ -2578,9 +2572,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
           case 'interactions.dismissed':
             clearPendingCards()
             break
-          case 'goal.state':
-            setGoalState(message.goal)
-            break
           case 'status':
             // Free-form statuses (selection read results, etc.) replace the
             // transient phase line too, so they don't pile up.
@@ -2974,7 +2965,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
     // The save-card popup belongs to the previous conversation: close it, or it
     // floats over the newly opened chat with a card that no longer exists.
     setSaveCardModalOpen(false)
-    resetGoalUi()
     streamingRef.current = null
     thinkingRef.current = null
     resetUsage()
@@ -3007,7 +2997,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
     setWorkflowPrompt(null)
     // Close the previous conversation's save-card popup (see openConversation).
     setSaveCardModalOpen(false)
-    resetGoalUi()
     streamingRef.current = null
     thinkingRef.current = null
     resetUsage()
@@ -3073,7 +3062,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
       setAskUsers([])
       setWorkflowPrompt(null)
       setSaveCardModalOpen(false)
-      resetGoalUi()
       streamingRef.current = null
       thinkingRef.current = null
       setConversationId(DEFAULT_CONVERSATION_ID)
@@ -4518,17 +4506,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
                 {t.chatSaveWorkflowSkip}
               </button>
             </div>
-          </div>
-        )}
-
-        {goalState && (
-          <div className="mx-3 mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-panel-2 px-3 py-2 text-xs">
-            <span className="min-w-0 flex-1 truncate font-medium" title={goalState.summary}>
-              {goalState.summary}
-            </span>
-            <span className="text-muted">
-              {goalState.status === 'done' ? t.goalStatusDone : t.goalStatusActive}
-            </span>
           </div>
         )}
 

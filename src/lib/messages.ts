@@ -193,14 +193,6 @@ export type Command =
    * channel's in-memory copy, not the persisted one.
    */
   | { type: 'conversations.compact'; conversationId: string }
-  /** Explicit completion / end of a goal from the panel. */
-  | {
-      type: 'goal.complete'
-      conversationId: string
-      summary?: string
-      evidence: { kind: 'url' | 'element' | 'text'; value: string }[]
-    }
-  | { type: 'goal.abandon'; conversationId: string }
 
   // --- Scheduled tasks ---
   | { type: 'tasks.list' }
@@ -731,7 +723,6 @@ export type CommandResult =
     }
   | { type: 'conversations.rename' }
   | { type: 'conversations.delete' }
-  | { type: 'goal.update'; goal: { summary: string; status: string } | null }
   | {
       type: 'conversations.compact'
       outcome: 'compacted' | 'nothing' | 'busy'
@@ -1092,15 +1083,6 @@ export type AgentClientMessage =
    * the panel, which then re-sends it instead of losing what the user typed.
    */
   | { type: 'chat.interject'; conversationId: string; text: string; noteId: string }
-  /** Explicit completion with locatable evidence; the ONLY way a goal is done. */
-  | {
-      type: 'goal.complete'
-      conversationId: string
-      summary?: string
-      evidence: { kind: 'url' | 'element' | 'text'; value: string }[]
-    }
-  /** Ends the current task without claiming success (keeps an archive record). */
-  | { type: 'goal.abandon'; conversationId: string }
   | { type: 'reset'; conversationId: string }
   /**
    * Sent right after connecting: asks the worker for the stored transcript and
@@ -1173,8 +1155,6 @@ export type AgentServerMessage =
       split?: string
     }
   | { type: 'status'; text: string }
-  /** The goal's public state; sent at turn start and after every goal change. */
-  | { type: 'goal.state'; goal: { summary: string; status: string } }
   /**
    * Cumulative token usage of the running turn, pushed after every LLM
    * request completes (each tool-calling round reports its own trailing
