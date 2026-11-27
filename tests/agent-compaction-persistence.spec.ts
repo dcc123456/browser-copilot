@@ -184,7 +184,7 @@ describe('compaction persistence boundary', () => {
         confirm: async () => true,
         conversationId: `ac14-${Date.now()}`,
         getMode: async () => 'full' as const,
-        getMaxToolRounds: async () => 8,
+        getMaxRoundsBeforeStop: async () => 8,
         getToolConfig: async () => ({ disabledTools: [], basePrompt: '' }),
       } as never,
     )
@@ -224,7 +224,7 @@ describe('compaction persistence boundary', () => {
         confirm: async () => true,
         conversationId: `ac14-empty-${Date.now()}`,
         getMode: async () => 'full' as const,
-        getMaxToolRounds: async () => 4,
+        getMaxRoundsBeforeStop: async () => 4,
         getToolConfig: async () => ({ disabledTools: [], basePrompt: '' }),
       } as never,
     )

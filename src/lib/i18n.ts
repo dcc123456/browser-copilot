@@ -723,25 +723,9 @@ export interface Messages {
    * Deliberately count-free: chat shows no step numbers.
    */
   chatStoppedToAvoidLoop: string
-  /** Goal budget bar (spec R10). */
-  goalBudgetLabel: string
+  /** Current goal bar status. */
   goalStatusActive: string
-  goalStatusPaused: string
   goalStatusDone: string
-  goalRenew: string
-  /** Reveals the goal bar's budget input; the input itself never opens on its own. */
-  goalBudgetAdjust: string
-  goalSetBudget: string
-  goalNewTask: string
-  goalExhaustedTitle: string
-  goalCompletedLabel: string
-  goalUnfinishedLabel: string
-  goalStopReasonLabel: string
-  goalCostLabel: string
-  goalNextLabel: string
-  goalRounds: (params: { used: number; max: number }) => string
-  /** Refusal shown when a budget edit would go below the rounds already spent. */
-  goalBudgetBelowUsed: (params: { used: number }) => string
   /** Composer `/compact` command description (it replaced a toolbar button). */
   chatCompactContext: string
   /** Transient phase line while the manual compaction request runs. */
@@ -1141,14 +1125,8 @@ export interface Messages {
   // Settings
   settingsProviders: string
   settingsProvidersIntro: string
-  settingsFreeProviders: string
-  settingsOtherProviders: string
   settingsFreeBadge: string
-  settingsKeyOptional: string
-  settingsKeyNotRequired: string
-  settingsNoKeyNeeded: string
   settingsFreeToolsWarning: string
-  presetPollinationsHint: string
   presetGeminiHint: string
   presetCerebrasHint: string
   presetSambaNovaHint: string
@@ -1234,10 +1212,6 @@ export interface Messages {
   settingsLanguage: string
   settingsLanguageAuto: string
   settingsKeyPlaceholderLocal: string
-  settingsMaxToolRounds: string
-  settingsMaxToolRoundsHint: string
-  settingsGoalAutoRenewals: string
-  settingsGoalAutoRenewalsHint: string
   settingsModelsEmpty: string
   settingsModelsFailed: (params: { message: string }) => string
   settingsSaved: (params: { name: string }) => string
@@ -2590,22 +2564,8 @@ const en: Messages = {
   chatReplyStillTruncated:
     "The reply reached the model's output limit and may be incomplete — send “continue” to get the rest.",
   chatStoppedToAvoidLoop: 'Stopped this reply to avoid an endless loop.',
-  goalBudgetLabel: 'Budget',
   goalStatusActive: 'Task in progress',
-  goalStatusPaused: 'Paused',
   goalStatusDone: 'Done',
-  goalRenew: 'Renew',
-  goalBudgetAdjust: 'Adjust budget',
-  goalSetBudget: 'Set budget',
-  goalNewTask: 'End and start a new task',
-  goalExhaustedTitle: 'Goal budget used up',
-  goalCompletedLabel: 'Completed',
-  goalUnfinishedLabel: 'Still to do',
-  goalStopReasonLabel: 'Stopped because',
-  goalCostLabel: 'Cost',
-  goalNextLabel: 'Next',
-  goalRounds: ({ used, max }) => `${used}/${max} rounds`,
-  goalBudgetBelowUsed: ({ used }) => `Cannot be lower than the rounds already used (${used}).`,
   chatCompactContext: 'Compress context',
   chatCompactRunning: 'Compressing the context…',
   chatCompactDone: ({ removed }) =>
@@ -2897,18 +2857,10 @@ const en: Messages = {
 
   settingsProviders: 'Model providers',
   settingsProvidersIntro:
-    'Any OpenAI-compatible endpoint works — DeepSeek, Volcengine Ark, OpenAI, OpenRouter, or a local Ollama. Pick a preset to prefill the base URL.',
-  settingsFreeProviders: 'Free to try',
-  settingsOtherProviders: 'All providers',
+    'Any OpenAI-compatible endpoint works — DeepSeek, Volcengine Ark, OpenAI, OpenRouter, or a local Ollama. Pick a preset to prefill the base URL. Each provider needs its own API key.',
   settingsFreeBadge: 'Free',
-  settingsKeyOptional: 'Optional — no key needed',
-  settingsKeyNotRequired:
-    'This provider needs no API key; requests go directly from this extension to the service.',
-  settingsNoKeyNeeded: 'no key needed',
   settingsFreeToolsWarning:
     'Tool calling on free models varies. If the agent cannot act on the page, test the model or use one known to support function calling.',
-  presetPollinationsHint:
-    'Free and anonymous — no key. Requests go directly from this extension to Pollinations; the anonymous tier is rate-limited and text-only.',
   presetGeminiHint:
     'Free tier via a Google AI Studio key, using Google’s OpenAI-compatible endpoint.',
   presetCerebrasHint: 'Free tier via a Cerebras Cloud key.',
@@ -3009,12 +2961,6 @@ const en: Messages = {
   settingsLanguage: 'Language',
   settingsLanguageAuto: 'Automatic (follow browser)',
   settingsKeyPlaceholderLocal: 'any value works locally',
-  settingsMaxToolRounds: 'Round budget for a new task',
-  settingsMaxToolRoundsHint:
-    'How many action rounds (clicks, reads, scrolls, …) a new task starts with. When the budget runs out the turn stops and pauses for your decision — add rounds to continue, change the budget, or end the task. Scheduled tasks and AI-agent blocks have nobody to decide, so they settle and pause when the budget is spent. Range 1–100.',
-  settingsGoalAutoRenewals: 'Automatic renewals for unattended tasks',
-  settingsGoalAutoRenewalsHint:
-    'How many times a scheduled task or an AI-agent block may extend its own budget after it runs out; 0 turns automatic renewal off. A renewal happens only when the segment that just ran made progress, and each one adds one initial budget (an initial 20 becomes 40, then 60, …). With K renewals the total budget is at most the initial budget × (1 + K). With you in the chat it never happens — the task pauses and waits for your decision. Range 0–10.',
   settingsModelsEmpty: 'The endpoint returned an empty model list.',
   settingsModelsFailed: ({ message }) =>
     `${message} — not all gateways expose /models; you can still type the model name.`,
@@ -4396,22 +4342,8 @@ const zhCN: Messages = {
   chatReplyStillTruncated:
     '回复已达到模型单次输出上限，内容可能仍不完整；发送「继续」即可获取剩余部分。',
   chatStoppedToAvoidLoop: '为避免死循环，本次回复已停止。',
-  goalBudgetLabel: '预算',
   goalStatusActive: '任务进行中',
-  goalStatusPaused: '已暂停',
   goalStatusDone: '已完成',
-  goalRenew: '续期',
-  goalBudgetAdjust: '调整预算',
-  goalSetBudget: '设定预算',
-  goalNewTask: '结束并新建任务',
-  goalExhaustedTitle: '目标预算已用尽',
-  goalCompletedLabel: '已完成',
-  goalUnfinishedLabel: '未完成',
-  goalStopReasonLabel: '停止原因',
-  goalCostLabel: '成本',
-  goalNextLabel: '下一步',
-  goalRounds: ({ used, max }) => `${used}/${max} 轮`,
-  goalBudgetBelowUsed: ({ used }) => `不能小于已用轮次（${used}）。`,
   chatCompactContext: '压缩上下文',
   chatCompactRunning: '正在压缩上下文…',
   chatCompactDone: ({ removed }) => `上下文已压缩：较早的 ${removed} 条消息已合并为一段摘要。`,
@@ -4666,17 +4598,10 @@ const zhCN: Messages = {
 
   settingsProviders: '模型服务',
   settingsProvidersIntro:
-    '支持任意 OpenAI 兼容接口——DeepSeek、火山方舟、OpenAI、OpenRouter，或本地 Ollama。选择预设可自动填入接口地址。',
-  settingsFreeProviders: '免费可用',
-  settingsOtherProviders: '全部服务',
+    '支持任意 OpenAI 兼容接口——DeepSeek、火山方舟、OpenAI、OpenRouter，或本地 Ollama。选择预设可自动填入接口地址。每个服务都需要自己的 API 密钥。',
   settingsFreeBadge: '免费',
-  settingsKeyOptional: '可选 —— 无需密钥',
-  settingsKeyNotRequired: '该服务无需 API 密钥，请求由本扩展直接发往服务商。',
-  settingsNoKeyNeeded: '无需密钥',
   settingsFreeToolsWarning:
     '免费模型的工具调用支持不一致。若 agent 无法操作页面，请先测试模型，或改用支持函数调用的模型。',
-  presetPollinationsHint:
-    '免费匿名，无需密钥。请求由本扩展直接发往 Pollinations；匿名档有限流，仅支持文本。',
   presetGeminiHint: '通过 Google AI Studio 的密钥使用免费额度，走 Google 的 OpenAI 兼容端点。',
   presetCerebrasHint: '通过 Cerebras Cloud 的密钥使用免费额度。',
   presetSambaNovaHint: '通过 SambaNova Cloud 的密钥使用免费额度。',
@@ -4770,12 +4695,6 @@ const zhCN: Messages = {
   settingsLanguage: '语言',
   settingsLanguageAuto: '自动（跟随浏览器）',
   settingsKeyPlaceholderLocal: '本地服务填任意值即可',
-  settingsMaxToolRounds: '新任务的初始轮次预算',
-  settingsMaxToolRoundsHint:
-    '每个新任务开始时拥有的动作轮次（点击、读取、滚动等）。预算用尽后本轮会停下并暂停，等你决定：加预算继续、改预算，或结束任务。定时任务与 AI 智能体块没有人可以决策，到达预算会结算并暂停。范围 1–100。',
-  settingsGoalAutoRenewals: '无人值守任务的自动续期次数',
-  settingsGoalAutoRenewalsHint:
-    '定时任务或 AI 智能体块预算用尽后可以自动续期几次；0 表示关闭自动续期。只有刚跑完的那一段确实有进展才会续期，每次续期增加一个初始预算的量（初始 20 就是 40、60…），续 K 次后总预算最多到初始预算的 1+K 倍。你在聊天里时永远不会自动续期——任务会暂停等你决定。范围 0–10。',
   settingsModelsEmpty: '该接口返回的模型列表为空。',
   settingsModelsFailed: ({ message }) =>
     `${message}——并非所有网关都提供 /models，你仍可手动输入模型名称。`,

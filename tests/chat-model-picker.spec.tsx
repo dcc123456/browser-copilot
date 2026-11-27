@@ -282,12 +282,12 @@ describe('chat model picker', () => {
       providers: [
         {
           id: 'free',
-          label: 'Pollinations',
-          presetId: 'pollinations',
-          baseUrl: 'https://text.pollinations.ai/openai',
-          apiKey: '',
-          model: 'openai-fast',
-          models: ['openai-fast'],
+          label: 'Gemini',
+          presetId: 'gemini',
+          baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+          apiKey: 'k',
+          model: 'gemini-2.5-flash',
+          models: ['gemini-2.5-flash'],
         },
         {
           id: 'or',
@@ -305,7 +305,7 @@ describe('chat model picker', () => {
     await openPicker(mounted)
     const freeTag = messagesFor('en').settingsFreeBadge
     const options = modelOptions(mounted)
-    const freeOption = options.find((option) => option.dataset.model === 'openai-fast')!
+    const freeOption = options.find((option) => option.dataset.model === 'gemini-2.5-flash')!
     const openrouterFree = options.find(
       (option) => option.dataset.model === 'deepseek/deepseek-chat:free',
     )!

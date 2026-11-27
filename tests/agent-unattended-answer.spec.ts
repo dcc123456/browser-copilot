@@ -158,7 +158,7 @@ describe('runUnattendedPrompt answer assembly', () => {
     const result = await runUnattendedPrompt('do it', 'conv')
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/Stopped after 2 tool rounds/)
-    expect(result.error).toMatch(/tool-round budget/)
+    expect(result.error).toMatch(/tool-round limit/)
   })
 
   it('names the last tool call when the turn simply ended without an answer', async () => {

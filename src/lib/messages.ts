@@ -193,9 +193,7 @@ export type Command =
    * channel's in-memory copy, not the persisted one.
    */
   | { type: 'conversations.compact'; conversationId: string }
-  /** Goal budget decisions and explicit completion from the panel (spec R10). */
-  | { type: 'goal.renew'; conversationId: string }
-  | { type: 'goal.setBudget'; conversationId: string; maxRounds: number }
+  /** Explicit completion / end of a goal from the panel. */
   | {
       type: 'goal.complete'
       conversationId: string
@@ -733,10 +731,7 @@ export type CommandResult =
     }
   | { type: 'conversations.rename' }
   | { type: 'conversations.delete' }
-  | {
-      type: 'goal.update'
-      goal: { summary: string; maxRounds: number; roundsStarted: number; status: string } | null
-    }
+  | { type: 'goal.update'; goal: { summary: string; status: string } | null }
   | {
       type: 'conversations.compact'
       outcome: 'compacted' | 'nothing' | 'busy'
@@ -1097,12 +1092,6 @@ export type AgentClientMessage =
    * the panel, which then re-sends it instead of losing what the user typed.
    */
   | { type: 'chat.interject'; conversationId: string; text: string; noteId: string }
-  /**
-   * Budget decisions for a paused goal (spec R10). The turn that paused stays
-   * alive and continues from its breakpoint; these commands resolve it.
-   */
-  | { type: 'goal.renew'; conversationId: string }
-  | { type: 'goal.setBudget'; conversationId: string; maxRounds: number }
   /** Explicit completion with locatable evidence; the ONLY way a goal is done. */
   | {
       type: 'goal.complete'
@@ -1184,39 +1173,8 @@ export type AgentServerMessage =
       split?: string
     }
   | { type: 'status'; text: string }
-  /**
-   * The goal's public budget state (spec R10). Sent at turn start and after
-   * every budget change so the panel's goal bar can render `used/max` without
-   * polling storage.
-   */
-  | {
-      type: 'goal.state'
-      goal: { summary: string; maxRounds: number; roundsStarted: number; status: string }
-    }
-  /**
-   * The goal reached its explicit budget and the turn paused for a decision.
-   * Carries the six-item report the pause card renders.
-   */
-  | {
-      type: 'goal.budgetExhausted'
-      report: {
-        goal: string
-        completed: number
-        steps: string[]
-        unfinished: string[]
-        stopReason: string
-        usedRounds: number
-        maxRounds: number
-        remainingRounds: number
-        nextActions: ('renew' | 'change-goal' | 'stop')[]
-        cost?: {
-          inputTokens: number
-          cachedInputTokens: number
-          outputTokens: number
-          requests: number
-        }
-      }
-    }
+  /** The goal's public state; sent at turn start and after every goal change. */
+  | { type: 'goal.state'; goal: { summary: string; status: string } }
   /**
    * Cumulative token usage of the running turn, pushed after every LLM
    * request completes (each tool-calling round reports its own trailing

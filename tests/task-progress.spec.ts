@@ -30,10 +30,7 @@ describe('task progress record', () => {
     expect(started.goal).toMatchObject({
       summary: 'Book the cheapest flight',
       startedAt: 2000,
-      maxRounds: 20,
-      roundsStarted: 0,
       status: 'active',
-      budgetLog: [],
     })
     expect(started.steps).toEqual([])
   })

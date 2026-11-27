@@ -111,11 +111,7 @@ describe('durable task progress in the agent loop', () => {
       goal: {
         summary: 'Submit the order for order 42',
         startedAt: 1000,
-        maxRounds: 20,
-        roundsStarted: 0,
         status: 'active',
-        budgetLog: [],
-        autoRenewals: 0,
       },
       steps: [{ at: 2000, tool: 'click', summary: 'Click Pay now', ok: true }],
       destructiveOps: [],
@@ -309,18 +305,14 @@ describe('durable task progress in the agent loop', () => {
     ).toBe(true)
   })
 
-  it('starts a fresh goal for a new message after a paused one', async () => {
+  it('starts a fresh goal for a new message after a finished one', async () => {
     loadMock.mockResolvedValue({
       version: 2,
       conversationId: 'conv-new-task',
       goal: {
         summary: 'old task',
         startedAt: 1000,
-        maxRounds: 5,
-        roundsStarted: 5,
-        status: 'paused',
-        budgetLog: [{ at: 2000, kind: 'auto-renew', actor: 'strategy', roundsAdded: 5 }],
-        autoRenewals: 1,
+        status: 'done',
       },
       steps: [{ at: 1500, tool: 'click', summary: 'old step', ok: true }],
       destructiveOps: [],
@@ -340,8 +332,6 @@ describe('durable task progress in the agent loop', () => {
     )
     const saved = saveMock.mock.calls.at(-1)?.[0]
     expect(saved?.goal?.summary).toBe('a different task')
-    expect(saved?.goal?.roundsStarted).toBe(0)
-    expect(saved?.goal?.autoRenewals).toBe(0)
     expect(saved?.steps).toEqual([])
   })
 

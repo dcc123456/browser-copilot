@@ -5,13 +5,11 @@ import {
   findPreset,
   findPresetByBaseUrl,
   freeAccessOf,
-  isKeylessEndpoint,
   isLocalEndpoint,
   normalizeBaseUrl,
   normalizeSettingsPayload,
   profileFromPreset,
   providerHasCredentials,
-  providerNeedsKey,
   validateProfile,
   type ProviderProfile,
 } from '../src/lib/providers'
@@ -20,7 +18,6 @@ import {
   normalizeLocalAgentBindings,
   normalizeStoredSettings,
 } from '../src/lib/storage'
-import { DEFAULT_FREE_PROVIDER_ID } from '../src/lib/free-provider-default'
 import { RUN_WINDOW_LIMITS } from '../src/lib/types'
 
 const en = messagesFor('en')
@@ -169,30 +166,16 @@ describe('isLocalEndpoint', () => {
 })
 
 describe('free providers', () => {
-  it('recognises only the exact keyless host', () => {
-    expect(isKeylessEndpoint('https://text.pollinations.ai/openai')).toBe(true)
-    expect(isKeylessEndpoint('https://text.pollinations.ai/openai/chat/completions')).toBe(true)
-    expect(isKeylessEndpoint('https://text.pollinations.ai.evil.com/openai')).toBe(false)
-    expect(isKeylessEndpoint('https://api.deepseek.com/v1')).toBe(false)
-    expect(isKeylessEndpoint('not a url')).toBe(false)
-  })
-
-  it('ships the new free-quota providers with hints', () => {
+  it('ships free-quota providers with hints', () => {
     for (const id of ['huggingface', 'modelscope', 'together', 'novita', 'nebius', 'fireworks']) {
       const preset = findPreset(id)
       expect(preset?.free).toBe('quota')
       expect(preset?.hintKey).toBeTruthy()
     }
-    expect(findPreset('pollinations')?.free).toBe('direct')
+    expect(findPreset('pollinations')).toBeUndefined()
   })
 
-  it('distinguishes direct free from quota and paid models', () => {
-    const pollinations = profile({
-      presetId: 'pollinations',
-      baseUrl: 'https://text.pollinations.ai/openai',
-    })
-    expect(freeAccessOf(pollinations, 'openai-fast')).toBe('direct')
-
+  it('distinguishes free-quota models from paid models', () => {
     const openrouter = profile({
       presetId: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
@@ -218,46 +201,33 @@ describe('free providers', () => {
     expect(freeAccessOf(deepseek, 'deepseek-chat')).toBeUndefined()
   })
 
-  it('accepts an empty key for the keyless endpoint only', () => {
-    const pollinations = profile({
-      baseUrl: 'https://text.pollinations.ai/openai',
-      apiKey: '',
-      model: 'openai-fast',
-    })
-    expect(validateProfile(pollinations, en)).toEqual([])
-
-    const paid = profile({
+  it('requires a key for every provider', () => {
+    const withoutKey = profile({
       baseUrl: 'https://api.deepseek.com/v1',
       apiKey: '',
       model: 'deepseek-chat',
     })
-    expect(validateProfile(paid, en).map((problem) => problem.field)).toEqual(['apiKey'])
-  })
+    expect(validateProfile(withoutKey, en).map((problem) => problem.field)).toEqual(['apiKey'])
 
-  it('prefills a usable model only for the keyless preset', () => {
-    const pollinations = profileFromPreset(findPreset('pollinations')!, 'p')
-    expect(pollinations).toMatchObject({
-      apiKey: '',
-      model: 'openai-fast',
-      models: ['openai-fast'],
+    const withKey = profile({
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: 'sk-test',
+      model: 'deepseek-chat',
     })
-
-    const ark = profileFromPreset(findPreset('ark')!, 'a')
-    expect(ark.model).toBe('')
-    expect(ark.models).toEqual([])
+    expect(validateProfile(withKey, en)).toEqual([])
   })
 
-  it('reports credentials from the keyless host', () => {
-    expect(providerNeedsKey(profile({ apiKey: '' }))).toBe(true)
-    expect(
-      providerNeedsKey(profile({ apiKey: '', baseUrl: 'https://text.pollinations.ai/openai' })),
-    ).toBe(false)
+  it('leaves the model empty in every preset until the user picks one', () => {
+    for (const preset of PROVIDER_PRESETS) {
+      const created = profileFromPreset(preset, 'p')
+      expect(created.model).toBe('')
+      expect(created.models).toEqual([])
+    }
+  })
+
+  it('reports credentials only when a key is present', () => {
     expect(providerHasCredentials(profile({ apiKey: '' }))).toBe(false)
-    expect(
-      providerHasCredentials(
-        profile({ apiKey: '', baseUrl: 'https://text.pollinations.ai/openai' }),
-      ),
-    ).toBe(true)
+    expect(providerHasCredentials(profile({ apiKey: 'sk-test' }))).toBe(true)
   })
 
   it('localizes every preset hint in both locales', () => {
@@ -268,8 +238,7 @@ describe('free providers', () => {
     }
   })
 
-  it('finds a free preset from its base URL after a custom edit', () => {
-    expect(findPresetByBaseUrl('https://text.pollinations.ai/openai')?.id).toBe('pollinations')
+  it('finds a preset from its base URL after a custom edit', () => {
     expect(findPresetByBaseUrl('https://api.deepseek.com/v1')?.id).toBe('deepseek')
     expect(findPresetByBaseUrl('https://example.com/v1')).toBeUndefined()
   })
@@ -280,26 +249,34 @@ describe('free providers', () => {
  * hand-edit, or a half-written record must not be able to break the panel.
  */
 describe('normalizeStoredSettings', () => {
-  it('returns the default settings, including the free provider, for absent or non-object input', () => {
+  it('returns the default settings with no providers for absent or non-object input', () => {
     for (const input of [undefined, null, 'text', 42, {}]) {
       expect(normalizeStoredSettings(input)).toEqual(DEFAULT_SETTINGS)
     }
   })
 
-  it('starts a fresh install on the keyless free provider', () => {
+  it('starts a fresh install with an empty provider list', () => {
     const settings = normalizeStoredSettings(undefined)
-    const provider = settings.providers[0]!
-    expect(settings.activeProviderId).toBe(DEFAULT_FREE_PROVIDER_ID)
-    expect(provider).toMatchObject({
-      id: DEFAULT_FREE_PROVIDER_ID,
-      presetId: 'pollinations',
-      baseUrl: 'https://text.pollinations.ai/openai',
-      apiKey: '',
-      model: 'openai-fast',
-      models: ['openai-fast'],
+    expect(settings.providers).toEqual([])
+    expect(settings.activeProviderId).toBe('')
+  })
+
+  it('drops a stored keyless Pollinations profile on read', () => {
+    const settings = normalizeStoredSettings({
+      providers: [
+        {
+          id: 'default-pollinations',
+          label: 'Pollinations',
+          presetId: 'pollinations',
+          baseUrl: 'https://text.pollinations.ai/openai',
+          apiKey: '',
+          model: 'openai-fast',
+        },
+      ],
+      activeProviderId: 'default-pollinations',
     })
-    expect(providerNeedsKey(provider)).toBe(false)
-    expect(providerHasCredentials(provider)).toBe(true)
+    expect(settings.providers).toEqual([])
+    expect(settings.activeProviderId).toBe('')
   })
 
   it('keeps an explicitly empty provider list empty', () => {
@@ -337,8 +314,6 @@ describe('normalizeStoredSettings', () => {
       activeProviderId: 'p1',
       locale: 'auto' as const,
       mode: 'full' as const,
-      maxToolRounds: 25,
-      goalAutoRenewals: 2,
       disabledTools: [],
       systemPromptOverride: '',
       downloadAutoSave: true,
@@ -393,8 +368,6 @@ describe('normalizeStoredSettings', () => {
       activeProviderId: '',
       locale: 'auto',
       mode: 'semi',
-      maxToolRounds: 20,
-      goalAutoRenewals: 1,
       disabledTools: [],
       systemPromptOverride: '',
       downloadAutoSave: true,
@@ -418,18 +391,6 @@ describe('normalizeStoredSettings', () => {
       historyLimitTaskRuns: 50,
       historyLimitOperations: 50,
     })
-  })
-
-  it('clamps the unattended auto-renewal cap and defaults it to one', () => {
-    const at = (value: unknown) =>
-      normalizeStoredSettings({ providers: [], activeProviderId: '', goalAutoRenewals: value })
-        .goalAutoRenewals
-    expect(at(undefined)).toBe(1)
-    expect(at('nope')).toBe(1)
-    expect(at(-3)).toBe(0)
-    expect(at(0)).toBe(0)
-    expect(at(99)).toBe(10)
-    expect(at(2.6)).toBe(3)
   })
 
   it('coerces a non-array providers value to an empty list', () => {

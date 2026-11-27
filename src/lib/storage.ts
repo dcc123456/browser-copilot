@@ -28,7 +28,6 @@ import { jsonBytes } from './persist-budget'
 import { skillFromMarkdown, skillSlug, skillToMarkdown } from './skills-import'
 import { agentFromMarkdown, agentSlug, agentToMarkdown } from './agents-import'
 import { normalizeThinkingProfile } from './thinking'
-import { DEFAULT_FREE_PROVIDER_ID, defaultFreeProvider } from './free-provider-default'
 import { BUILT_IN_SKILLS } from './builtin-skills'
 import { BUILT_IN_AGENTS } from './builtin-agents'
 import { LOCALES, type LocaleSetting } from './i18n'
@@ -46,7 +45,6 @@ import type {
 } from './types'
 import {
   DEFAULT_LOCAL_AGENT_URL,
-  GOAL_AUTO_RENEW_LIMITS,
   HISTORY_LIMITS,
   RUN_WINDOW_LIMITS,
   isRemovedWebProvider,
@@ -105,21 +103,18 @@ const KEY_CONVERSATIONS_META = 'conversations'
  * - v7: the built-in `plan` skill is seeded on install/upgrade (the plan-first
  *   gate's trigger; existing installs must re-run `seedBuiltInSkills` to see it
  *   in the slash menu).
- * - v8: an install with no providers starts on the keyless Pollinations
- *   provider, so the plugin is usable before any model setup.
  * - v9: drop the removed DeepSeek/ChatGPT web-chat provider profiles; if the
- *   active pointer named one, it falls back to the first remaining provider
- *   (or Pollinations when none remain).
+ *   active pointer named one, it falls back to the first remaining provider.
+ * - v10: drop the seeded keyless Pollinations profile; providers start empty
+ *   and every provider requires the user's own key.
  */
-export const SCHEMA_VERSION = 9
+export const SCHEMA_VERSION = 10
 
 export const DEFAULT_SETTINGS: Settings = {
-  providers: [defaultFreeProvider()],
-  activeProviderId: DEFAULT_FREE_PROVIDER_ID,
+  providers: [],
+  activeProviderId: '',
   locale: 'auto',
   mode: 'semi',
-  maxToolRounds: 20,
-  goalAutoRenewals: 1,
   disabledTools: [],
   systemPromptOverride: '',
   downloadAutoSave: true,
@@ -157,32 +152,6 @@ function coerceLocale(value: unknown): LocaleSetting {
     : 'auto'
 }
 
-/** Bounds for the configurable tool-round cap. */
-export const MIN_TOOL_ROUNDS = 1
-export const MAX_TOOL_ROUNDS_CAP = 100
-
-/**
- * Clamps the unattended auto-renewal cap (K) into its legal range. Each
- * renewal doubles the task's budget, so an unbounded K turns a stuck
- * unattended task into an unbounded spend with nobody watching.
- */
-export function coerceGoalAutoRenewals(value: unknown): number {
-  const n = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(n)) return GOAL_AUTO_RENEW_LIMITS.default
-  return Math.min(GOAL_AUTO_RENEW_LIMITS.max, Math.max(GOAL_AUTO_RENEW_LIMITS.min, Math.round(n)))
-}
-
-/**
- * Clamps the configured tool-round limit to a sane integer range. A value too
- * low makes multi-step tasks impossible; too high lets a looping model burn
- * tokens and act on the page for far too long before being stopped.
- */
-export function coerceMaxToolRounds(value: unknown): number {
-  const n = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(n)) return DEFAULT_SETTINGS.maxToolRounds
-  return Math.min(MAX_TOOL_ROUNDS_CAP, Math.max(MIN_TOOL_ROUNDS, Math.round(n)))
-}
-
 /**
  * Normalizes the local-agent window-assignment map (`agentName -> windowId`).
  *
@@ -218,7 +187,7 @@ export function normalizeLocalAgentBindings(raw: unknown): Record<string, number
  */
 export function normalizeStoredSettings(raw: unknown): Settings {
   if (!raw || typeof raw !== 'object') {
-    return { ...DEFAULT_SETTINGS, providers: [defaultFreeProvider()] }
+    return { ...DEFAULT_SETTINGS }
   }
 
   const value = raw as Partial<Settings>
@@ -230,13 +199,10 @@ export function normalizeStoredSettings(raw: unknown): Settings {
             !!profile && typeof profile === 'object' && typeof profile.id === 'string',
         )
         .filter((profile) => !isRemovedWebProvider(profile))
+        .filter((profile) => profile.id !== 'default-pollinations')
         .map(normalizeThinkingProfile)
         .map(normalizeProviderModels)
-    : // A missing field is a fresh/legacy install: start on the free provider.
-      // An explicit empty array is a user choice and stays empty.
-      value.providers === undefined
-      ? [defaultFreeProvider()]
-      : []
+    : []
 
   // Never leave the pointer dangling: an unknown id would open the editor blank
   // with no way to tell why.
@@ -278,8 +244,6 @@ export function normalizeStoredSettings(raw: unknown): Settings {
       value.mode === 'workflow'
         ? value.mode
         : 'semi',
-    maxToolRounds: coerceMaxToolRounds(value.maxToolRounds),
-    goalAutoRenewals: coerceGoalAutoRenewals(value.goalAutoRenewals),
     disabledTools: Array.isArray(value.disabledTools)
       ? value.disabledTools.filter((n): n is string => typeof n === 'string')
       : [],
@@ -368,14 +332,7 @@ export async function ensureSchema(): Promise<void> {
 
   const patch: Record<string, unknown> = { [KEY_SCHEMA]: SCHEMA_VERSION }
   if (!unreadableGap(KEY_SETTINGS)) {
-    const settings = normalizeStoredSettings(stored[KEY_SETTINGS])
-    // v8: an install with no provider starts on the keyless free one. This runs
-    // once per schema upgrade, so deleting it afterwards is respected.
-    if (settings.providers.length === 0) {
-      settings.providers = [defaultFreeProvider()]
-      settings.activeProviderId = DEFAULT_FREE_PROVIDER_ID
-    }
-    patch[KEY_SETTINGS] = settings
+    patch[KEY_SETTINGS] = normalizeStoredSettings(stored[KEY_SETTINGS])
   }
   // Seed new collections as empty arrays so reads never need to special-case
   // "key absent" — but never over an unreadable gap, where the seeded empty
@@ -457,8 +414,8 @@ const LEGACY_EMPTY_SETTINGS: Settings = {
 
 function isPristineSettings(raw: unknown): boolean {
   if (raw === undefined) return true
-  // Pre-provider records are pristine by definition; the v8 default provider
-  // must not stop a legacy settings file from being adopted.
+  // Pre-provider records are pristine by definition; they must not stop a
+  // legacy settings file from being adopted.
   if (raw && typeof raw === 'object' && !('providers' in (raw as Record<string, unknown>))) {
     return true
   }
@@ -568,18 +525,11 @@ export async function saveProvider(profile: ProviderProfile): Promise<Settings> 
     const index = providers.findIndex((existing) => existing.id === profile.id)
     if (index === -1) providers.push(profile)
     else providers[index] = profile
-    // A first user profile becomes active automatically. The seeded free
-    // provider is the only profile on a fresh install, so adding a real
-    // provider must still take over — otherwise it would sit beside the
-    // default while the default kept answering.
-    const onlySeededDefault =
-      settings.providers.length === 1 &&
-      settings.providers[0]?.id === DEFAULT_FREE_PROVIDER_ID &&
-      profile.id !== DEFAULT_FREE_PROVIDER_ID
-    const activeProviderId = onlySeededDefault
-      ? profile.id
-      : settings.activeProviderId || profile.id
-    return setSettingsLocked({ providers, activeProviderId })
+    // The first provider added becomes active automatically.
+    return setSettingsLocked({
+      providers,
+      activeProviderId: settings.activeProviderId || profile.id,
+    })
   })
 }
 

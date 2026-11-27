@@ -696,9 +696,9 @@
               Does Browser Copilot require an API key?
             </summary>
             <p class="mt-3 text-sm leading-relaxed text-muted">
-              No. A new installation starts with the keyless, rate-limited Pollinations provider.
-              You can also use an OpenAI-compatible API or local models through Ollama and LM
-              Studio.
+              Yes. Add your own OpenAI-compatible provider in Settings (each needs an API key), or
+              connect a local model through Ollama or LM Studio with a placeholder key. A fresh
+              install has no provider configured.
             </p>
           </details>
           <details class="rounded-xl border border-border bg-panel p-6">
@@ -717,8 +717,8 @@
             </summary>
             <p class="mt-3 text-sm leading-relaxed text-muted">
               The project has no account system, telemetry, or cloud server. Required page content
-              is sent to your selected model provider, including Pollinations by default. Use a
-              local model when page text must remain on your machine.
+              is sent only to the model provider you selected. Use a local model when page text must
+              remain on your machine.
             </p>
           </details>
           <details class="rounded-xl border border-border bg-panel p-6">
@@ -752,7 +752,7 @@
             "name": "Does Browser Copilot require an API key?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. A new installation starts with the keyless, rate-limited Pollinations provider. You can also use an OpenAI-compatible API or local models through Ollama and LM Studio."
+              "text": "Yes. Add your own OpenAI-compatible provider in Settings (each needs an API key), or connect a local model through Ollama or LM Studio with a placeholder key. A fresh install has no provider configured."
             }
           },
           {
@@ -768,7 +768,7 @@
             "name": "Does Browser Copilot send browsing data to a server?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "The project has no account system, telemetry, or cloud server. Required page content is sent to your selected model provider, including Pollinations by default. Use a local model when page text must remain on your machine."
+              "text": "The project has no account system, telemetry, or cloud server. Required page content is sent only to the model provider you selected. Use a local model when page text must remain on your machine."
             }
           },
           {

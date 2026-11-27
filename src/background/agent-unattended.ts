@@ -91,12 +91,12 @@ export interface UnattendedOptions {
  *
  * The `ai-agent` block surfaces this string into the run history, and the repair
  * engine classifies failures from it. Returning `undefined` here made every
- * budget-exhausted node read as a bare "运行失败" with no cause attached, which
- * is the difference between "raise the block's tool-round budget" and a shrug.
+ * answerless node read as a bare "运行失败" with no cause attached, which is
+ * the difference between "raise the block's tool-round limit" and a shrug.
  */
 function failureReason(stopNotice: string, transcript: readonly string[]): string {
   if (stopNotice) {
-    return `${stopNotice} The turn ran out of rounds before it produced a final answer — raise the block's tool-round budget or shorten its task.`
+    return `${stopNotice} The turn ran out of rounds before it produced a final answer — raise the block's tool-round limit or shorten its task.`
   }
   const lastCall = [...transcript].reverse().find((line) => line.startsWith('→ '))
   return lastCall
@@ -166,9 +166,7 @@ export async function runUnattendedPrompt(
           options.onStep?.('result', `← ${message.summary}`)
         }
         if (message.type === 'status') {
-          // The round limit is now an explicit per-task budget (spec R10), so the
-          // pause line is the "why" an answerless block reports.
-          if (/^(Stopped after \d+ tool rounds|Goal budget exhausted)/.test(message.text)) {
+          if (/^Stopped after \d+ tool rounds/.test(message.text)) {
             stopNotice = message.text
           }
           options.onStep?.('status', message.text)
@@ -189,10 +187,9 @@ export async function runUnattendedPrompt(
       // told it was refused and moves on.
       confirm: async (name) => modeOverride === 'full' || isObservationTool(name),
       getMode: async () => modeOverride ?? settings.mode,
-      getMaxToolRounds: async () => options.maxToolRounds ?? settings.maxToolRounds,
-      // K (spec R10): the only automatic budget extension, and it exists
-      // exactly because this entry point has nobody to answer the pause.
-      getGoalAutoRenewals: async () => settings.goalAutoRenewals,
+      ...(options.maxToolRounds !== undefined
+        ? { getMaxRoundsBeforeStop: async () => options.maxToolRounds as number }
+        : {}),
       ...(options.provider ? { getProvider: async () => options.provider } : {}),
       getToolConfig: async () => ({
         // The global switch still wins: a tool the user disabled everywhere

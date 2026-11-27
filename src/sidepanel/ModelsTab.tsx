@@ -16,7 +16,6 @@ import {
   PROVIDER_PRESETS,
   findPreset,
   findPresetByBaseUrl,
-  isKeylessEndpoint,
   isLocalEndpoint,
   normalizeBaseUrl,
   profileFromPreset,
@@ -173,14 +172,8 @@ export default function ModelsTab() {
 
   const preset = draft ? findPreset(draft.presetId) : undefined
   const localEndpoint = draft ? isLocalEndpoint(draft.baseUrl) : false
-  const keyOptional = draft ? isKeylessEndpoint(draft.baseUrl) : false
   const hintText = preset?.hintKey ? t[preset.hintKey] : preset?.hint
-  const directPresets = PROVIDER_PRESETS.filter(
-    (option) => option.free === 'direct' && option.id !== 'custom',
-  )
-  const otherPresets = PROVIDER_PRESETS.filter(
-    (option) => option.free !== 'direct' && option.id !== 'custom',
-  )
+  const otherPresets = PROVIDER_PRESETS.filter((option) => option.id !== 'custom')
   const customPreset = PROVIDER_PRESETS.find((option) => option.id === 'custom')
   const presetEndpoints = preset?.endpoints ?? []
   // The endpoint picker is controlled and reflects whichever preset endpoint
@@ -535,8 +528,6 @@ export default function ModelsTab() {
                   <span>
                     {profile.apiKey ? (
                       <span className="status-ok">{t.settingsKeyConfigured}</span>
-                    ) : isKeylessEndpoint(profile.baseUrl) ? (
-                      <span className="status-ok">{t.settingsNoKeyNeeded}</span>
                     ) : (
                       t.settingsNoKey
                     )}
@@ -592,22 +583,11 @@ export default function ModelsTab() {
             <option disabled value="">
               {t.settingsChoosePreset}
             </option>
-            {directPresets.length > 0 && (
-              <optgroup label={t.settingsFreeProviders}>
-                {directPresets.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            <optgroup label={t.settingsOtherProviders}>
-              {otherPresets.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </optgroup>
+            {otherPresets.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
             {customPreset && <option value={customPreset.id}>{customPreset.label}</option>}
           </select>
         </div>
@@ -724,17 +704,10 @@ export default function ModelsTab() {
               autoComplete="off"
               id="p-key"
               onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
-              placeholder={
-                keyOptional
-                  ? t.settingsKeyOptional
-                  : localEndpoint
-                    ? t.settingsKeyPlaceholderLocal
-                    : 'sk-…'
-              }
+              placeholder={localEndpoint ? t.settingsKeyPlaceholderLocal : 'sk-…'}
               type={revealKey ? 'text' : 'password'}
               value={draft.apiKey}
             />
-            {keyOptional && <p className="hint">{t.settingsKeyNotRequired}</p>}
           </div>
           <label className="inline-check">
             <input

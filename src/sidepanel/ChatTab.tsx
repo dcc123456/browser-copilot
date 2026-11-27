@@ -34,7 +34,6 @@ import {
   type AiPrefillStep,
 } from '../lib/storage'
 import { freeAccessOf } from '../lib/providers'
-import { goalBudgetDraftProblem } from '../lib/task-progress'
 import { isCompactionSummaryText } from '../lib/context-compact'
 import { isTriggerNode } from '../lib/workflow/migrate'
 import { generateWorkflowName } from '../lib/workflow/generation-goal'
@@ -1672,50 +1671,12 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [includeSelection, setIncludeSelection] = useState(false)
   const [busy, setBusy] = useState(false)
-  /** Goal budget bar (spec R10): visible used/max for the current task. */
-  const [goalState, setGoalState] = useState<{
-    summary: string
-    maxRounds: number
-    roundsStarted: number
-    status: string
-  } | null>(null)
-  /** The pause card's payload; non-null means the task awaits a decision. */
-  const [goalReport, setGoalReport] = useState<{
-    goal: string
-    completed: number
-    steps: string[]
-    unfinished: string[]
-    stopReason: string
-    usedRounds: number
-    maxRounds: number
-    remainingRounds: number
-    nextActions: string[]
-    cost?: {
-      inputTokens: number
-      cachedInputTokens: number
-      outputTokens: number
-      requests: number
-    }
-  } | null>(null)
-  /** Draft value of the goal-bar / pause-card budget input. */
-  const [goalBudgetDraft, setGoalBudgetDraft] = useState('')
-  /** Whether the goal bar's budget input is shown. The bar reports the spend on
-   *  its own; editing the rounds is an explicit request, never a popup. */
-  const [budgetEditorOpen, setBudgetEditorOpen] = useState(false)
-  /** Drops the goal bar / pause card between conversations. */
+  /** Current goal: the task summary and its lifecycle status. */
+  const [goalState, setGoalState] = useState<{ summary: string; status: string } | null>(null)
+  /** Drops the goal bar between conversations. */
   const resetGoalUi = (): void => {
     setGoalState(null)
-    setGoalReport(null)
-    setGoalBudgetDraft('')
-    setBudgetEditorOpen(false)
   }
-  // A budget below what the task already spent is refused instead of applied:
-  // accepting 5 for a task that used 20 seconds later shows "20/5", which reads
-  // as a successful edit while changing nothing.
-  const goalBudgetFloor = goalState?.roundsStarted ?? 0
-  const goalBudgetIssue = goalBudgetDraftProblem(goalBudgetDraft, goalBudgetFloor)
-  const goalBudgetDraftValid = goalBudgetIssue === null
-  const goalBudgetTooLow = goalBudgetIssue === 'below-used'
   /** A manual context compression the worker is still running. */
   const [compacting, setCompacting] = useState(false)
   /** Every configured provider, for the composer's model picker. */
@@ -2619,22 +2580,6 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
             break
           case 'goal.state':
             setGoalState(message.goal)
-            setGoalBudgetDraft((prev) => prev || String(message.goal.maxRounds))
-            if (message.goal.status !== 'paused') setGoalReport(null)
-            break
-          case 'goal.budgetExhausted':
-            setGoalReport(message.report)
-            setGoalBudgetDraft(String(message.report.maxRounds))
-            setGoalState((prev) =>
-              prev
-                ? { ...prev, status: 'paused' }
-                : {
-                    summary: message.report.goal,
-                    maxRounds: message.report.maxRounds,
-                    roundsStarted: message.report.usedRounds,
-                    status: 'paused',
-                  },
-            )
             break
           case 'status':
             // Free-form statuses (selection read results, etc.) replace the
@@ -4582,146 +4527,8 @@ export default function ChatTab({ skills, activeSkillId, onSelectSkill, active =
               {goalState.summary}
             </span>
             <span className="text-muted">
-              {t.goalBudgetLabel}:{' '}
-              {t.goalRounds({ used: goalState.roundsStarted, max: goalState.maxRounds })}
+              {goalState.status === 'done' ? t.goalStatusDone : t.goalStatusActive}
             </span>
-            <span className={goalState.status === 'paused' ? 'text-warn' : 'text-muted'}>
-              {goalState.status === 'paused'
-                ? t.goalStatusPaused
-                : goalState.status === 'done'
-                  ? t.goalStatusDone
-                  : t.goalStatusActive}
-            </span>
-            {goalState.status === 'active' && (
-              <button
-                className="rounded border border-border px-2 py-0.5"
-                onClick={() => setBudgetEditorOpen((open) => !open)}
-                type="button"
-              >
-                {t.goalBudgetAdjust}
-              </button>
-            )}
-            {goalState.status === 'active' && budgetEditorOpen && (
-              <>
-                <input
-                  aria-label={t.goalSetBudget}
-                  className="w-14 rounded border border-border bg-panel px-1 py-0.5"
-                  min={Math.max(1, goalState.roundsStarted)}
-                  onChange={(event) => setGoalBudgetDraft(event.target.value)}
-                  type="number"
-                  value={goalBudgetDraft}
-                />
-                <button
-                  className="rounded border border-border px-2 py-0.5"
-                  disabled={goalBudgetTooLow || !goalBudgetDraftValid}
-                  onClick={() => {
-                    const value = Number(goalBudgetDraft)
-                    // A budget below what is already spent is a no-op dressed
-                    // as a decision: refuse it instead of showing "20/5".
-                    if (!Number.isFinite(value) || value < goalState.roundsStarted) return
-                    void sendCommand({
-                      type: 'goal.setBudget',
-                      conversationId,
-                      maxRounds: value,
-                    })
-                    setBudgetEditorOpen(false)
-                  }}
-                  type="button"
-                >
-                  {t.goalSetBudget}
-                </button>
-                {goalBudgetTooLow && (
-                  <span className="text-err">
-                    {t.goalBudgetBelowUsed({ used: goalState.roundsStarted })}
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {goalReport && (
-          <div className="mx-3 mt-2 rounded-lg border border-warn/40 bg-panel-2 p-3 text-xs">
-            <div className="mb-1 text-sm font-semibold">{t.goalExhaustedTitle}</div>
-            <div className="mb-2 truncate" title={goalReport.goal}>
-              {goalReport.goal}
-            </div>
-            <div className="mb-1">
-              {t.goalCompletedLabel}: {goalReport.completed}
-              {goalReport.steps.length > 0 && (
-                <ul className="mt-1 list-disc pl-4 text-muted">
-                  {goalReport.steps.slice(0, 5).map((step) => (
-                    <li key={step}>{step}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            {goalReport.unfinished.length > 0 && (
-              <div className="mb-1">
-                {t.goalUnfinishedLabel}:
-                <ul className="mt-1 list-disc pl-4 text-muted">
-                  {goalReport.unfinished.slice(0, 5).map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <div className="mb-1">
-              {t.goalStopReasonLabel}: {goalReport.stopReason}
-            </div>
-            <div className="mb-2">
-              {t.goalCostLabel}: {goalReport.usedRounds}/{goalReport.maxRounds}
-              {goalReport.cost
-                ? ` · ${goalReport.cost.inputTokens} in / ${goalReport.cost.outputTokens} out`
-                : ''}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                className="rounded border border-border bg-accent px-2 py-1 text-on-accent"
-                onClick={() => {
-                  // No amount travels with the command: the worker renews by
-                  // the budget actually stored, so a stale card cannot pay out
-                  // the wrong number of rounds.
-                  void sendCommand({ type: 'goal.renew', conversationId })
-                }}
-                type="button"
-              >
-                {t.goalRenew}
-              </button>
-              <input
-                aria-label={t.goalSetBudget}
-                className="w-16 rounded border border-border bg-panel px-1 py-1"
-                min={Math.max(1, goalBudgetFloor)}
-                onChange={(event) => setGoalBudgetDraft(event.target.value)}
-                type="number"
-                value={goalBudgetDraft}
-              />
-              <button
-                className="rounded border border-border px-2 py-1"
-                disabled={goalBudgetTooLow || !goalBudgetDraftValid}
-                onClick={() => {
-                  const value = Number(goalBudgetDraft)
-                  if (!Number.isFinite(value) || value < goalBudgetFloor) return
-                  void sendCommand({ type: 'goal.setBudget', conversationId, maxRounds: value })
-                }}
-                type="button"
-              >
-                {t.goalSetBudget}
-              </button>
-              {goalBudgetTooLow && (
-                <span className="text-err">{t.goalBudgetBelowUsed({ used: goalBudgetFloor })}</span>
-              )}
-              <button
-                className="rounded border border-border px-2 py-1"
-                onClick={() => {
-                  void sendCommand({ type: 'goal.abandon', conversationId })
-                  setGoalReport(null)
-                }}
-                type="button"
-              >
-                {t.goalNewTask}
-              </button>
-            </div>
           </div>
         )}
 

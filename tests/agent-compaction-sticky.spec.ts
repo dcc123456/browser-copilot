@@ -162,7 +162,7 @@ describe('compaction projection stickiness', () => {
         confirm: async () => true,
         conversationId: `sticky-${Date.now()}`,
         getMode: async () => 'full' as const,
-        getMaxToolRounds: async () => 8,
+        getMaxRoundsBeforeStop: async () => 8,
         getToolConfig: async () => ({ disabledTools: [], basePrompt: '' }),
       } as never,
     )

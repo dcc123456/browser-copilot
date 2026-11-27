@@ -17,7 +17,7 @@
 
 import { isImageAttachment, isTextAttachment } from './attachments'
 import type { AttachmentDescriptor } from './attachments'
-import { isKeylessEndpoint, normalizeBaseUrl } from './providers'
+import { normalizeBaseUrl } from './providers'
 import { sleepWithSignal } from './sleep'
 import { isUnsupportedThinkingDetail, thinkingBodyFor, type ThinkingLevel } from './thinking'
 import type { TokenAttribution } from './token-ledger'
@@ -775,8 +775,7 @@ function buildHeaders(request: {
     ...(request.headers ?? {}),
     'Content-Type': 'application/json',
   }
-  // A keyless endpoint must not receive an empty bearer token.
-  if (request.apiKey.trim()) headers.Authorization = `Bearer ${request.apiKey}`
+  headers.Authorization = `Bearer ${request.apiKey}`
   return headers
 }
 
@@ -801,7 +800,7 @@ export async function streamCompletion(
 ): Promise<StreamResult> {
   const who = request.providerLabel ?? 'The model provider'
 
-  if (!request.apiKey.trim() && !isKeylessEndpoint(request.baseUrl)) {
+  if (!request.apiKey.trim()) {
     throw new LlmError('No API key configured. Add one in Settings.')
   }
   const base = normalizeBaseUrl(request.baseUrl)

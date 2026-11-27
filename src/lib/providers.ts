@@ -14,12 +14,6 @@
  * @module lib/providers
  */
 
-import {
-  DEFAULT_FREE_PROVIDER_BASE_URL,
-  DEFAULT_FREE_PROVIDER_LABEL,
-  DEFAULT_FREE_PROVIDER_MODEL,
-  DEFAULT_FREE_PROVIDER_PRESET_ID,
-} from './free-provider-default'
 import { LOCALES, type LocaleSetting, type Messages } from './i18n'
 import { normalizeLocalAgentBindings } from './storage'
 import { normalizeThinkingProfile, type ThinkingLevel } from './thinking'
@@ -38,8 +32,8 @@ export type TextKey = {
   [K in keyof Messages]: Messages[K] extends string ? K : never
 }[keyof Messages]
 
-/** `direct` = usable without a key; `quota` = free quota / daily credits. */
-export type FreeAccess = 'direct' | 'quota'
+/** `quota` = the vendor offers a free tier / daily credits for the model. */
+export type FreeAccess = 'quota'
 
 /** A configured endpoint the agent can talk to. */
 export interface ProviderProfile {
@@ -92,10 +86,8 @@ export interface ProviderPreset {
   hintKey?: TextKey
   /** Docs URL for keys/models. */
   docsUrl?: string
-  /** How the vendor's free offering works; see {@link FreeAccess}. */
+  /** Whether the vendor offers a free tier for the model; see {@link FreeAccess}. */
   free?: FreeAccess
-  /** No credential at all is needed. */
-  keyless?: boolean
   /** Whether the suggested model can call tools on the free tier. */
   tools?: true | false | 'varies'
   /**
@@ -114,18 +106,6 @@ export interface ProviderPreset {
  * `/chat/completions`.
  */
 export const PROVIDER_PRESETS: ProviderPreset[] = [
-  {
-    id: DEFAULT_FREE_PROVIDER_PRESET_ID,
-    label: DEFAULT_FREE_PROVIDER_LABEL,
-    baseUrl: DEFAULT_FREE_PROVIDER_BASE_URL,
-    suggestedModel: DEFAULT_FREE_PROVIDER_MODEL,
-    keyless: true,
-    free: 'direct',
-    tools: true,
-    hint: 'Free and anonymous; no key required. Requests go directly from this extension to Pollinations.',
-    hintKey: 'presetPollinationsHint',
-    docsUrl: 'https://pollinations.ai/',
-  },
   {
     id: 'gemini',
     label: 'Google AI Studio (Gemini)',
@@ -489,7 +469,7 @@ export function validateProfile(profile: ProviderProfile, t: Messages): ProfileP
     }
   }
 
-  if (providerNeedsKey(profile) && !profile.apiKey.trim()) {
+  if (!profile.apiKey.trim()) {
     problems.push({ field: 'apiKey', message: t.errorProviderApiKey })
   }
   if (!profile.model.trim()) {
@@ -502,18 +482,16 @@ export function validateProfile(profile: ProviderProfile, t: Messages): ProfileP
 
 /** Builds a profile from a preset, ready to be edited. */
 export function profileFromPreset(preset: ProviderPreset, id: string): ProviderProfile {
-  // Keyless profiles have exactly one sensible model and no key, so they are
-  // usable as-is. Every other preset keeps the empty-model contract: a
-  // prefilled model would filter fetched-model suggestions down to it.
-  const usableAsIs = preset.keyless === true
+  // Models start empty: a prefilled model would filter fetched-model
+  // suggestions down to it. The user picks after adding the provider.
   return {
     id,
     label: preset.label,
     presetId: preset.id,
     baseUrl: preset.baseUrl,
     apiKey: '',
-    model: usableAsIs ? preset.suggestedModel : '',
-    models: usableAsIs && preset.suggestedModel ? [preset.suggestedModel] : [],
+    model: '',
+    models: [],
   }
 }
 
@@ -532,29 +510,9 @@ export function isLocalEndpoint(baseUrl: string): boolean {
   }
 }
 
-/** Hosts that serve completions with no credential at all. */
-const KEYLESS_HOSTS = new Set(['text.pollinations.ai'])
-
-/**
- * Exact-host match on purpose: a lookalike domain (`text.pollinations.ai.evil`)
- * must not silently drop the Authorization header.
- */
-export function isKeylessEndpoint(baseUrl: string): boolean {
-  try {
-    return KEYLESS_HOSTS.has(new URL(normalizeBaseUrl(baseUrl)).hostname)
-  } catch {
-    return false
-  }
-}
-
-/** True when this profile cannot work without an API key. */
-export function providerNeedsKey(profile: ProviderProfile): boolean {
-  return !isKeylessEndpoint(profile.baseUrl)
-}
-
-/** True when a request can be attempted at all. */
+/** True when a request can be attempted at all. Local endpoints use a placeholder key. */
 export function providerHasCredentials(profile: ProviderProfile): boolean {
-  return !providerNeedsKey(profile) || profile.apiKey.trim().length > 0
+  return profile.apiKey.trim().length > 0
 }
 
 /** Finds the preset whose endpoint matches, including after a custom edit. */
@@ -568,10 +526,10 @@ export function findPresetByBaseUrl(baseUrl: string): ProviderPreset | undefined
 /**
  * How the given model is free, if at all.
  *
- * `direct` means usable without a key (Pollinations); `quota` means covered by
- * a free tier / starting credits. Mixed catalogs (OpenRouter, Together) and
- * vendors with one free model (Zhipu) only tag the free family; `undefined`
- * means the model is paid.
+ * `quota` means covered by a free tier / starting credits. Mixed catalogs
+ * (OpenRouter, Together) and vendors with one free model (Zhipu) only tag the
+ * free family; `undefined` means the model is paid. Every provider still needs
+ * the user's own key.
  */
 export function freeAccessOf(profile: ProviderProfile, model: string): FreeAccess | undefined {
   const preset = findPreset(profile.presetId) ?? findPresetByBaseUrl(profile.baseUrl)
@@ -607,8 +565,6 @@ export function normalizeSettingsPayload(raw: unknown): {
   activeProviderId: string
   locale: LocaleSetting
   mode: AgentMode
-  maxToolRounds: number
-  goalAutoRenewals: number
   disabledTools: string[]
   systemPromptOverride: string
   downloadAutoSave: boolean
@@ -651,16 +607,6 @@ export function normalizeSettingsPayload(raw: unknown): {
   const activeProviderId = typeof activeRaw === 'string' ? activeRaw : ''
   const localeRaw = value.locale
   const modeRaw = value.mode
-  const roundsRaw = value.maxToolRounds
-  const rounds = typeof roundsRaw === 'number' ? roundsRaw : Number(roundsRaw)
-  const maxToolRounds = Number.isFinite(rounds)
-    ? Math.min(100, Math.max(1, Math.round(rounds)))
-    : 20
-  const autoRenewRaw = value.goalAutoRenewals
-  const autoRenew = typeof autoRenewRaw === 'number' ? autoRenewRaw : Number(autoRenewRaw)
-  const goalAutoRenewals = Number.isFinite(autoRenew)
-    ? Math.min(10, Math.max(0, Math.round(autoRenew)))
-    : 1
   const disabledTools = Array.isArray(value.disabledTools)
     ? (value.disabledTools as unknown[]).filter((n): n is string => typeof n === 'string')
     : []
@@ -716,8 +662,6 @@ export function normalizeSettingsPayload(raw: unknown): {
       modeRaw === 'chat' || modeRaw === 'readonly' || modeRaw === 'full'
         ? (modeRaw as AgentMode)
         : 'semi',
-    maxToolRounds,
-    goalAutoRenewals,
     disabledTools,
     systemPromptOverride,
     downloadAutoSave,

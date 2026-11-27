@@ -265,35 +265,6 @@ describe('the provider model list', () => {
 })
 
 describe('free providers', () => {
-  it('shows a keyless provider as needing no key and groups the presets', async () => {
-    const container = await openProviderEditor(
-      settingsWith({
-        label: 'Pollinations',
-        presetId: 'pollinations',
-        baseUrl: 'https://text.pollinations.ai/openai',
-        apiKey: '',
-        model: 'openai-fast',
-        models: ['openai-fast'],
-      }),
-    )
-    const en = messagesFor('en')
-
-    expect(container.textContent).toContain(en.settingsNoKeyNeeded)
-    expect(container.textContent).toContain(en.settingsKeyNotRequired)
-    const freeBadge = [...container.querySelectorAll('span')].find(
-      (candidate) => candidate.textContent?.trim() === en.settingsFreeBadge,
-    )
-    expect(freeBadge).toBeDefined()
-
-    const keyInput = container.querySelector('#p-key') as HTMLInputElement | null
-    expect(keyInput?.placeholder).toBe(en.settingsKeyOptional)
-
-    const groups = [...container.querySelectorAll('optgroup')].map((group) =>
-      group.getAttribute('label'),
-    )
-    expect(groups).toContain(en.settingsFreeProviders)
-  })
-
   it('shows the Free badge without a quota suffix', async () => {
     const container = await openProviderEditor(
       settingsWith({

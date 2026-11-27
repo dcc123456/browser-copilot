@@ -293,7 +293,7 @@ export async function runSubAgent(options: RunSubAgentOptions): Promise<SubAgent
     // No delegation context: the child's ToolContext must not inherit the
     // parent's runtime, and specialists never get the delegate group.
     enableDelegation: false,
-    getMaxToolRounds: async () => agent.maxRounds,
+    getMaxRoundsBeforeStop: async () => agent.maxRounds,
     send: (message) => {
       if (message.type === 'tool.start' || message.type === 'tool.result') {
         parent.send({ ...message, name: `[${agent.name}] ${message.name}` })

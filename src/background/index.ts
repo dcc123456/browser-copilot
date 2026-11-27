@@ -14,22 +14,9 @@ import type { WireMessage } from '../lib/llm'
 import { LlmError, listModels, testConnection } from '../lib/llm'
 import { rejectionMessage, sanitizeAttachments } from '../lib/attachments'
 import { toHistoryMessages, toRestoreMessages } from './restore'
-import {
-  archiveGoal,
-  completeGoal,
-  renewGoalBudget,
-  renewIncrementOf,
-  setGoalBudget,
-} from '../lib/task-progress'
+import { archiveGoal, completeGoal } from '../lib/task-progress'
 
-/**
- * Resolvers for a paused goal, keyed by conversation (spec R10). The turn that
- * runs out of budget stays alive here; the panel's renew / budget-edit / stop
- * decision resolves this promise so the SAME turn continues from the breakpoint.
- */
-const goalDecisionWaiters = new Map<string, (answer: { rounds: number } | null) => void>()
-
-/** Push the goal bar state to whichever panel is watching this conversation. */
+/** Push the goal state to whichever panel is watching this conversation. */
 function broadcastGoalState(conversationId: string): void {
   void (async () => {
     const progress = await loadTaskProgress(conversationId)
@@ -37,12 +24,7 @@ function broadcastGoalState(conversationId: string): void {
     if (!goal) return
     channelFor(conversationId)?.sink({
       type: 'goal.state',
-      goal: {
-        summary: goal.summary,
-        maxRounds: goal.maxRounds,
-        roundsStarted: goal.roundsStarted,
-        status: goal.status,
-      },
+      goal: { summary: goal.summary, status: goal.status },
     })
   })()
 }
@@ -3663,20 +3645,12 @@ async function handleCommand(
       }
     }
 
-    case 'goal.renew':
-    case 'goal.setBudget':
     case 'goal.complete':
     case 'goal.abandon': {
       const progress = await loadTaskProgress(command.conversationId)
       if (!progress?.goal) return { type: 'goal.update', goal: null }
       let next = progress
-      if (command.type === 'goal.renew') {
-        // The increment is computed from the STORED goal, never sent by the
-        // panel: a card rendering an older budget must not decide the amount.
-        next = renewGoalBudget(progress, renewIncrementOf(progress.goal), 'user')
-      } else if (command.type === 'goal.setBudget') {
-        next = setGoalBudget(progress, command.maxRounds)
-      } else if (command.type === 'goal.abandon') {
+      if (command.type === 'goal.abandon') {
         next = archiveGoal(progress, 'abandoned')
       } else {
         const completed = completeGoal(progress, {
@@ -3686,41 +3660,17 @@ async function handleCommand(
         if (!completed) {
           return {
             type: 'goal.update',
-            goal: {
-              summary: progress.goal.summary,
-              maxRounds: progress.goal.maxRounds,
-              roundsStarted: progress.goal.roundsStarted,
-              status: progress.goal.status,
-            },
+            goal: { summary: progress.goal.summary, status: progress.goal.status },
           }
         }
         next = completed
       }
       await saveTaskProgress(next)
       broadcastGoalState(command.conversationId)
-      const waiter = goalDecisionWaiters.get(command.conversationId)
-      if (waiter) {
-        // The budget was already applied above, so the loop must NOT add it a
-        // second time: `rounds: 0` means "reload the stored goal and continue".
-        // Completing/ending, or a budget that is still below what was spent,
-        // ends the paused turn instead of leaving it waiting.
-        const continues =
-          command.type === 'goal.renew' ||
-          (command.type === 'goal.setBudget' && next.goal?.status === 'active')
-        waiter(continues ? { rounds: 0 } : null)
-        goalDecisionWaiters.delete(command.conversationId)
-      }
       const goal = next.goal
       return {
         type: 'goal.update',
-        goal: goal
-          ? {
-              summary: goal.summary,
-              maxRounds: goal.maxRounds,
-              roundsStarted: goal.roundsStarted,
-              status: goal.status,
-            }
-          : null,
+        goal: goal ? { summary: goal.summary, status: goal.status } : null,
       }
     }
 
@@ -3936,8 +3886,6 @@ chrome.runtime.onConnect.addListener((port) => {
         channel.controller.abort()
         declineInteractions(channel)
       }
-      goalDecisionWaiters.get(message.conversationId)?.(null)
-      goalDecisionWaiters.delete(message.conversationId)
       return
     }
 
@@ -4170,7 +4118,6 @@ chrome.runtime.onConnect.addListener((port) => {
         // same turn. We still read once here so the system prompt reflects
         // the mode at turn start.
         const getMode = async () => (await getSettings()).mode
-        const getMaxToolRounds = async () => (await getSettings()).maxToolRounds
         const getToolConfig = async () => {
           const s = await getSettings()
           return {
@@ -4185,16 +4132,10 @@ chrome.runtime.onConnect.addListener((port) => {
           // Panel conversations get the supervisor/delegation machinery;
           // unattended entry points leave this off.
           enableDelegation: true,
-          awaitGoalDecision: (report) =>
-            new Promise((resolve) => {
-              void report
-              goalDecisionWaiters.set(conversationId, resolve)
-            }),
           ...(message.skillId ? { skillId: message.skillId } : {}),
           ...(scope ? { scopeWindowId: scope.windowId } : {}),
           conversationId,
           getMode,
-          getMaxToolRounds,
           getToolConfig,
           confirm: (name, argsPreview) => requestConfirmation(turnChannel, name, argsPreview),
           // ask_user and present_plan ride the channel, not this connection:

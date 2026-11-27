@@ -136,14 +136,6 @@ import {
   appendProgressStep,
   archiveGoal,
   completeGoal,
-  DEFAULT_GOAL_MAX_ROUNDS,
-  autoRenewDecision,
-  goalBudgetExhausted,
-  goalBudgetReport,
-  recordGoalRound,
-  renewGoalBudget,
-  renewIncrementOf,
-  type GoalBudgetReport,
   beginTask,
   emptyTaskProgress,
   fingerprintOf,
@@ -2577,10 +2569,13 @@ export interface AgentDeps {
    */
   getMode: () => Promise<AgentMode>
   /**
-   * Returns the maximum number of model↔tool round trips allowed in one turn.
-   * Read at turn start so a settings change applies to the next request.
+   * Optional hard cap for UNATTENDED runs only (scheduled tasks, workflow
+   * AI-agent blocks, delegated specialists) — nobody is there to press Stop,
+   * so the run ends after this many rounds instead of spending forever. It is
+   * NOT a budget: no pause, no renewal, no panel decision. Interactive chat
+   * omits it and has no round limit at all.
    */
-  getMaxToolRounds: () => Promise<number>
+  getMaxRoundsBeforeStop?: () => Promise<number>
   /**
    * Overrides the provider/model for this turn (e.g. the AI-takeover runner
    * pointing at `settings.takeoverModel`). Returns undefined (or is omitted)
@@ -2622,20 +2617,6 @@ export interface AgentDeps {
    * Feishu prompts cannot fan out into sub-agents.
    */
   enableDelegation?: boolean
-  /**
-   * Budget decision for a paused goal (spec R10). Present only when a human can
-   * answer (panel turns): the turn stays alive here until the user renews,
-   * edits the budget or stops. Unattended runs omit it and end paused.
-   */
-  awaitGoalDecision?: (report: GoalBudgetReport) => Promise<{ rounds: number } | null>
-  /**
-   * Unattended auto-renewal cap (K, spec R10). Read only when nobody can answer
-   * the pause: `0` disables automatic renewal, and a renewal still requires
-   * progress in the segment that just ran. When omitted, the setting's default
-   * (1) applies. Panel turns never read it — a human is present, so the pause
-   * waits for their decision instead.
-   */
-  getGoalAutoRenewals?: () => Promise<number>
   /**
    * Set when this turn IS a delegated specialist run. The turn then uses the
    * agent's identity prompt and tool whitelist and can never delegate again.
@@ -5643,18 +5624,20 @@ export async function runAgentTurn(
     skillList,
     initialMode,
     toolConfig,
-    maxToolRounds,
     agentList,
+    maxRoundsBeforeStop,
     settings,
   ] = await Promise.all([
     deps.getProvider ? deps.getProvider().catch(() => undefined) : Promise.resolve(undefined),
     listSkills(),
     deps.getMode(),
     deps.getToolConfig(),
-    deps.getMaxToolRounds(),
     // Unattended runs (no enableDelegation) never read the agent store, so
     // scheduled/Feishu prompts cannot fan out into sub-agents.
     deps.enableDelegation ? listAgents() : Promise.resolve([] as Agent[]),
+    deps.getMaxRoundsBeforeStop
+      ? deps.getMaxRoundsBeforeStop().catch(() => undefined)
+      : Promise.resolve(undefined),
     getSettings(),
   ])
   const provider = preferredProvider ?? (await getActiveProvider())
@@ -5798,21 +5781,12 @@ export async function runAgentTurn(
     string | undefined
   const storedProgress = await loadTaskProgress(deps.conversationId)
   let taskProgress = storedProgress ?? emptyTaskProgress(deps.conversationId)
-  // Chat mode is pure conversation: no task, no budget, no goal bar (spec R10
-  // 边界). Every other mode gets a goal whose budget is the only round limit.
-  // A goal lives as long as its task (R-1/R-2): a new message after a
-  // paused/finished goal archives it and starts a fresh one, while a message
-  // during an ACTIVE goal belongs to the same task and keeps its budget.
+  // A goal lives as long as its task: a new message after a finished goal
+  // archives it and starts a fresh one, while a message during an ACTIVE goal
+  // belongs to the same task. There is no round limit — long tasks keep going.
   if (initialMode !== 'chat' && (!taskProgress.goal || startsNewGoal(taskProgress))) {
     if (taskProgress.goal) taskProgress = archiveGoal(taskProgress, 'abandoned')
-    // The configured maxToolRounds is the INITIAL explicit budget, not a hidden
-    // ceiling: the goal carries it and the only gate reads it (spec R10).
-    taskProgress = beginTask(
-      taskProgress,
-      lastUserText?.trim() || 'Current task',
-      Date.now(),
-      maxToolRounds || DEFAULT_GOAL_MAX_ROUNDS,
-    )
+    taskProgress = beginTask(taskProgress, lastUserText?.trim() || 'Current task', Date.now())
   }
   const isResumed =
     storedProgress !== undefined &&
@@ -5824,23 +5798,11 @@ export async function runAgentTurn(
     const note = renderResumeNote(taskProgress, cost)
     if (note) systemPrompt = `${systemPrompt}\n\n${note}`
   }
-  taskProgress = await saveProgressKeepingBudget(taskProgress)
-  // A chat-mode turn has no budget to show or enforce, even when an earlier
-  // semi-auto turn left a goal on record: without this the stale goal painted
-  // the budget bar and its exhausted gate paused a plain question.
-  const budgetApplies = initialMode !== 'chat'
+  await saveTaskProgress(taskProgress)
   const broadcastGoal = (): void => {
     const goal = (ctx.taskProgress ?? taskProgress).goal
-    if (!goal || !budgetApplies) return
-    deps.send({
-      type: 'goal.state',
-      goal: {
-        summary: goal.summary,
-        maxRounds: goal.maxRounds,
-        roundsStarted: goal.roundsStarted,
-        status: goal.status,
-      },
-    })
+    if (!goal) return
+    deps.send({ type: 'goal.state', goal: { summary: goal.summary, status: goal.status } })
   }
 
   // Compaction is limited to one pass per turn (per batch in a panel turn,
@@ -6072,123 +6034,18 @@ export async function runAgentTurn(
     return { result, replyText }
   }
 
-  // The explicit goal budget is the ONLY round limit (spec R10). Rounds are
-  // spent one per loop and the gate below pauses at the budget — no hidden
-  // batch multiplication, no silent ceiling.
-  for (let round = 0; ; round += 1) {
+  // Interactive chat has no round limit: long tasks loop until the model
+  // finishes or the user cancels. Only unattended callers that supplied a cap
+  // (scheduled tasks, workflow AI blocks, delegated specialists) stop here —
+  // a plain END, never a pause with a renewal decision.
+  let roundsSpent = 0
+  for (;;) {
     // Bail promptly when the run is cancelled, rather than waiting for the next
     // in-flight fetch to notice its signal. The streamCompletion catch below
     // also handles an abort mid-request.
     if (deps.signal?.aborted) {
       deps.send({ type: 'status', text: 'Cancelled.' })
       return null
-    }
-
-    // The panel can edit the budget while the task is still running; pick the
-    // stored one up here so the gate below judges the budget the user sees.
-    const boundaryProgress = ctx.taskProgress ?? taskProgress
-    const adoptedProgress = await adoptStoredBudget(boundaryProgress)
-    if (adoptedProgress !== boundaryProgress) {
-      taskProgress = adoptedProgress
-      ctx.taskProgress = adoptedProgress
-      broadcastGoal()
-    }
-
-    // Explicit budget gate (spec R10): reaching maxRounds PAUSES the task and
-    // asks for a decision — never a silent stop. The turn stays alive while the
-    // panel waits, so renewal continues from this exact breakpoint.
-    const currentProgress = ctx.taskProgress ?? taskProgress
-    const currentGoal = currentProgress.goal
-    if (budgetApplies && currentGoal && goalBudgetExhausted(currentProgress)) {
-      taskProgress = await saveProgressKeepingBudget({
-        ...currentProgress,
-        goal: { ...currentGoal, status: 'paused' },
-      })
-      ctx.taskProgress = taskProgress
-      broadcastGoal()
-      const cost = await taskCostSince(deps.conversationId, currentGoal.startedAt)
-      const report = goalBudgetReport(taskProgress, cost, 'budget')
-      if (report) {
-        deps.send({
-          type: 'goal.budgetExhausted',
-          report: {
-            goal: report.goal,
-            completed: report.completed,
-            steps: report.completedSteps.map(
-              (step) => `${step.tool}: ${step.summary}${step.url ? ` @ ${step.url}` : ''}`,
-            ),
-            unfinished: report.unfinished,
-            stopReason: report.stopReason,
-            usedRounds: report.usedRounds,
-            maxRounds: report.maxRounds,
-            remainingRounds: report.remainingRounds,
-            nextActions: report.nextActions,
-            ...(report.cost ? { cost: report.cost } : {}),
-          },
-        })
-      }
-      const decision =
-        deps.awaitGoalDecision && report ? await deps.awaitGoalDecision(report) : null
-
-      // Nobody can answer this pause (scheduled task, Feishu command, workflow
-      // AI-agent block): K may extend the SAME task, but only while the segment
-      // that just ran made progress — no progress is never auto-renewed, and a
-      // panel turn never reaches this branch (a human is present, so their
-      // answer is the only way the budget moves).
-      if (!decision && !deps.awaitGoalDecision) {
-        const k = deps.getGoalAutoRenewals ? await deps.getGoalAutoRenewals() : 1
-        const stagnation = taskProgress.goal?.stagnation ?? currentGoal.stagnation
-        const unchanged = stagnation?.unchanged ?? 0
-        const unreadable = stagnation?.unreadable ?? 0
-        const auto = autoRenewDecision(taskProgress, {
-          unattended: true,
-          k,
-          progressDetected: unchanged === 0 && unreadable === 0,
-        })
-        if (auto.allowed) {
-          const segment = (currentGoal.autoRenewals ?? 0) + 1
-          const evidence =
-            `segment ${segment}: the page state kept changing ` +
-            `(unchanged=${unchanged}, unreadable=${unreadable})`
-          // One initial budget per renewal, never a doubling: the ceiling stays
-          // predictable at initial × (1 + K) however long the task runs.
-          taskProgress = renewGoalBudget(
-            taskProgress,
-            renewIncrementOf(currentGoal),
-            'strategy',
-            Date.now(),
-            evidence,
-          )
-          ctx.taskProgress = taskProgress
-          await saveTaskProgress(taskProgress)
-          broadcastGoal()
-          deps.send({
-            type: 'status',
-            text:
-              'Budget exhausted with nobody to ask: auto-renewed to ' +
-              `${taskProgress.goal?.maxRounds ?? 0} rounds ` +
-              `(${taskProgress.goal?.autoRenewals ?? 0}/${k}, ${evidence}).`,
-          })
-          continue
-        }
-      }
-
-      if (!decision) {
-        deps.send({
-          type: 'status',
-          text:
-            'Goal budget exhausted. The task is paused; renew the budget to continue, ' +
-            'change the goal, or stop. No further requests are sent until you decide.',
-        })
-        return totalUsage.totalTokens > 0 ? totalUsage : null
-      }
-      // The panel already applied the budget change before resolving; reload it
-      // so the loop works on the stored goal instead of a stale in-memory copy.
-      const fresh = (await loadTaskProgress(deps.conversationId)) ?? taskProgress
-      taskProgress = decision.rounds > 0 ? renewGoalBudget(fresh, decision.rounds, 'user') : fresh
-      ctx.taskProgress = taskProgress
-      await saveTaskProgress(taskProgress)
-      broadcastGoal()
     }
 
     // Mid-turn supplement, drained at the round boundary — the one point where
@@ -6362,14 +6219,11 @@ export async function runAgentTurn(
       history.push({ role: 'assistant', content: replyText })
       // A supplement that arrived while this answer streamed still belongs to
       // THIS task: apply it and keep the same turn going, so the model answers
-      // the supplement instead of the task ending with it unread. The round
-      // budget bounds the continuation; a note left over when the turn truly
-      // cannot go on is handed back to the panel, never dropped.
+      // the supplement instead of the task ending with it unread.
       if (applySupplements() === 0) {
         // Completion is a declaration, never inferred here: the goal stays
         // active until an explicit completion with locatable evidence arrives.
-        taskProgress = await saveProgressKeepingBudget(ctx.taskProgress ?? taskProgress)
-        ctx.taskProgress = taskProgress
+        await saveTaskProgress(ctx.taskProgress ?? taskProgress)
         return totalUsage.totalTokens > 0 ? totalUsage : null
       }
       continue
@@ -6399,13 +6253,14 @@ export async function runAgentTurn(
       }
     }
 
-    // Spend one round of the explicit budget; the gate above pauses at the limit.
-    taskProgress = await saveProgressKeepingBudget(
-      recordGoalRound(ctx.taskProgress ?? taskProgress),
-    )
-    ctx.taskProgress = taskProgress
-    // The goal bar tracks the budget round by round, not only at pause time.
-    broadcastGoal()
+    roundsSpent += 1
+    if (maxRoundsBeforeStop !== undefined && roundsSpent >= maxRoundsBeforeStop) {
+      deps.send({
+        type: 'status',
+        text: `Stopped after ${roundsSpent} tool rounds to avoid an endless loop.`,
+      })
+      return totalUsage.totalTokens > 0 ? totalUsage : null
+    }
   }
 }
 
@@ -6500,57 +6355,6 @@ function auditOf(
 }
 
 /**
- * Reads the goal's budget fields back from storage and folds them into the
- * live copy.
- *
- * The panel's goal commands write `maxRounds` (and its change log, and the K
- * counter) straight to storage while a turn is running, but the loop only holds
- * its in-memory copy — and it writes progress back after every round and every
- * tool step, so without this merge a mid-run budget edit is rolled back by the
- * agent's own write. Only budget fields move; `roundsStarted`, `status` and the
- * steps stay with the writer that owns them. A different `startedAt` is a
- * different task, so nothing is inherited across tasks.
- */
-async function adoptStoredBudget(progress: TaskProgress): Promise<TaskProgress> {
-  const goal = progress.goal
-  if (!goal) return progress
-  const storedGoal = (await loadTaskProgress(progress.conversationId))?.goal
-  if (!storedGoal || storedGoal.startedAt !== goal.startedAt) return progress
-  if (
-    storedGoal.maxRounds === goal.maxRounds &&
-    storedGoal.renewIncrement === goal.renewIncrement &&
-    storedGoal.autoRenewals === goal.autoRenewals &&
-    storedGoal.budgetLog.length === goal.budgetLog.length
-  ) {
-    return progress
-  }
-  return {
-    ...progress,
-    goal: {
-      ...goal,
-      maxRounds: storedGoal.maxRounds,
-      autoRenewals: storedGoal.autoRenewals,
-      budgetLog: storedGoal.budgetLog,
-      // A record written before this field existed keeps the in-memory value.
-      ...(storedGoal.renewIncrement !== undefined
-        ? { renewIncrement: storedGoal.renewIncrement }
-        : {}),
-    },
-  }
-}
-
-/**
- * Persists progress with the panel's current budget merged in. Callers that
- * have JUST changed the budget themselves (a renewal) must call
- * `saveTaskProgress` directly — their copy is the newer one.
- */
-async function saveProgressKeepingBudget(progress: TaskProgress): Promise<TaskProgress> {
-  const merged = await adoptStoredBudget(progress)
-  await saveTaskProgress(merged)
-  return merged
-}
-
-/**
  * Folds one executed step into the conversation's durable progress.
  *
  * Best effort by contract: losing a checkpoint costs recovery detail, failing
@@ -6585,7 +6389,8 @@ async function recordTaskStep(
       fingerprint: fingerprintOf(name, args),
     })
   }
-  ctx.taskProgress = await saveProgressKeepingBudget(next)
+  await saveTaskProgress(next)
+  ctx.taskProgress = next
   await observeProgress(ctx, deps, history, name, args, ok)
 }
 
@@ -6825,17 +6630,13 @@ async function runOneToolCall(
       sendToolResult({ type: 'tool.result', name, summary: 'Completion refused (no evidence)' })
       return
     }
-    ctx.taskProgress = await saveProgressKeepingBudget(next)
-    const goal = ctx.taskProgress.goal
+    await saveTaskProgress(next)
+    ctx.taskProgress = next
+    const goal = next.goal
     if (goal) {
       deps.send({
         type: 'goal.state',
-        goal: {
-          summary: goal.summary,
-          maxRounds: goal.maxRounds,
-          roundsStarted: goal.roundsStarted,
-          status: goal.status,
-        },
+        goal: { summary: goal.summary, status: goal.status },
       })
     }
     pushResult(
@@ -7515,7 +7316,7 @@ async function runOneToolCall(
       describeAction(name, args, ctx.snapshotTargets),
       ok,
     )
-    if (ctx.taskProgress) ctx.taskProgress = await saveProgressKeepingBudget(ctx.taskProgress)
+    if (ctx.taskProgress) await saveTaskProgress(ctx.taskProgress)
   } catch (error) {
     // A termination must unwind the whole turn, not be recorded as a failed
     // tool step — otherwise the loop keeps going after the user cancelled.
