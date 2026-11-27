@@ -60,3 +60,15 @@ export function describeApplyError(t: Messages, error: unknown): string {
     detail: error instanceof Error ? error.message : String(error),
   })
 }
+
+/**
+ * Technical detail for failures whose localized line cannot say what actually
+ * went wrong (I/O against the install folder, where the browser error name is
+ * the actionable clue). Every other code has a complete localized explanation,
+ * so its detail would only repeat it.
+ */
+const DETAILED_CODES: ReadonlySet<UpdateApplyErrorCode> = new Set(['backup-failed', 'write-failed'])
+
+export function describeApplyErrorDetail(error: unknown): string | null {
+  return error instanceof UpdateApplyError && DETAILED_CODES.has(error.code) ? error.message : null
+}

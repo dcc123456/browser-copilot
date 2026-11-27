@@ -39,6 +39,15 @@ function writeOrder(files: readonly ZipEntryInfo[]): ZipEntryInfo[] {
 }
 
 export const BACKUP_FOLDER_PREFIX = 'browser-copilot-backup-'
+
+/**
+ * One whole-file `write()` of a multi-10-MB buffer is not reliable here: the
+ * 0.6.22 OCR update failed to back up its 20MB `chi_sim.traineddata.gz` (the
+ * backup file was left at 0 bytes) while every smaller file of that run was
+ * written fine. Slice large files so no single call carries a huge buffer.
+ */
+const WRITE_CHUNK_BYTES = 1024 * 1024
+
 /**
  * Deliberately not `manifest.json`: the backup folder lives inside the install
  * folder, and a valid root manifest there could be loaded as a second extension
@@ -165,7 +174,7 @@ async function backupExistingFiles(
   } catch (error) {
     throw new UpdateApplyError(
       'backup-failed',
-      `Could not create "${backupFolder}": ${error instanceof Error ? error.message : String(error)}`,
+      `Could not create "${backupFolder}": ${describeCause(error)}`,
     )
   }
 
@@ -182,7 +191,7 @@ async function backupExistingFiles(
     } catch (error) {
       throw new UpdateApplyError(
         'backup-failed',
-        `Could not back up "${target.name}": ${error instanceof Error ? error.message : String(error)}`,
+        `Could not back up "${target.name}": ${describeCause(error)}`,
       )
     }
   }
@@ -209,7 +218,7 @@ async function readExistingFile(
   } catch (error) {
     throw new UpdateApplyError(
       'backup-failed',
-      `Could not read "${segments.join('/')}": ${error instanceof Error ? error.message : String(error)}`,
+      `Could not read "${segments.join('/')}": ${describeCause(error)}`,
     )
   }
 }
@@ -326,14 +335,36 @@ async function writeFile(
     const handle = await parent.getFileHandle(name, { create: true })
     const writable = await handle.createWritable()
     try {
-      await writable.write(content as unknown as FileSystemWriteChunkType)
+      await writeInChunks(writable, content)
     } finally {
       await writable.close()
     }
   } catch (error) {
     throw new UpdateApplyError(
       'write-failed',
-      `Could not write "${segments.join('/')}": ${error instanceof Error ? error.message : String(error)}`,
+      `Could not write "${segments.join('/')}": ${describeCause(error)}`,
     )
   }
+}
+
+async function writeInChunks(
+  writable: FileSystemWritableFileStream,
+  content: Uint8Array,
+): Promise<void> {
+  if (content.length <= WRITE_CHUNK_BYTES) {
+    await writable.write(content as unknown as FileSystemWriteChunkType)
+    return
+  }
+  for (let offset = 0; offset < content.length; offset += WRITE_CHUNK_BYTES) {
+    const end = Math.min(offset + WRITE_CHUNK_BYTES, content.length)
+    await writable.write(content.subarray(offset, end) as unknown as FileSystemWriteChunkType)
+  }
+}
+
+/** `DOMException.message` is often too vague; its `name` is the useful half. */
+function describeCause(error: unknown): string {
+  if (error instanceof Error) {
+    return error.name && error.name !== 'Error' ? `${error.name}: ${error.message}` : error.message
+  }
+  return String(error)
 }

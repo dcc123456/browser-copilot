@@ -29,7 +29,7 @@ import {
 } from '../../lib/update/types'
 import FormDialog from '../../ui/FormDialog'
 import { useT } from '../i18n'
-import { describeApplyError } from './error-text'
+import { describeApplyError, describeApplyErrorDetail } from './error-text'
 import IconButton from './IconButton'
 import { openReleasePage } from './open-release'
 import type { UpdateSnapshot } from './use-update-snapshot'
@@ -53,6 +53,8 @@ export default function UpdateDialog({
   const [phase, setPhase] = useState<Phase>('idle')
   const [progress, setProgress] = useState<UpdateProgress | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  /** Browser/IO detail for failures where the localized line alone is not actionable. */
+  const [noticeDetail, setNoticeDetail] = useState<string | null>(null)
   const [saved, setSaved] = useState<SavedInstallDirectory | null>(null)
   const [doneVersion, setDoneVersion] = useState<string | null>(null)
   const [backupFolder, setBackupFolder] = useState<string | null>(null)
@@ -117,10 +119,12 @@ export default function UpdateDialog({
 
   const changeFolder = async (): Promise<void> => {
     setNotice(null)
+    setNoticeDetail(null)
     try {
       await acceptPickedFolder()
     } catch (error) {
       setNotice(describeApplyError(t, error))
+      setNoticeDetail(describeApplyErrorDetail(error))
     }
   }
 
@@ -144,11 +148,13 @@ export default function UpdateDialog({
   const start = async (): Promise<void> => {
     if (!asset) return
     setNotice(null)
+    setNoticeDetail(null)
     let directory: FileSystemDirectoryHandle | null
     try {
       directory = await readyDirectory()
     } catch (error) {
       setNotice(describeApplyError(t, error))
+      setNoticeDetail(describeApplyErrorDetail(error))
       setPhase('error')
       return
     }
@@ -179,8 +185,10 @@ export default function UpdateDialog({
         setPhase('idle')
         setProgress(null)
         setNotice(null)
+        setNoticeDetail(null)
       } else {
         setNotice(describeApplyError(t, error))
+        setNoticeDetail(describeApplyErrorDetail(error))
         setPhase('error')
       }
     } finally {
@@ -209,12 +217,16 @@ export default function UpdateDialog({
   )
 
   const noticeBox = notice && (
-    <p
-      className="m-0 rounded-lg border border-err bg-err-surface p-2.5 text-[12px] leading-relaxed break-words text-err"
-      role="alert"
-    >
-      {notice}
-    </p>
+    <div className="rounded-lg border border-err bg-err-surface p-2.5">
+      <p className="m-0 text-[12px] leading-relaxed break-words text-err" role="alert">
+        {notice}
+      </p>
+      {noticeDetail && (
+        <p className="m-0 mt-1 select-text text-[11px] leading-relaxed break-all text-muted">
+          {t.updateErrorDetail({ detail: noticeDetail })}
+        </p>
+      )}
+    </div>
   )
 
   if (!snapshot.canApply) {

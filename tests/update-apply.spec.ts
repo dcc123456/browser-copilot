@@ -13,11 +13,11 @@ function dirNode(): DirNode {
   return { kind: 'dir', children: new Map() }
 }
 
-function fileNode(text: string): FileNode {
-  return { kind: 'file', bytes: new TextEncoder().encode(text) }
+function addFile(root: DirNode, path: string, text: string): void {
+  addBytes(root, path, new TextEncoder().encode(text))
 }
 
-function addFile(root: DirNode, path: string, text: string): void {
+function addBytes(root: DirNode, path: string, bytes: Uint8Array): void {
   const segments = path.split('/')
   let current = root
   for (const segment of segments.slice(0, -1)) {
@@ -29,10 +29,15 @@ function addFile(root: DirNode, path: string, text: string): void {
     if (next.kind !== 'dir') throw new Error(`${segment} is not a directory`)
     current = next
   }
-  current.children.set(segments[segments.length - 1]!, fileNode(text))
+  current.children.set(segments[segments.length - 1]!, { kind: 'file', bytes })
 }
 
 function readFile(root: DirNode, path: string): string | null {
+  const bytes = readFileBytes(root, path)
+  return bytes ? new TextDecoder().decode(bytes) : null
+}
+
+function readFileBytes(root: DirNode, path: string): Uint8Array | null {
   const segments = path.split('/')
   let current: DirNode = root
   for (const segment of segments.slice(0, -1)) {
@@ -41,30 +46,44 @@ function readFile(root: DirNode, path: string): string | null {
     current = next
   }
   const file = current.children.get(segments[segments.length - 1]!)
-  return file?.kind === 'file' ? new TextDecoder().decode(file.bytes) : null
+  return file?.kind === 'file' ? file.bytes : null
 }
 
 class FakeWritable {
+  private readonly parts: Uint8Array[] = []
+
   constructor(
     private readonly node: FileNode,
     private readonly path: string,
     private readonly writes: string[],
+    private readonly chunks: Array<{ path: string; size: number }>,
   ) {}
 
   async write(data: FileSystemWriteChunkType): Promise<void> {
+    const bytes =
+      typeof data === 'string'
+        ? new TextEncoder().encode(data)
+        : data instanceof ArrayBuffer
+          ? new Uint8Array(data.slice(0))
+          : ArrayBuffer.isView(data)
+            ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()
+            : null
+    if (!bytes) throw new Error('unsupported writable chunk')
     this.writes.push(this.path)
-    if (typeof data === 'string') {
-      this.node.bytes = new TextEncoder().encode(data)
-    } else if (data instanceof ArrayBuffer) {
-      this.node.bytes = new Uint8Array(data.slice(0))
-    } else if (ArrayBuffer.isView(data)) {
-      this.node.bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()
-    } else {
-      throw new Error('unsupported writable chunk')
-    }
+    this.chunks.push({ path: this.path, size: bytes.length })
+    this.parts.push(bytes)
   }
 
-  async close(): Promise<void> {}
+  async close(): Promise<void> {
+    const total = this.parts.reduce((sum, part) => sum + part.length, 0)
+    const merged = new Uint8Array(total)
+    let offset = 0
+    for (const part of this.parts) {
+      merged.set(part, offset)
+      offset += part.length
+    }
+    this.node.bytes = merged
+  }
 }
 
 class FakeFileHandle {
@@ -72,6 +91,7 @@ class FakeFileHandle {
     private readonly node: FileNode,
     private readonly fullPath: string,
     private readonly writes: string[],
+    private readonly chunks: Array<{ path: string; size: number }>,
   ) {}
 
   async getFile(): Promise<{ text(): Promise<string>; arrayBuffer(): Promise<ArrayBuffer> }> {
@@ -84,7 +104,7 @@ class FakeFileHandle {
   }
 
   async createWritable(): Promise<FakeWritable> {
-    return new FakeWritable(this.node, this.fullPath, this.writes)
+    return new FakeWritable(this.node, this.fullPath, this.writes, this.chunks)
   }
 }
 
@@ -92,6 +112,7 @@ class FakeDirectoryHandle {
   constructor(
     private readonly node: DirNode,
     private readonly writes: string[],
+    private readonly chunks: Array<{ path: string; size: number }>,
     private readonly prefix = '',
   ) {}
 
@@ -102,12 +123,14 @@ class FakeDirectoryHandle {
   async getFileHandle(name: string, options?: { create?: boolean }): Promise<FakeFileHandle> {
     const fullPath = `${this.prefix}${name}`
     const existing = this.node.children.get(name)
-    if (existing?.kind === 'file') return new FakeFileHandle(existing, fullPath, this.writes)
+    if (existing?.kind === 'file') {
+      return new FakeFileHandle(existing, fullPath, this.writes, this.chunks)
+    }
     if (existing) throw new Error(`"${name}" is a directory`)
     if (!options?.create) throw new Error(`"${name}" does not exist`)
     const created: FileNode = { kind: 'file', bytes: new Uint8Array() }
     this.node.children.set(name, created)
-    return new FakeFileHandle(created, fullPath, this.writes)
+    return new FakeFileHandle(created, fullPath, this.writes, this.chunks)
   }
 
   async getDirectoryHandle(
@@ -116,13 +139,13 @@ class FakeDirectoryHandle {
   ): Promise<FakeDirectoryHandle> {
     const existing = this.node.children.get(name)
     if (existing?.kind === 'dir') {
-      return new FakeDirectoryHandle(existing, this.writes, `${this.prefix}${name}/`)
+      return new FakeDirectoryHandle(existing, this.writes, this.chunks, `${this.prefix}${name}/`)
     }
     if (existing) throw new Error(`"${name}" is a file`)
     if (!options?.create) throw new Error(`"${name}" does not exist`)
     const created = dirNode()
     this.node.children.set(name, created)
-    return new FakeDirectoryHandle(created, this.writes, `${this.prefix}${name}/`)
+    return new FakeDirectoryHandle(created, this.writes, this.chunks, `${this.prefix}${name}/`)
   }
 }
 
@@ -138,7 +161,7 @@ function manifest(version: string, noOcr = false): string {
 }
 
 function releaseZip(
-  options: { version?: string; noOcr?: boolean; extra?: Record<string, string> } = {},
+  options: { version?: string; noOcr?: boolean; extra?: Record<string, string | Uint8Array> } = {},
 ): Uint8Array {
   const version = options.version ?? '0.6.8'
   return buildZip({
@@ -174,13 +197,19 @@ function installedFolder(version = '0.6.7'): {
   root: DirNode
   handle: FileSystemDirectoryHandle
   writes: string[]
+  chunks: Array<{ path: string; size: number }>
 } {
   const root = dirNode()
   addFile(root, 'manifest.json', manifest(version))
   addFile(root, 'background.js', 'console.log("old")')
   const writes: string[] = []
-  const handle = new FakeDirectoryHandle(root, writes) as unknown as FileSystemDirectoryHandle
-  return { root, handle, writes }
+  const chunks: Array<{ path: string; size: number }> = []
+  const handle = new FakeDirectoryHandle(
+    root,
+    writes,
+    chunks,
+  ) as unknown as FileSystemDirectoryHandle
+  return { root, handle, writes, chunks }
 }
 
 afterEach(() => {
@@ -271,6 +300,33 @@ describe('applyUpdate', () => {
       `${result.backupFolder}/background.js`,
       `${result.backupFolder}/manifest.json.bak`,
     ])
+  })
+
+  it('slices a large file write instead of sending one huge buffer', async () => {
+    const MIB = 1024 * 1024
+    const oldContent = new Uint8Array(17 * MIB)
+    oldContent.fill(1)
+    const newContent = new Uint8Array(17 * MIB)
+    newContent.fill(2)
+
+    const { root, handle, chunks } = installedFolder()
+    addBytes(root, 'tesseract/chi_sim.traineddata.gz', oldContent)
+    const bytes = releaseZip({ extra: { 'tesseract/chi_sim.traineddata.gz': newContent } })
+    stubDownload(bytes)
+
+    const result = await applyUpdate(await baseOptions(handle, await assetFor(bytes)))
+
+    const backupPath = `${result.backupFolder}/tesseract/chi_sim.traineddata.gz`
+    expect(readFileBytes(root, 'tesseract/chi_sim.traineddata.gz')!.length).toBe(newContent.length)
+    expect(readFileBytes(root, backupPath)!.length).toBe(oldContent.length)
+
+    // A 17MB file used to go out as one write() call; the 0.6.22 OCR update
+    // showed that a single buffer that size can fail (0-byte backup).
+    const largeChunks = chunks.filter(
+      (entry) => entry.path === backupPath || entry.path === 'tesseract/chi_sim.traineddata.gz',
+    )
+    expect(largeChunks.length).toBe(Math.ceil(newContent.length / MIB) * 2)
+    expect(largeChunks.every((entry) => entry.size <= MIB)).toBe(true)
   })
 
   it('does not touch the folder when the root manifest is not this installation', async () => {

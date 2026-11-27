@@ -1940,6 +1940,8 @@ export interface Messages {
   updateErrorWrite: string
   updateErrorAborted: string
   updateErrorGeneric: ({ detail }: { detail: string }) => string
+  /** Technical cause line under a backup/write failure; the message above is localized. */
+  updateErrorDetail: ({ detail }: { detail: string }) => string
   updateSettingsTitle: string
   updateSettingsHint: string
   updateCheckNow: string
@@ -3735,6 +3737,7 @@ Keep the whole report dense and within the message size cap.`,
     'Writing the release files failed. The previous version remains installed; try again.',
   updateErrorAborted: 'The update was canceled.',
   updateErrorGeneric: ({ detail }) => `Something went wrong: ${detail}`,
+  updateErrorDetail: ({ detail }) => `Details: ${detail}`,
   updateSettingsTitle: 'Updates',
   updateSettingsHint:
     'Checks GitHub Releases every 12 hours; a failed check retries automatically with backoff. An in-place update writes the release into the unpacked install folder; reload the extension to switch versions.',
@@ -5387,6 +5390,7 @@ const zhCN: Messages = {
   updateErrorWrite: '写入更新文件失败。当前版本仍然可用，请重试。',
   updateErrorAborted: '更新已取消。',
   updateErrorGeneric: ({ detail }) => `出现错误：${detail}`,
+  updateErrorDetail: ({ detail }) => `详细信息：${detail}`,
   updateSettingsTitle: '更新',
   updateSettingsHint:
     '每 12 小时检查一次 GitHub Releases；检查失败会按退避自动重试。直接更新会把发布文件写入未打包扩展的安装目录；重新加载扩展后切换版本。',
