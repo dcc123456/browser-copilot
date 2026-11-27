@@ -4,6 +4,64 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.22] - 2026-11-27
+
+### Changed — Chat tasks run without a round budget
+
+Chat tasks no longer carry a round budget: nothing pauses at "20 rounds used",
+and the renew / adjust-budget card is gone. A long task keeps running until the
+model produces a result or you press Stop. Unattended runs (scheduled tasks,
+workflow AI-agent blocks, delegated specialists) keep their own hard round
+limit and simply end when it is reached. Tasks paused under the old budget model
+come back as active. Budget leftovers left on screen by an earlier
+semi-automatic turn no longer paint the bar or gate a plain question, the
+rounds input appears only after **Adjust budget**, and switching, starting or
+deleting a conversation clears the old bar and pause card.
+
+### Removed — The keyless default provider
+
+New installs start with an empty provider list; every provider needs its own
+key. Pollinations is gone as the keyless default, and a stored
+`default-pollinations` configuration is dropped on read and in the v10 schema
+migration. Providers that offer free quota keep their badge — free quota is not
+the same as keyless.
+
+### Fixed — In-place updates rejected the 0.6.20 and 0.6.21 packages
+
+The 0.6.20 and 0.6.21 release zips were named after the release tag but carried
+a `manifest.json` with version 0.6.19, so the updater's "package version must
+equal the release version" check refused them as "not a valid extension
+archive" and no in-place update could finish. The manifest version is now read
+from `package.json` (it had been restated by hand), packaging fails loudly when
+a built manifest's version or variant marker drifts, and a mismatch is reported
+as "built from a different version, install it manually" instead of blaming the
+archive.
+
+### Fixed — A stalled turn can be stopped
+
+Turn pre-flight (transcript read, conversation-index write, page read) had no
+timeout and could not be cancelled, so an unresponsive data folder kept the
+panel on "preparing" with a Stop button that reached nothing. Each step now
+races a 20-second budget and the turn's signal, reports which step stalled, and
+a pre-flight cancel ends the turn like any other cancellation.
+
+### Fixed — Switching the storage folder
+
+The folder picker now opens straight from the click instead of after an
+IndexedDB handle read and permission query, which could swallow the transient
+activation so the dialog never appeared; cancelling is no longer reported as a
+failure and a browser without the API gets a localized message. A folder that
+can no longer be read can be replaced with an explicit "skip the carry" button
+instead of trapping the settings row, and a failed reconnect now says so.
+
+### Added — Recovery card in settings
+
+The settings page has a **Recovery** card whose **Reload extension** button
+(behind a confirmation) restarts the extension — tasks stop, the panel closes,
+stored data stays — so a stuck panel can reset itself. The download directory's
+**Open Downloads folder** shortcut was removed; the locate picker already
+reaches the configured folder.
+
 ## [0.6.21] - 2026-11-25
 
 ### Added — Workflow save versions you can switch back to

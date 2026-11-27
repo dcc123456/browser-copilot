@@ -1003,16 +1003,17 @@ webhooks, Docker deployment, and a web console.
 
 ## Troubleshooting
 
-| Symptom                          | Fix                                                                                       |
-| -------------------------------- | ----------------------------------------------------------------------------------------- |
-| "No model provider configured"   | More → Model settings → Add a provider.                                                   |
-| 401 / 403                        | Wrong/expired key, or key/vendor mismatch.                                                |
-| 404 when sending                 | Base URL missing its version segment, or unknown model; press **Test connection**.        |
-| "Cannot read this page"          | `chrome://`, `file://`, Web Store, or extension page — not injectable.                    |
-| Action still asks in full auto   | Reload the extension; confirm the dropdown shows ⚡ Full auto.                            |
-| Chats but never reads/acts       | Model lacks function calling; attach the page or switch model.                            |
-| Page text empty/partial          | Content is in an iframe, lazy-loaded, or behind "Load more"; select the relevant section. |
-| Nothing happens on toolbar click | Reload the extension; the worker may have failed to start.                                |
+| Symptom                                   | Fix                                                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| "No model provider configured"            | More → Model settings → Add a provider.                                                                            |
+| 401 / 403                                 | Wrong/expired key, or key/vendor mismatch.                                                                         |
+| 404 when sending                          | Base URL missing its version segment, or unknown model; press **Test connection**.                                 |
+| "Cannot read this page"                   | `chrome://`, `file://`, Web Store, or extension page — not injectable.                                             |
+| Action still asks in full auto            | Reload the extension; confirm the dropdown shows ⚡ Full auto.                                                     |
+| Chats but never reads/acts                | Model lacks function calling; attach the page or switch model.                                                     |
+| Page text empty/partial                   | Content is in an iframe, lazy-loaded, or behind "Load more"; select the relevant section.                          |
+| Nothing happens on toolbar click          | Reload the extension; the worker may have failed to start.                                                         |
+| "Not a valid extension archive" on update | The package was built from a different version (0.6.20/0.6.21 did this). Install 0.6.22+ once; later updates work. |
 
 ---
 
