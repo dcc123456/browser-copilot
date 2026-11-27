@@ -65,10 +65,40 @@ if (!existsSync(join(distDir, 'manifest.json'))) {
   process.exit(1)
 }
 
+const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+const version = pkg.version
+const manifest = JSON.parse(await readFile(join(distDir, 'manifest.json'), 'utf8'))
+
+// The updater downloads the asset named after the release tag and refuses a
+// package whose manifest.version differs from it (src/lib/update/install-plan.ts),
+// so a stale restated version here bricks every in-place update instead of
+// failing the release. v0.6.20 and v0.6.21 shipped exactly that — a manifest
+// saying 0.6.19 inside a 0.6.21-named zip — and every user got "the downloaded
+// package is not a valid extension archive". package.json is the only authority.
+if (manifest.version !== version) {
+  console.error(
+    `${spec.dist}/manifest.json says version ${JSON.stringify(manifest.version)} but ` +
+      `package.json says ${version}. Rebuild this variant (\`${spec.build}\`): a stale ` +
+      'dist/ is the usual cause.',
+  )
+  process.exit(1)
+}
+
+// The updater picks the asset by variant, and reloading a mislabelled package
+// would install an OCR build over a lite install (or the reverse).
+const markedNoOcr =
+  typeof manifest.version_name === 'string' && manifest.version_name.includes('(no OCR)')
+if (markedNoOcr !== (variant === 'no-ocr')) {
+  console.error(
+    `${spec.dist}/manifest.json ${markedNoOcr ? 'is' : 'is not'} marked as the no-OCR build — ` +
+      `this is not the package the ${variant} variant should ship.`,
+  )
+  process.exit(1)
+}
+
 if (variant === 'firefox') {
   // A Chrome-shaped manifest here means the two assemblers got crossed; the
   // zip would fail in Firefox, so fail packaging instead of shipping it.
-  const manifest = JSON.parse(await readFile(join(distDir, 'manifest.json'), 'utf8'))
   if (!manifest.browser_specific_settings?.gecko?.id) {
     console.error(
       'dist-firefox/manifest.json has no browser_specific_settings.gecko.id — ' +
@@ -77,9 +107,6 @@ if (variant === 'firefox') {
     process.exit(1)
   }
 }
-
-const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
-const version = pkg.version
 const extension = variant === 'firefox' ? 'xpi' : 'zip'
 const archivePath = join(releasesDir, `browser-copilot-${version}-${variant}.${extension}`)
 
