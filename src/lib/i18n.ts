@@ -1934,6 +1934,8 @@ export interface Messages {
   updateErrorDownload: string
   updateErrorDigest: string
   updateErrorArchive: string
+  /** The package is intact but was built from another version than the release. */
+  updateErrorArchiveVersion: string
   updateErrorPath: string
   updateErrorDuplicate: string
   updateErrorVariant: string
@@ -3727,6 +3729,8 @@ Keep the whole report dense and within the message size cap.`,
   updateErrorDigest:
     'The download did not match the SHA-256 digest published by GitHub. Nothing was written.',
   updateErrorArchive: 'The downloaded package is not a valid extension archive.',
+  updateErrorArchiveVersion:
+    'This package was built from a different version than the release. Download the release zip from GitHub and load it manually.',
   updateErrorPath: 'The package contains an unsafe file path.',
   updateErrorDuplicate: 'The package contains duplicate file paths.',
   updateErrorVariant: 'The package is for a different build of this extension.',
@@ -5381,6 +5385,8 @@ const zhCN: Messages = {
   updateErrorDownload: '安装包下载失败，请检查网络后重试。',
   updateErrorDigest: '下载内容与 GitHub 公布的 SHA-256 摘要不一致，未写入任何文件。',
   updateErrorArchive: '下载的安装包不是有效的扩展压缩包。',
+  updateErrorArchiveVersion:
+    '这个安装包是用另一个版本构建的，无法原地更新。请到 GitHub 发布页面下载压缩包后手动加载。',
   updateErrorPath: '安装包中包含不安全的文件路径。',
   updateErrorDuplicate: '安装包中包含重复的文件路径。',
   updateErrorVariant: '安装包适用于另一种构建版本。',

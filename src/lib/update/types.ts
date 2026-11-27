@@ -114,6 +114,7 @@ export type UpdateApplyErrorCode =
   | 'download-failed'
   | 'digest-mismatch'
   | 'archive-invalid'
+  | 'archive-version-mismatch'
   | 'archive-unsafe-path'
   | 'archive-duplicate-path'
   | 'variant-mismatch'

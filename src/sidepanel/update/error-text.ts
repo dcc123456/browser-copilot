@@ -39,6 +39,7 @@ const APPLY_ERROR_TEXT: Partial<Record<UpdateApplyErrorCode, keyof Messages>> = 
   'download-failed': 'updateErrorDownload',
   'digest-mismatch': 'updateErrorDigest',
   'archive-invalid': 'updateErrorArchive',
+  'archive-version-mismatch': 'updateErrorArchiveVersion',
   'archive-unsafe-path': 'updateErrorPath',
   'archive-duplicate-path': 'updateErrorDuplicate',
   'variant-mismatch': 'updateErrorVariant',

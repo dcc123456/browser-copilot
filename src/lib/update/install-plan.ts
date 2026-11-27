@@ -136,10 +136,14 @@ export function validateArchiveManifest(
       'The downloaded manifest belongs to a different extension.',
     )
   }
-  if (normalizeVersion(String(manifest.version ?? '')) !== options.expectedVersion) {
+  const archiveVersion = normalizeVersion(String(manifest.version ?? ''))
+  if (archiveVersion !== options.expectedVersion) {
+    // A distinct code: the archive is fine, it was just built from another
+    // release (v0.6.20/v0.6.21 shipped a 0.6.19 manifest), and telling the user
+    // the package is invalid hides the manual-install path that does work.
     throw new UpdateApplyError(
-      'archive-invalid',
-      'The downloaded manifest version does not match the release.',
+      'archive-version-mismatch',
+      `The downloaded manifest reports version "${archiveVersion}" but the release is "${options.expectedVersion}".`,
     )
   }
   const markedNoOcr =

@@ -138,19 +138,11 @@ describe('validateArchiveManifest', () => {
     ).toBe('variant-mismatch')
   })
 
-  it('rejects a different extension, version or manifest version', () => {
+  it('rejects a different extension or manifest version', () => {
     expect(
       applyCode(() =>
         validateArchiveManifest(
           JSON.stringify({ manifest_version: 3, name: 'Other', version: '0.6.8' }),
-          expectOcr,
-        ),
-      ),
-    ).toBe('archive-invalid')
-    expect(
-      applyCode(() =>
-        validateArchiveManifest(
-          JSON.stringify({ manifest_version: 3, name: 'Browser Copilot', version: '0.6.7' }),
           expectOcr,
         ),
       ),
@@ -163,6 +155,19 @@ describe('validateArchiveManifest', () => {
         ),
       ),
     ).toBe('archive-invalid')
+  })
+
+  it('names a stale package version as a version mismatch, not a corrupt archive', () => {
+    // v0.6.20/v0.6.21 shipped a 0.6.19 manifest under 0.6.21 asset names; the
+    // archive was fine, and the manual-install path still works.
+    expect(
+      applyCode(() =>
+        validateArchiveManifest(
+          JSON.stringify({ manifest_version: 3, name: 'Browser Copilot', version: '0.6.7' }),
+          expectOcr,
+        ),
+      ),
+    ).toBe('archive-version-mismatch')
   })
 
   it('rejects malformed JSON and non-object documents', () => {
