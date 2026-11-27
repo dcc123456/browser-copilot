@@ -18,91 +18,35 @@ you're on and takes action — clicking buttons, filling forms, scrolling,
 switching tabs, walking through a whole checkout or setup flow — while you
 watch or stay hands-off.
 
-- 🧠 **Works with the model you already use.** Any OpenAI-compatible endpoint:
-  DeepSeek, 火山方舟 Ark, OpenAI, OpenRouter, Moonshot, DashScope, SiliconFlow,
-  or a local Ollama/LM Studio. Bring your own key.
-- 🆓 **Free by default.** A fresh install starts on the keyless Pollinations
-  provider — no key, no setup. Gemini, Groq, Cerebras, SambaNova, Chutes,
-  OpenRouter, GitHub Models and Zhipu GLM-4-Flash have free tiers.
-- 🎚️ **You choose how autonomous it is.** Five modes from plain chat to full
-  auto, plus a workflow-generate mode that turns a run into a reusable
-  workflow; semi-auto asks only before risky actions — payments, passwords,
-  deletions, sending — and lets reading and scrolling run.
-- 💸 **Only the tools a step needs are sent.** The specialised page tools
-  (scrolling, keys, form controls, vision, scripts) load by group on demand
-  instead of riding on every request, and read-only mode withholds every write
-  tool outright — which cut round-one tool schemas by about a third. Settings →
-  Tools lists every switch by loading group, so it is clear what loads when.
-- 🛑 **It stops repeating itself.** Page state is sampled after every action: three identical
-  no-change results in a row get the model a "change approach" note, six get that exact call
-  refused while different arguments or a different tool still run, and a page whose state
-  cannot be read (PDFs, strict-CSP pages, `chrome://`) only counts while the URL stays put.
-  Destructive actions — submit, pay, publish, send — are never replayed: the second identical
-  call is refused before it is dispatched. Resuming a conversation folds the goal, what was
-  already done and which irreversible actions ran into the prompt instead of replaying it.
-- 🧭 **Long tasks pause instead of dying at a limit.** A task starts with a round
-  budget (default 20) and shows a goal bar; when it runs out the turn pauses with a
-  card that lists the goal, the finished steps with their evidence, what is left, the
-  stop reason and the cost — then you renew, change the budget, or end the task and
-  start a new one. Renewal continues the same task, and a task only counts as done
-  when the model declares it with locatable evidence, so it never closes itself just
-  because it went quiet. Unattended tasks extend themselves only when the finished
-  segment made progress, at most K times (default 1).
-- 🧩 **Skills** turn repeatable know-how (review checklists, style guides,
-  extraction formats) into one-tap instructions the model must follow.
-- 🎬 **Workflows run whole procedures on their own.** Record yourself doing a
-  task once, ask the assistant to generate one, or assemble it on a visual
-  canvas from 56 block types — clicking, filling, loops, condition branches,
-  even an AI-agent step — then launch it by hand, on a schedule, at startup,
-  with a keyboard shortcut, from a context menu, or when a matching page is
-  opened. Every save that changes the graph becomes a version (up to 20), and
-  the editor can switch back to any of them in one click.
-- 🧾 **The runs you launch stay manageable.** The editor's AI assistant keeps chat history
-  per workflow, the Run button turns into **Stop run** while a run is live, and run logs
-  delete one at a time or in bulk and copy out as text. A workflow that declares parameters
-  asks for them in a **Parameters required** dialog before it runs — or you store the values
-  on the workflow itself, so neither scheduled nor manual runs get interrupted.
-  Hovering any operator offers a one-step test that runs just that node.
-- 🛍️ **Share workflows through a marketplace.** Publish any workflow to the
-  public marketplace or a private team repository as a pull request; browse,
-  search and sort what others published; apply a listing with its triggers
-  disabled; and get an update reminder when the publisher moves ahead.
-- 🎯 **Point at an element instead of describing it.** The page element picker
-  in Settings puts a crosshair on every page: one click copies the CSS
-  selector, the visible text, or the HTML — or, in select-only mode, records
-  the element so the assistant or a connected coding agent can read it. The
-  crosshair is its own draggable control (independent of the minimized-plugin
-  icon, never overlapping it) and pressing it does not take focus, so
-  dropdowns that close on blur stay open while you pick inside them.
-- ✍️ **Report problems from the panel.** Settings ends with feedback: write a
-  report, optionally attach version/build/browser diagnostics, and create a
-  public GitHub issue without leaving the extension.
-- ⏰ **Runs on a schedule while you sleep.** Set a task to fire once at a date
-  and time, every few minutes, daily, or on weekdays — an unattended prompt or a
-  saved workflow, with a full run history and outputs you can hand to the next
-  task in a chain.
-- 📊 **You see what it costs.** The **Tokens** board totals spend over today /
-  7 days / 30 days / since first use, broken down by feature and by conversation,
-  task or workflow.
-- 🔄 **Mid-turn, the panel is not a pet.** Minimizing it used to leave the
-  running turn streaming into a dead port: reopening showed a frozen snapshot
-  until the round ended, and a confirmation asked for in the meantime had nobody
-  to answer it. Output now goes through a per-conversation channel that a
-  reopened panel reattaches to.
-- 💬 **Picks up work from Feishu/Lark.** Get notified in a group chat when a
-  task finishes, or DM the bot a request from your phone and watch it execute
-  in the browser on your machine and reply with the result.
-- 🤝 **Your coding agent can drive it too.** Claude Code, Codex, Trae — any
-  MCP client — gets a browser toolbox through a local adapter and operates
-  your real Chrome (see [Agent integration](#agent-integration-mcp)).
-- 🔒 **Private by construction.** No accounts, no telemetry, no cloud server of
-  ours. Keys and data stay on your machine; passwords are filled locally and
-  never shown to the model. The default free Pollinations provider does send
-  prompts to Pollinations — choose a local model or your own provider if text
-  must stay local.
-- 💾 **Own your data as files.** Pick a folder in Settings and everything —
-  conversations, skills, workflows — is written to real files on your disk and
-  nowhere else; the browser's own storage is left empty.
+## At a glance
+
+### Feature overview
+
+| Area | Feature | What it does | Where |
+|---|---|---|---|
+| Chat | AI side panel | Reads the page and acts: clicks, fills, scrolls, switches tabs, and runs the whole flow | Toolbar icon → ask |
+| Chat | Skills | Turns repeatable know-how into one-tap instructions | Type `/` or Skills tab |
+| Automation | Workflow editor | 56 block types; record, AI-generate, or hand-build | Workflows → Edit |
+| Automation | Scheduled tasks | Once / daily / weekly / cron; outputs can chain into the next task | Tasks tab |
+| Automation | Marketplace | Publish, search, and install shared workflows | More → Marketplace |
+| Integration | Feishu / Lark | Push results to groups; DM the bot to run tasks remotely | Tasks → Feishu/Lark |
+| Integration | MCP local access | Let coding agents such as Claude Code drive your real Chrome | Settings → Local agent access |
+| Integration | Element picker | Crosshair to copy CSS / text / HTML | More → Settings → Element picker |
+| Data | Local file storage | Data saved as real files, beyond the browser's 10MB quota | Settings → Storage location |
+| Data | Auto-update | Checks versions, verifies, backs up, and reloads in one click | Settings → Updates |
+
+### Tips
+
+| Tip | How | Effect |
+|---|---|---|
+| Precise input | Check "include selection" and send only the highlighted text | Fewer tokens, sharper target |
+| Close the panel, keep running | Close the side panel; the task continues and catches up when reopened | Long tasks don't break |
+| Step test | Hover a block to run just that node | Pinpoint issues fast |
+| Parameters without prompts | Store parameter values on the workflow, so runs never ask again | Truly unattended |
+| Chain tasks | Use `{{upstream.<key>}}` to reference the upstream output | Build a pipeline |
+| Version rollback | Every save keeps a version (up to 20) | Iterate freely |
+| Password privacy | Passwords fill locally via `get_secret`, never visible to the model | Keeps secrets private |
+| Window scope | The panel only drives the window it is attached to | Isolates your workspace |
 
 It never acts on its own initiative — every action is either part of answering
 something you just asked, a [scheduled task](#scheduled-tasks) you created, a
@@ -114,6 +58,7 @@ agent you connected over [MCP](#agent-integration-mcp).
 
 ## Contents
 
+- [At a glance](#at-a-glance)
 - [Quick start](#quick-start)
 - [What it is good for](#what-it-is-good-for)
 - [Agent modes](#agent-modes)
